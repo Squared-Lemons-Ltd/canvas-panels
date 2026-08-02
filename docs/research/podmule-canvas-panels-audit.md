@@ -1,6 +1,6 @@
 # PodMule Canvas Panels capability and divergence audit
 
-- **Research ticket:** [Squared-Lemons-Ltd/canvas-panels#3](https://github.com/Squared-Lemons-Ltd/canvas-panels/issues/3)
+- **Research ticket:** [Audit PodMule’s Canvas Panels capabilities and divergences](https://github.com/Squared-Lemons-Ltd/canvas-panels/issues/3)
 - **Source audited:** PodMule checkout `feat/unified-upload-router` at `5fddaa607645bf65a512b07a215bcaacf18c90e1` (2026-08-02)
 - **Source root:** `/Users/jonathangill-moss/Developer/Squared Lemons/Apps/PodMule/podmule-app`
 - **Package target:** `Squared-Lemons-Ltd/canvas-panels`
