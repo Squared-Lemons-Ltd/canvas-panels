@@ -68,6 +68,18 @@ A Panel that exists only in the current runtime and is not reconstructed from na
 
 A proposed Panel Stack change that may remove Panels and must resolve every affected lifecycle guard before it commits atomically.
 
+## Navigation Document
+
+A versioned, validated description of the persistent Panels needed to reconstruct a Canvas Workspace independently of runtime Panel Instance IDs.
+
+## URL-Owning Canvas Workspace
+
+The one primary Canvas Workspace explicitly authorised to synchronize its Navigation Document with an application URL namespace.
+
+## Recovery Panel
+
+A package-owned Transient Panel that explains why navigation state could only be partially restored and offers safe recovery actions.
+
 ## Panel Registry
 
 The host-owned catalogue of Panel Kinds and the policies required to present and coordinate them.
