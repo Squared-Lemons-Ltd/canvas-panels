@@ -68,6 +68,14 @@ A Panel that exists only in the current runtime and is not reconstructed from na
 
 A proposed Panel Stack change that may remove Panels and must resolve every affected lifecycle guard before it commits atomically.
 
+## Transition Guard
+
+A Panel-level interface that reports whether a proposed destructive transition may proceed, needs a human decision, or is temporarily blocked.
+
+## Guard Outcome
+
+One of `allow`, `confirm`, or `block`, returned by a Transition Guard without performing side effects.
+
 ## Navigation Document
 
 A versioned, validated description of the persistent Panels needed to reconstruct a Canvas Workspace independently of runtime Panel Instance IDs.
