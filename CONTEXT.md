@@ -99,3 +99,11 @@ A package-owned Transient Panel that explains why navigation state could only be
 ## Panel Registry
 
 The host-owned catalogue of Panel Kinds and the policies required to present and coordinate them.
+
+## Bound Canvas Module
+
+The application-specific React namespace produced by closing a Root Panel and a set of Panel definitions into one immutable Panel Registry. It exposes typed providers, components, hooks, commands, read models, and testing helpers without requiring callers to repeat registry generics.
+
+## Context Signal
+
+An optional, application-typed, in-memory value published by a mounted Panel for an application-selected Context Target. Canvas Panels stores and selects the value but does not interpret, serialize, log, announce, or infer it from rendered content.
