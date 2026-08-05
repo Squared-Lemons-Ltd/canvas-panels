@@ -80,6 +80,14 @@ One of `allow`, `confirm`, or `block`, returned by a Transition Guard without pe
 
 A versioned, validated description of the persistent Panels needed to reconstruct a Canvas Workspace independently of runtime Panel Instance IDs.
 
+## Panel Engine
+
+The framework-neutral module that owns Canvas Workspace state, commands, transitions, guards, and Navigation Documents without depending on React or browser APIs.
+
+## Navigation Adapter
+
+An adapter that synchronizes a Navigation Document with an external navigation mechanism such as browser history or an application router.
+
 ## URL-Owning Canvas Workspace
 
 The one primary Canvas Workspace explicitly authorised to synchronize its Navigation Document with an application URL namespace.
