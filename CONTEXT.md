@@ -115,3 +115,7 @@ The documented package exports, behaviours, schemas, accessibility guarantees, c
 ## Proof Consumer
 
 The first real application installation used to verify that the published package, documented integration boundary, and complete acceptance gates work outside package fixtures. Project Holly is the v1 Proof Consumer.
+
+## Package Gate
+
+The complete package-level verification checkpoint—public contracts, fixtures, accessibility, compatibility, packed installation, documentation, and release controls—that must pass before a version can be installed into the Proof Consumer.
