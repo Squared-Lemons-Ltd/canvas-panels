@@ -111,3 +111,7 @@ An optional, application-typed, in-memory value published by a mounted Panel for
 ## Public Contract
 
 The documented package exports, behaviours, schemas, accessibility guarantees, compatibility ranges, semantic styling hooks, and integration attributes protected by the package’s versioning policy. Undocumented implementation details are not part of this contract.
+
+## Proof Consumer
+
+The first real application installation used to verify that the published package, documented integration boundary, and complete acceptance gates work outside package fixtures. Project Holly is the v1 Proof Consumer.
