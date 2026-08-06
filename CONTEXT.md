@@ -107,3 +107,7 @@ The application-specific React namespace produced by closing a Root Panel and a 
 ## Context Signal
 
 An optional, application-typed, in-memory value published by a mounted Panel for an application-selected Context Target. Canvas Panels stores and selects the value but does not interpret, serialize, log, announce, or infer it from rendered content.
+
+## Public Contract
+
+The documented package exports, behaviours, schemas, accessibility guarantees, compatibility ranges, semantic styling hooks, and integration attributes protected by the package’s versioning policy. Undocumented implementation details are not part of this contract.
