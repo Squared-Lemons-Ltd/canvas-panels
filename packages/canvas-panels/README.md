@@ -46,4 +46,4 @@ export const ClassesCanvas = createCanvasModule({
 });
 ```
 
-Render `ClassesCanvas.Provider` above `ClassesCanvas.Workspace`. The Root Panel is permanent: closing a Child restores Root as the active Panel. Treat Panel Instance IDs as opaque runtime values and create Panel references only through their definitions.
+Render `ClassesCanvas.Provider` above `ClassesCanvas.Workspace`. The Root Panel is permanent: closing a Child restores Root as the active Panel, while opening from an earlier Panel replaces its existing descendant branch. Treat Panel Instance IDs as opaque runtime values and create Panel references only through their definitions. Panel inputs are copied into deeply immutable read models and must contain only structured-cloneable plain objects, arrays, and primitive values.

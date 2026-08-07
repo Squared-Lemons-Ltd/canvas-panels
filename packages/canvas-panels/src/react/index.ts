@@ -12,9 +12,7 @@ import {
   useContext,
   useSyncExternalStore,
 } from "react";
-import type { ReactElement, ReactNode } from "react";
-
-const CanvasEngineContext = createContext<PanelEngine | null>(null);
+import type { ComponentType, ReactElement, ReactNode } from "react";
 
 export type CanvasProviderProps<Reference extends PanelReference> = Readonly<{
   engine: PanelEngine<Reference>;
@@ -27,36 +25,65 @@ export type CanvasBinding<Reference extends PanelReference> = Readonly<{
   close: (instanceId: PanelInstanceId) => boolean;
 }>;
 
+export type CanvasBindings<Reference extends PanelReference> = Readonly<{
+  Provider: ComponentType<CanvasProviderProps<Reference>>;
+  useCanvas: () => CanvasBinding<Reference>;
+}>;
+
+export function createCanvasBindings<
+  Reference extends PanelReference = PanelReference,
+>(): CanvasBindings<Reference> {
+  const CanvasEngineContext = createContext<PanelEngine<Reference> | null>(
+    null,
+  );
+
+  function Provider({
+    engine,
+    children,
+  }: CanvasProviderProps<Reference>): ReactElement {
+    return createElement(
+      CanvasEngineContext.Provider,
+      { value: engine },
+      children,
+    );
+  }
+
+  function useCanvasBinding(): CanvasBinding<Reference> {
+    const engine = useContext(CanvasEngineContext);
+    if (!engine) {
+      throw new Error("Canvas hooks must be used within a Canvas Provider");
+    }
+
+    const snapshot = useSyncExternalStore(
+      engine.subscribe,
+      engine.getSnapshot,
+      engine.getSnapshot,
+    );
+
+    return Object.freeze({
+      snapshot,
+      open: engine.open,
+      close: engine.close,
+    });
+  }
+
+  return Object.freeze({ Provider, useCanvas: useCanvasBinding });
+}
+
+const defaultCanvasBindings = createCanvasBindings();
+
 export function CanvasProvider<Reference extends PanelReference>({
   engine,
   children,
 }: CanvasProviderProps<Reference>): ReactElement {
-  return createElement(
-    CanvasEngineContext.Provider,
-    { value: engine as unknown as PanelEngine },
+  return createElement(defaultCanvasBindings.Provider, {
     children,
-  );
+    engine: engine as unknown as PanelEngine,
+  });
 }
 
 export function useCanvas<
   Reference extends PanelReference = PanelReference,
 >(): CanvasBinding<Reference> {
-  const engine = useContext(
-    CanvasEngineContext,
-  ) as PanelEngine<Reference> | null;
-  if (!engine) {
-    throw new Error("Canvas hooks must be used within a Canvas Provider");
-  }
-
-  const snapshot = useSyncExternalStore(
-    engine.subscribe,
-    engine.getSnapshot,
-    engine.getSnapshot,
-  );
-
-  return Object.freeze({
-    snapshot,
-    open: engine.open,
-    close: engine.close,
-  });
+  return defaultCanvasBindings.useCanvas() as CanvasBinding<Reference>;
 }

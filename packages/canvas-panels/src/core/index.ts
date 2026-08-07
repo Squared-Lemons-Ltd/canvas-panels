@@ -1,6 +1,14 @@
 declare const panelInstanceIdBrand: unique symbol;
 declare const panelReferenceBrand: unique symbol;
 
+export type DeepReadonly<Value> = Value extends (...args: never[]) => unknown
+  ? Value
+  : Value extends readonly (infer Item)[]
+    ? readonly DeepReadonly<Item>[]
+    : Value extends object
+      ? { readonly [Key in keyof Value]: DeepReadonly<Value[Key]> }
+      : Value;
+
 export type PanelInstanceId = string & {
   readonly [panelInstanceIdBrand]: "PanelInstanceId";
 };
@@ -10,7 +18,7 @@ export type PanelReference<
   Input = unknown,
 > = Readonly<{
   kind: Kind;
-  input: Input;
+  input: DeepReadonly<Input>;
   readonly [panelReferenceBrand]: "PanelReference";
 }>;
 
@@ -27,7 +35,7 @@ export type PanelDefinition<
 > = Readonly<{
   role: "panel";
   kind: Kind;
-  title: (input: Input) => string;
+  title: (input: DeepReadonly<Input>) => string;
   reference: (input: Input) => PanelReference<Kind, Input>;
 }>;
 
@@ -71,6 +79,60 @@ type ReferenceOf<Definition> =
     ? PanelReference<Kind, Input>
     : never;
 
+function cloneAndFreezePanelInput<Input>(input: Input): DeepReadonly<Input> {
+  const validateVisited = new WeakSet<object>();
+  const assertPlainInput = (value: unknown): void => {
+    if (
+      value === null ||
+      typeof value !== "object" ||
+      validateVisited.has(value)
+    ) {
+      return;
+    }
+    if (!Array.isArray(value)) {
+      const prototype = Object.getPrototypeOf(value);
+      if (prototype !== Object.prototype && prototype !== null) {
+        throw new TypeError(
+          "Panel input may contain only plain objects and arrays",
+        );
+      }
+    }
+
+    validateVisited.add(value);
+    for (const child of Object.values(value)) assertPlainInput(child);
+  };
+
+  assertPlainInput(input);
+  let clone: Input;
+  try {
+    clone = structuredClone(input);
+  } catch (cause) {
+    throw new TypeError("Panel input must be structured-cloneable", { cause });
+  }
+
+  const visited = new WeakSet<object>();
+  const freeze = (value: unknown): void => {
+    if (value === null || typeof value !== "object" || visited.has(value)) {
+      return;
+    }
+    if (!Array.isArray(value)) {
+      const prototype = Object.getPrototypeOf(value);
+      if (prototype !== Object.prototype && prototype !== null) {
+        throw new TypeError(
+          "Panel input may contain only plain objects and arrays",
+        );
+      }
+    }
+
+    visited.add(value);
+    for (const child of Object.values(value)) freeze(child);
+    Object.freeze(value);
+  };
+
+  freeze(clone);
+  return clone as DeepReadonly<Input>;
+}
+
 export function defineRootPanel<const Kind extends string>(options: {
   kind: Kind;
   title: string;
@@ -90,17 +152,17 @@ export function defineRootPanel<const Kind extends string>(options: {
 
 export function definePanel<const Kind extends string, Input>(options: {
   kind: Kind;
-  title: (input: Input) => string;
+  title: (input: DeepReadonly<Input>) => string;
 }): PanelDefinition<Kind, Input> {
   return Object.freeze({
     role: "panel",
     kind: options.kind,
     title: options.title,
     reference: (input: Input) =>
-      Object.freeze({ kind: options.kind, input }) as PanelReference<
-        Kind,
-        Input
-      >,
+      Object.freeze({
+        kind: options.kind,
+        input: cloneAndFreezePanelInput(input),
+      }) as PanelReference<Kind, Input>,
   });
 }
 
@@ -126,6 +188,13 @@ export function createPanelEngine<
     activePanelId: instanceId,
   }) as PanelEngineSnapshot;
   const listeners = new Set<() => void>();
+  const registeredKinds = new Set([options.root.kind]);
+  for (const definition of options.panels) {
+    if (registeredKinds.has(definition.kind)) {
+      throw new Error(`Duplicate Panel Kind: ${definition.kind}`);
+    }
+    registeredKinds.add(definition.kind);
+  }
   const definitions = new Map(
     options.panels.map((definition) => [
       definition.kind,
@@ -143,7 +212,20 @@ export function createPanelEngine<
       panels: Object.freeze(panels),
       activePanelId: activePanel.instanceId,
     });
-    for (const listener of listeners) listener();
+    const subscriberErrors: unknown[] = [];
+    for (const listener of listeners) {
+      try {
+        listener();
+      } catch (error) {
+        subscriberErrors.push(error);
+      }
+    }
+    if (subscriberErrors.length > 0) {
+      throw new AggregateError(
+        subscriberErrors,
+        "Panel Engine subscriber failed after the snapshot was published",
+      );
+    }
   };
 
   return Object.freeze({
@@ -153,10 +235,10 @@ export function createPanelEngine<
       return () => listeners.delete(listener);
     },
     open: ({ originId, panel }) => {
-      const originExists = snapshot.panels.some(
+      const originIndex = snapshot.panels.findIndex(
         (candidate) => candidate.instanceId === originId,
       );
-      if (!originExists) {
+      if (originIndex < 0) {
         throw new Error(`Unknown origin Panel Instance ID: ${originId}`);
       }
 
@@ -173,7 +255,7 @@ export function createPanelEngine<
         isRoot: false,
         reference: panel,
       });
-      publish([...snapshot.panels, child]);
+      publish([...snapshot.panels.slice(0, originIndex + 1), child]);
       return childId;
     },
     close: (panelId) => {

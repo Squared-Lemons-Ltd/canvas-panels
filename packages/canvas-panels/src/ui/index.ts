@@ -9,11 +9,7 @@ import {
   type PanelReference,
   type RootPanelDefinition,
 } from "../core/index.js";
-import {
-  type CanvasBinding,
-  CanvasProvider,
-  useCanvas,
-} from "../react/index.js";
+import { type CanvasBinding, createCanvasBindings } from "../react/index.js";
 import { createElement, useId, useState } from "react";
 import type { ComponentType, ReactNode } from "react";
 
@@ -32,15 +28,47 @@ type ReferenceOf<Definition> =
 type AllowedReference<Definitions extends readonly PanelDefinitionShape[]> =
   ReferenceOf<Definitions[number]>;
 
+type OpenPanelForDefinition<Definition> =
+  Definition extends RootPanelDefinition<infer Kind>
+    ? Omit<OpenPanel, "isRoot" | "kind" | "reference"> &
+        Readonly<{
+          isRoot: true;
+          kind: Kind;
+          reference: PanelReference<Kind, undefined>;
+        }>
+    : Definition extends PanelDefinition<infer Kind, infer Input>
+      ? Omit<OpenPanel, "isRoot" | "kind" | "reference"> &
+          Readonly<{
+            isRoot: false;
+            kind: Kind;
+            reference: PanelReference<Kind, Input>;
+          }>
+      : never;
+
 export type CanvasPanelRenderProps<
   Reference extends PanelReference = PanelReference,
+  Panel extends OpenPanel = OpenPanel,
 > = Readonly<{
-  panel: OpenPanel;
+  panel: Panel;
   open: (command: {
     originId: PanelInstanceId;
     panel: Reference;
   }) => PanelInstanceId;
   close: (instanceId: PanelInstanceId) => boolean;
+}>;
+
+type CanvasRendererMap<
+  Root extends RootPanelDefinition,
+  Definitions extends readonly PanelDefinitionShape[],
+> = Readonly<{
+  [Definition in
+    | Root
+    | Definitions[number] as Definition["kind"]]: ComponentType<
+    CanvasPanelRenderProps<
+      AllowedReference<Definitions>,
+      OpenPanelForDefinition<Definition>
+    >
+  >;
 }>;
 
 export type CanvasWorkspaceProps = Readonly<{
@@ -67,14 +95,10 @@ export function createCanvasModule<
 >(config: {
   root: Root;
   panels: Definitions;
-  renderers: Readonly<
-    Record<
-      Root["kind"] | Definitions[number]["kind"],
-      ComponentType<CanvasPanelRenderProps<AllowedReference<Definitions>>>
-    >
-  >;
+  renderers: CanvasRendererMap<Root, Definitions>;
 }): BoundCanvasModule<AllowedReference<Definitions>> {
   type Reference = AllowedReference<Definitions>;
+  const bindings = createCanvasBindings<Reference>();
   const createEngine = () =>
     createPanelEngine({ root: config.root, panels: config.panels });
 
@@ -83,11 +107,11 @@ export function createCanvasModule<
     engine: suppliedEngine,
   }: CanvasModuleProviderProps<Reference>) {
     const [engine] = useState(() => suppliedEngine ?? createEngine());
-    return createElement(CanvasProvider<Reference>, { children, engine });
+    return createElement(bindings.Provider, { children, engine });
   }
 
   function Workspace({ label }: CanvasWorkspaceProps) {
-    const { snapshot, open, close } = useCanvas<Reference>();
+    const { snapshot, open, close } = bindings.useCanvas();
     const workspaceId = useId();
     const renderers = config.renderers as Readonly<
       Record<string, ComponentType<CanvasPanelRenderProps<Reference>>>
@@ -146,6 +170,6 @@ export function createCanvasModule<
     Provider,
     Workspace,
     createEngine,
-    useCanvas: () => useCanvas<Reference>(),
+    useCanvas: bindings.useCanvas,
   });
 }

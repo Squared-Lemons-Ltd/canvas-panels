@@ -13,7 +13,13 @@ test("the engine starts with one permanent host-defined Root Panel", () => {
     kind: "student",
     title: ({ name }) => name,
   });
-  const studentReference = student.reference({ name: "Ada Lovelace" });
+  const studentInput = {
+    name: "Ada Lovelace",
+    metadata: { source: "fixture" },
+  };
+  const studentReference = student.reference(studentInput);
+  studentInput.name = "Mutated outside Canvas";
+  studentInput.metadata.source = "mutated outside Canvas";
   const engine = createPanelEngine({ root, panels: [student] });
   const snapshot = engine.getSnapshot();
 
@@ -27,12 +33,117 @@ test("the engine starts with one permanent host-defined Root Panel", () => {
   });
   assert.equal(snapshot.activePanelId, snapshot.panels[0].instanceId);
   assert.equal(studentReference.kind, "student");
-  assert.deepEqual(studentReference.input, { name: "Ada Lovelace" });
+  assert.deepEqual(studentReference.input, {
+    name: "Ada Lovelace",
+    metadata: { source: "fixture" },
+  });
   assert.ok(Object.isFrozen(root));
   assert.ok(Object.isFrozen(student));
   assert.ok(Object.isFrozen(studentReference));
+  assert.ok(Object.isFrozen(studentReference.input));
+  assert.ok(Object.isFrozen(studentReference.input.metadata));
   assert.ok(Object.isFrozen(snapshot));
   assert.ok(Object.isFrozen(snapshot.panels));
+});
+
+test("opening from an earlier Panel replaces its existing descendant branch", () => {
+  const root = defineRootPanel({ kind: "classes", title: "Classes" });
+  const student = definePanel({
+    kind: "student",
+    title: ({ name }) => name,
+  });
+  const engine = createPanelEngine({ root, panels: [student] });
+  const rootId = engine.getSnapshot().activePanelId;
+
+  engine.open({
+    originId: rootId,
+    panel: student.reference({ name: "Ada Lovelace" }),
+  });
+  const replacementId = engine.open({
+    originId: rootId,
+    panel: student.reference({ name: "Grace Hopper" }),
+  });
+  const snapshot = engine.getSnapshot();
+
+  assert.equal(snapshot.panels.length, 2);
+  assert.deepEqual(
+    snapshot.panels.map(({ title }) => title),
+    ["Classes", "Grace Hopper"],
+  );
+  assert.equal(snapshot.activePanelId, replacementId);
+});
+
+test("a Panel registry rejects duplicate semantic Panel Kinds", () => {
+  const root = defineRootPanel({ kind: "classes", title: "Classes" });
+  const firstStudent = definePanel({
+    kind: "student",
+    title: ({ name }) => name,
+  });
+  const secondStudent = definePanel({
+    kind: "student",
+    title: ({ identifier }) => identifier,
+  });
+
+  assert.throws(
+    () => createPanelEngine({ root, panels: [firstStudent, secondStudent] }),
+    /Duplicate Panel Kind: student/,
+  );
+  assert.throws(
+    () =>
+      createPanelEngine({
+        root,
+        panels: [
+          definePanel({
+            kind: "classes",
+            title: ({ name }) => name,
+          }),
+        ],
+      }),
+    /Duplicate Panel Kind: classes/,
+  );
+});
+
+test("Panel references reject non-plain input objects", () => {
+  class StudentInput {
+    constructor(name) {
+      this.name = name;
+    }
+  }
+  const student = definePanel({
+    kind: "student",
+    title: ({ name }) => name,
+  });
+
+  assert.throws(
+    () => student.reference(new StudentInput("Ada Lovelace")),
+    /Panel input may contain only plain objects and arrays/,
+  );
+});
+
+test("one failing subscriber cannot prevent the remaining subscribers", () => {
+  const root = defineRootPanel({ kind: "classes", title: "Classes" });
+  const student = definePanel({
+    kind: "student",
+    title: ({ name }) => name,
+  });
+  const engine = createPanelEngine({ root, panels: [student] });
+  const notifications = [];
+  engine.subscribe(() => {
+    notifications.push("first");
+    throw new Error("first subscriber failed");
+  });
+  engine.subscribe(() => notifications.push("second"));
+
+  assert.throws(
+    () =>
+      engine.open({
+        originId: engine.getSnapshot().activePanelId,
+        panel: student.reference({ name: "Ada Lovelace" }),
+      }),
+    /Panel Engine subscriber failed/,
+  );
+  assert.deepEqual(notifications, ["first", "second"]);
+  assert.equal(engine.getSnapshot().panels.length, 2);
 });
 
 test("open and close publish immutable snapshots while preserving Root", () => {

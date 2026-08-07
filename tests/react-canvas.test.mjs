@@ -129,3 +129,33 @@ test("multiple Canvas Workspaces use unique heading relationships", () => {
   }
   result.unmount();
 });
+
+test("nested Bound Canvas Modules retain their own engines", () => {
+  const ClassesCanvas = createCanvasModule({
+    root: defineRootPanel({ kind: "classes", title: "Classes" }),
+    panels: [],
+    renderers: { classes: () => createElement("p", null, "Class list") },
+  });
+  const ReportsCanvas = createCanvasModule({
+    root: defineRootPanel({ kind: "reports", title: "Reports" }),
+    panels: [],
+    renderers: { reports: () => createElement("p", null, "Report list") },
+  });
+
+  const result = render(
+    createElement(
+      ClassesCanvas.Provider,
+      null,
+      createElement(
+        ReportsCanvas.Provider,
+        null,
+        createElement(ReportsCanvas.Workspace, { label: "Report records" }),
+        createElement(ClassesCanvas.Workspace, { label: "Class records" }),
+      ),
+    ),
+  );
+
+  assert.ok(result.getByRole("region", { name: "Classes" }));
+  assert.ok(result.getByRole("region", { name: "Reports" }));
+  result.unmount();
+});

@@ -18,12 +18,16 @@ const teacher = definePanel({
 const studentReference = student.reference({ name: "Ada Lovelace" });
 // @ts-expect-error Panel references retain their definition's input contract.
 student.reference({ identifier: "student-1" });
+// @ts-expect-error Panel references expose immutable input read models.
+studentReference.input.name = "Mutated";
 
 const Canvas = createCanvasModule({
   root,
   panels: [student],
   renderers: {
     classes: ({ open, panel }) => {
+      const rootInput: undefined = panel.reference.input;
+      void rootInput;
       open({ originId: panel.instanceId, panel: studentReference });
       open({
         originId: panel.instanceId,
@@ -34,7 +38,13 @@ const Canvas = createCanvasModule({
       open({ originId: panel.instanceId, panel: root.reference });
       return null;
     },
-    student: () => null,
+    student: ({ panel }) => {
+      const studentName: string = panel.reference.input.name;
+      // @ts-expect-error A renderer receives only its registered Panel input.
+      panel.reference.input.identifier;
+      void studentName;
+      return null;
+    },
   },
 });
 
