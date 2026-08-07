@@ -3,6 +3,7 @@
 import {
   createPanelEngine,
   type OpenPanel,
+  type PanelDeduplication,
   type PanelDefinition,
   type PanelEngine,
   type PanelInstanceId,
@@ -16,6 +17,8 @@ import type { ComponentType, ReactNode } from "react";
 type PanelDefinitionShape = Readonly<{
   role: "panel";
   kind: string;
+  deduplication: PanelDeduplication;
+  key?: (input: never) => string;
   title: (input: never) => string;
   reference: (input: never) => PanelReference<string, unknown>;
 }>;
@@ -50,10 +53,7 @@ export type CanvasPanelRenderProps<
   Panel extends OpenPanel = OpenPanel,
 > = Readonly<{
   panel: Panel;
-  open: (command: {
-    originId: PanelInstanceId;
-    panel: Reference;
-  }) => PanelInstanceId;
+  open: PanelEngine<Reference>["open"];
   close: (instanceId: PanelInstanceId) => boolean;
 }>;
 
@@ -124,8 +124,8 @@ export function createCanvasModule<
         "data-canvas-workspace": "",
         role: "region",
       },
-      snapshot.panels.map((panel) => {
-        const headingId = `${workspaceId}-${panel.instanceId}-heading`;
+      snapshot.panels.map((panel, panelIndex) => {
+        const headingId = `${workspaceId}-panel-${panelIndex}-heading`;
         const Renderer = renderers[panel.kind];
         if (!Renderer) {
           throw new Error(

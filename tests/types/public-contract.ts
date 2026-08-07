@@ -2,6 +2,7 @@ import {
   definePanel,
   defineRootPanel,
   type PanelInstanceId,
+  type PanelKey,
 } from "../../packages/canvas-panels/dist/core/index.js";
 import { createCanvasModule } from "../../packages/canvas-panels/dist/ui/index.js";
 
@@ -12,6 +13,18 @@ const student = definePanel({
 });
 const teacher = definePanel({
   kind: "teacher",
+  title: (input: { name: string }) => input.name,
+});
+const reusableClass = definePanel({
+  kind: "class",
+  deduplication: "reuse",
+  key: (input: { classId: string; name: string }) => input.classId,
+  title: (input: { classId: string; name: string }) => input.name,
+});
+// @ts-expect-error Reusable Panels require a registered semantic Panel Key.
+definePanel({
+  kind: "invalid-reusable",
+  deduplication: "reuse",
   title: (input: { name: string }) => input.name,
 });
 
@@ -52,7 +65,19 @@ const engine = Canvas.createEngine();
 const [rootPanel] = engine.getSnapshot().panels;
 if (!rootPanel) throw new Error("Canvas Engine did not create its Root Panel");
 const rootId: PanelInstanceId = rootPanel.instanceId;
-engine.open({ originId: rootId, panel: studentReference });
+const opened = engine.open({ originId: rootId, panel: studentReference });
+if (opened.status !== "rejected") {
+  const openedId: PanelInstanceId = opened.instanceId;
+  void openedId;
+}
+const classReference = reusableClass.reference({
+  classId: "class-a",
+  name: "Class A",
+});
+const semanticKey: PanelKey | undefined = classReference.panelKey;
+void semanticKey;
+// @ts-expect-error Semantic Panel Keys are branded separately from strings.
+const invalidPanelKey: PanelKey = "class-a";
 engine.close(rootId);
 
 // @ts-expect-error Panel Instance IDs are branded runtime identities.
@@ -61,3 +86,4 @@ const invalidId: PanelInstanceId = "canvas-panel-1";
 engine.close("canvas-panel-1");
 
 void invalidId;
+void invalidPanelKey;

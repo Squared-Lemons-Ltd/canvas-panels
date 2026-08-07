@@ -18,6 +18,9 @@ test("the packed package installs into clean React and Next consumers", async ()
   );
 
   assert.equal(stderr, "");
-  assert.match(stdout, /verified packed React Root-to-Child consumer/);
+  assert.match(
+    stdout,
+    /verified packed React Root-to-Class-to-Learner consumer/,
+  );
   assert.match(stdout, /verified packed Next consumer/);
 });

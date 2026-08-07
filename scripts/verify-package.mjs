@@ -128,45 +128,76 @@ await Promise.all([
 ]);
 
 const root = defineRootPanel({ kind: "classes", title: "Classes" });
-const student = definePanel({
-  kind: "student",
+const classPanel = definePanel({
+  kind: "class",
+  deduplication: "reuse",
+  key: ({ classId }) => classId,
+  title: ({ name }) => name,
+});
+const learner = definePanel({
+  kind: "learner",
+  deduplication: "allow-many",
   title: ({ name }) => name,
 });
 const Canvas = createCanvasModule({
   root,
-  panels: [student],
+  panels: [classPanel, learner],
   renderers: {
     classes: () => createElement("p", null, "Class list"),
-    student: ({ panel }) => createElement("p", null, "Student record: " + panel.title),
+    class: ({ panel }) => createElement("p", null, "Class record: " + panel.title),
+    learner: ({ panel }) => createElement("p", null, "Learner record: " + panel.title),
   },
 });
 const engine = Canvas.createEngine();
 const rootId = engine.getSnapshot().panels[0].instanceId;
-const childId = engine.open({
+const openedClass = engine.open({
   originId: rootId,
-  panel: student.reference({ name: "Ada Lovelace" }),
+  panel: classPanel.reference({ classId: "class-a", name: "Class A" }),
 });
+if (openedClass.status !== "opened") throw new Error("packed Class Panel did not open");
+const openedLearner = engine.open({
+  originId: openedClass.instanceId,
+  panel: learner.reference({ name: "Ada Lovelace" }),
+});
+if (openedLearner.status !== "opened") throw new Error("packed Learner Panel did not open");
 const renderCanvas = () => renderToStaticMarkup(
   createElement(
     Canvas.Provider,
     { engine },
-    createElement(Canvas.Workspace, { label: "Student records" }),
+    createElement(Canvas.Workspace, { label: "Class and learner records" }),
   ),
 );
 
 const openedMarkup = renderCanvas();
-if (!openedMarkup.includes('aria-label="Student records"')) throw new Error("missing labelled packed Workspace");
+if (!openedMarkup.includes('aria-label="Class and learner records"')) throw new Error("missing labelled packed Workspace");
 const rootHeadingId = openedMarkup.match(/aria-labelledby="([^"]+)"[^>]*data-panel-kind="classes"/)?.[1];
 if (!rootHeadingId || !openedMarkup.includes('id="' + rootHeadingId + '"')) throw new Error("missing labelled packed Root Panel");
-if (!openedMarkup.includes('aria-label="Close Ada Lovelace"')) throw new Error("missing accessible packed Child close control");
-if (!engine.close(childId)) throw new Error("packed Child Panel did not close");
+if (!openedMarkup.includes('aria-label="Close Class A"')) throw new Error("missing accessible packed Class close control");
+if (!openedMarkup.includes('aria-label="Close Ada Lovelace"')) throw new Error("missing accessible packed Learner close control");
+const reusedClass = engine.open({
+  originId: rootId,
+  panel: classPanel.reference({ classId: "class-a", name: "Class A" }),
+});
+if (reusedClass.status !== "reused" || reusedClass.instanceId !== openedClass.instanceId) {
+  throw new Error("packed Class Panel did not reuse its semantic identity");
+}
+if (engine.getSnapshot().panels.length !== 2) throw new Error("packed Class reuse retained its Learner suffix");
+const openedOtherClass = engine.open({
+  originId: rootId,
+  panel: classPanel.reference({ classId: "class-b", name: "Class B" }),
+});
+if (openedOtherClass.status !== "opened") throw new Error("packed replacement Class did not open");
+if (engine.getSnapshot().panels.some(({ title }) => title === "Class A")) {
+  throw new Error("packed Branch Replacement retained the prior Class");
+}
+if (!engine.close(openedOtherClass.instanceId)) throw new Error("packed Class Panel did not close");
 const closedMarkup = renderCanvas();
 if (!closedMarkup.includes("Classes")) throw new Error("packed Root Panel was not retained");
-if (closedMarkup.includes("Ada Lovelace")) throw new Error("packed Child Panel remained after close");
+if (closedMarkup.includes("Class B")) throw new Error("packed Class Panel remained after close");
 
 const stylesheet = await readFile(new URL(import.meta.resolve("@squaredlemons/canvas-panels/styles.css")), "utf8");
 if (!stylesheet.includes("@layer canvas-panels")) throw new Error("missing Canvas stylesheet layer");
-console.log("verified packed React Root-to-Child consumer");
+console.log("verified packed React Root-to-Class-to-Learner consumer");
 `,
   );
   await run(
