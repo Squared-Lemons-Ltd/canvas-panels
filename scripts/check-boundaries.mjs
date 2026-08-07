@@ -39,8 +39,18 @@ function layerFor(relativePath) {
   const normalized = relativePath.split(sep).join("/");
   if (normalized === "next/server.ts") return "next-server";
   if (normalized.startsWith("next/")) return "next";
-  if (normalized === "extensions/editor.ts") return "editor";
-  if (normalized === "extensions/resources.ts") return "resources";
+  if (
+    normalized === "extensions/editor.ts" ||
+    normalized.startsWith("extensions/editor/")
+  ) {
+    return "editor";
+  }
+  if (
+    normalized === "extensions/resources.ts" ||
+    normalized.startsWith("extensions/resources/")
+  ) {
+    return "resources";
+  }
   return normalized.split("/")[0];
 }
 
@@ -72,7 +82,10 @@ for (const file of await collectTypeScriptFiles(sourceRoot)) {
   const importerPath = relative(sourceRoot, file);
   const importerLayer = layerFor(importerPath);
   const allowed = allowedLayers.get(importerLayer);
-  if (!allowed) continue;
+  if (!allowed) {
+    violations.push(`unknown source layer: ${importerLayer} (${importerPath})`);
+    continue;
+  }
 
   const source = await readFile(file, "utf8");
   for (const specifier of importSpecifiers(source)) {

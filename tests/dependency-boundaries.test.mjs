@@ -70,3 +70,48 @@ test("the boundary checker rejects a core self-import from the React subpath", a
     await rm(fixture, { force: true, recursive: true });
   }
 });
+
+test("the boundary checker rejects unknown source layers", async () => {
+  const fixture = await mkdtemp(join(tmpdir(), "canvas-boundary-"));
+
+  try {
+    await mkdir(join(fixture, "unknown"), { recursive: true });
+    await writeFile(join(fixture, "unknown/index.ts"), "export {};\n");
+
+    await assert.rejects(
+      execFileAsync(
+        process.execPath,
+        ["scripts/check-boundaries.mjs", fixture],
+        { cwd: root },
+      ),
+      /unknown source layer: unknown/,
+    );
+  } finally {
+    await rm(fixture, { force: true, recursive: true });
+  }
+});
+
+test("nested extension files retain their extension boundary", async () => {
+  const fixture = await mkdtemp(join(tmpdir(), "canvas-boundary-"));
+
+  try {
+    await mkdir(join(fixture, "extensions/editor"), { recursive: true });
+    await mkdir(join(fixture, "ui"), { recursive: true });
+    await writeFile(
+      join(fixture, "extensions/editor/helper.ts"),
+      'import "../../ui/index.js";\n',
+    );
+    await writeFile(join(fixture, "ui/index.ts"), "export {};\n");
+
+    await assert.rejects(
+      execFileAsync(
+        process.execPath,
+        ["scripts/check-boundaries.mjs", fixture],
+        { cwd: root },
+      ),
+      /editor cannot import ui/,
+    );
+  } finally {
+    await rm(fixture, { force: true, recursive: true });
+  }
+});
