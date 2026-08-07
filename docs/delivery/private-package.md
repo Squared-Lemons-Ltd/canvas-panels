@@ -29,7 +29,7 @@ Checked on 7 August 2026:
 - `npm access list packages squaredlemons --json` succeeds and currently returns an empty package list.
 - An authenticated lookup of `@squaredlemons/canvas-panels` returns `E404`. Because the organization owner can see its private packages, this confirms that the intended package name has not been published within the scope.
 
-The npm CLI does not expose the organization's billing plan. The organization owner must confirm in npm's web settings that the **Unlimited private packages** plan is active before the first restricted release. No placeholder package should be published to reserve the name.
+The npm CLI does not expose the organization's billing plan. The organization owner confirmed on 7 August 2026 that the **Unlimited private packages** plan is active. No placeholder package was published to reserve the name.
 
 Reverify the access path without printing credentials:
 
