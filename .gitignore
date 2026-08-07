@@ -1,0 +1,8 @@
+node_modules/
+.hermes/
+dist/
+.next/
+coverage/
+*.tsbuildinfo
+*.tgz
+.DS_Store

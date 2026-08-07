@@ -1,0 +1,74 @@
+{
+  "name": "@squaredlemons/canvas-panels",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Reusable Canvas Panels interaction framework for Squared Lemons applications",
+  "type": "module",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "exports": {
+    "./core": {
+      "types": "./dist/core/index.d.ts",
+      "import": "./dist/core/index.js"
+    },
+    "./react": {
+      "types": "./dist/react/index.d.ts",
+      "import": "./dist/react/index.js"
+    },
+    "./ui": {
+      "types": "./dist/ui/index.d.ts",
+      "import": "./dist/ui/index.js"
+    },
+    "./next": {
+      "types": "./dist/next/index.d.ts",
+      "import": "./dist/next/index.js"
+    },
+    "./next/server": {
+      "types": "./dist/next/server.d.ts",
+      "import": "./dist/next/server.js"
+    },
+    "./extensions/editor": {
+      "types": "./dist/extensions/editor.d.ts",
+      "import": "./dist/extensions/editor.js"
+    },
+    "./extensions/resources": {
+      "types": "./dist/extensions/resources.d.ts",
+      "import": "./dist/extensions/resources.js"
+    },
+    "./overlay": {
+      "types": "./dist/overlay/index.d.ts",
+      "import": "./dist/overlay/index.js"
+    },
+    "./styles.css": "./dist/styles.css",
+    "./testing": {
+      "types": "./dist/testing/index.d.ts",
+      "import": "./dist/testing/index.js"
+    }
+  },
+  "sideEffects": [
+    "./dist/styles.css"
+  ],
+  "scripts": {
+    "build": "node scripts/clean.mjs && tsc -p tsconfig.build.json && node scripts/copy-styles.mjs",
+    "typecheck": "tsc -p tsconfig.build.json --noEmit"
+  },
+  "engines": {
+    "node": "^22.0.0 || ^24.0.0"
+  },
+  "peerDependencies": {
+    "next": ">=15 <17",
+    "react": ">=19 <20",
+    "react-dom": ">=19 <20"
+  },
+  "peerDependenciesMeta": {
+    "next": {
+      "optional": true
+    }
+  },
+  "publishConfig": {
+    "access": "restricted",
+    "provenance": false
+  }
+}
