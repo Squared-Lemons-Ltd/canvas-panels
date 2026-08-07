@@ -44,6 +44,13 @@ function layerFor(relativePath) {
   return normalized.split("/")[0];
 }
 
+function layerForPackageSubpath(subpath) {
+  if (subpath === "next/server") return "next-server";
+  if (subpath === "extensions/editor") return "editor";
+  if (subpath === "extensions/resources") return "resources";
+  return subpath.split("/")[0];
+}
+
 function importSpecifiers(source) {
   const specifiers = [];
   const patterns = [
@@ -69,20 +76,28 @@ for (const file of await collectTypeScriptFiles(sourceRoot)) {
 
   const source = await readFile(file, "utf8");
   for (const specifier of importSpecifiers(source)) {
-    if (!specifier.startsWith(".")) continue;
-
-    const importedPath = relative(
-      sourceRoot,
-      resolve(dirname(file), specifier),
-    );
-    if (importedPath.startsWith("..")) {
-      violations.push(
-        `${importerPath} imports outside package source via ${specifier}`,
+    let importedLayer;
+    if (specifier.startsWith("@squaredlemons/canvas-panels/")) {
+      importedLayer = layerForPackageSubpath(
+        specifier.slice("@squaredlemons/canvas-panels/".length),
       );
-      continue;
+    } else {
+      if (!specifier.startsWith(".")) continue;
+
+      const importedPath = relative(
+        sourceRoot,
+        resolve(dirname(file), specifier),
+      );
+      if (importedPath.startsWith("..")) {
+        violations.push(
+          `${importerPath} imports outside package source via ${specifier}`,
+        );
+        continue;
+      }
+
+      importedLayer = layerFor(importedPath.replace(/\.js$/, ".ts"));
     }
 
-    const importedLayer = layerFor(importedPath.replace(/\.js$/, ".ts"));
     if (importedLayer !== importerLayer && !allowed.has(importedLayer)) {
       violations.push(
         `${importerLayer} cannot import ${importedLayer} (${importerPath})`,

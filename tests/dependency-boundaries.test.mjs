@@ -47,3 +47,26 @@ test("the boundary checker rejects a core import from React", async () => {
     await rm(fixture, { force: true, recursive: true });
   }
 });
+
+test("the boundary checker rejects a core self-import from the React subpath", async () => {
+  const fixture = await mkdtemp(join(tmpdir(), "canvas-boundary-"));
+
+  try {
+    await mkdir(join(fixture, "core"), { recursive: true });
+    await writeFile(
+      join(fixture, "core/index.ts"),
+      'import "@squaredlemons/canvas-panels/react";\n',
+    );
+
+    await assert.rejects(
+      execFileAsync(
+        process.execPath,
+        ["scripts/check-boundaries.mjs", fixture],
+        { cwd: root },
+      ),
+      /core cannot import react/,
+    );
+  } finally {
+    await rm(fixture, { force: true, recursive: true });
+  }
+});
