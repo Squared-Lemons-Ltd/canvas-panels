@@ -219,7 +219,7 @@ export function createPanelEngine<
       activePanelId: activePanel.instanceId,
     });
     const subscriberErrors: unknown[] = [];
-    for (const listener of listeners) {
+    for (const listener of [...listeners]) {
       try {
         listener();
       } catch (error) {

@@ -162,6 +162,31 @@ test("one failing subscriber cannot prevent the remaining subscribers", () => {
   assert.match(subscriberError.message, /Panel Engine subscriber failed/);
 });
 
+test("publication notifies the subscriber set captured at its start", () => {
+  const root = defineRootPanel({ kind: "classes", title: "Classes" });
+  const student = definePanel({
+    kind: "student",
+    title: ({ name }) => name,
+  });
+  const engine = createPanelEngine({ root, panels: [student] });
+  const notifications = [];
+  let unsubscribeSecond = () => {};
+
+  engine.subscribe(() => {
+    notifications.push("first");
+    unsubscribeSecond();
+    engine.subscribe(() => notifications.push("late"));
+  });
+  unsubscribeSecond = engine.subscribe(() => notifications.push("second"));
+
+  engine.open({
+    originId: engine.getSnapshot().activePanelId,
+    panel: student.reference({ name: "Ada Lovelace" }),
+  });
+
+  assert.deepEqual(notifications, ["first", "second"]);
+});
+
 test("open and close publish immutable snapshots while preserving Root", () => {
   const root = defineRootPanel({ kind: "classes", title: "Classes" });
   const student = definePanel({
