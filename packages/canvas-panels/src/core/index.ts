@@ -97,6 +97,11 @@ function cloneAndFreezePanelInput<Input>(input: Input): DeepReadonly<Input> {
         );
       }
     }
+    if (Reflect.ownKeys(value).some((key) => typeof key === "symbol")) {
+      throw new TypeError(
+        "Panel input may not contain symbol-keyed properties",
+      );
+    }
 
     validateVisited.add(value);
     for (const child of Object.values(value)) assertPlainInput(child);
@@ -171,6 +176,7 @@ export function createPanelEngine<
 >(options: {
   root: RootPanelDefinition;
   panels: Definitions;
+  onSubscriberError?: (error: AggregateError) => void;
 }): PanelEngine<ReferenceOf<Definitions[number]>> {
   let nextInstanceNumber = 1;
   const nextInstanceId = () =>
@@ -221,10 +227,15 @@ export function createPanelEngine<
       }
     }
     if (subscriberErrors.length > 0) {
-      throw new AggregateError(
+      const error = new AggregateError(
         subscriberErrors,
         "Panel Engine subscriber failed after the snapshot was published",
       );
+      try {
+        options.onSubscriberError?.(error);
+      } catch {
+        // Error reporting cannot change the outcome of a published command.
+      }
     }
   };
 

@@ -47,3 +47,5 @@ export const ClassesCanvas = createCanvasModule({
 ```
 
 Render `ClassesCanvas.Provider` above `ClassesCanvas.Workspace`. The Root Panel is permanent: closing a Child restores Root as the active Panel, while opening from an earlier Panel replaces its existing descendant branch. Treat Panel Instance IDs as opaque runtime values and create Panel references only through their definitions. Panel inputs are copied into deeply immutable read models and must contain only structured-cloneable plain objects, arrays, and primitive values.
+
+Hosts using `createPanelEngine` directly may provide `onSubscriberError` to report subscriber failures. A failing subscriber never blocks the remaining subscribers or changes the result of a command whose snapshot has already been published.

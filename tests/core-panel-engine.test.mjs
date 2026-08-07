@@ -118,6 +118,16 @@ test("Panel references reject non-plain input objects", () => {
     () => student.reference(new StudentInput("Ada Lovelace")),
     /Panel input may contain only plain objects and arrays/,
   );
+
+  const metadata = Symbol("metadata");
+  assert.throws(
+    () =>
+      student.reference({
+        name: "Ada Lovelace",
+        [metadata]: "must not be dropped",
+      }),
+    /Panel input may not contain symbol-keyed properties/,
+  );
 });
 
 test("one failing subscriber cannot prevent the remaining subscribers", () => {
@@ -126,7 +136,14 @@ test("one failing subscriber cannot prevent the remaining subscribers", () => {
     kind: "student",
     title: ({ name }) => name,
   });
-  const engine = createPanelEngine({ root, panels: [student] });
+  let subscriberError;
+  const engine = createPanelEngine({
+    root,
+    panels: [student],
+    onSubscriberError: (error) => {
+      subscriberError = error;
+    },
+  });
   const notifications = [];
   engine.subscribe(() => {
     notifications.push("first");
@@ -134,16 +151,15 @@ test("one failing subscriber cannot prevent the remaining subscribers", () => {
   });
   engine.subscribe(() => notifications.push("second"));
 
-  assert.throws(
-    () =>
-      engine.open({
-        originId: engine.getSnapshot().activePanelId,
-        panel: student.reference({ name: "Ada Lovelace" }),
-      }),
-    /Panel Engine subscriber failed/,
-  );
+  const childId = engine.open({
+    originId: engine.getSnapshot().activePanelId,
+    panel: student.reference({ name: "Ada Lovelace" }),
+  });
   assert.deepEqual(notifications, ["first", "second"]);
   assert.equal(engine.getSnapshot().panels.length, 2);
+  assert.equal(engine.getSnapshot().activePanelId, childId);
+  assert.ok(subscriberError instanceof AggregateError);
+  assert.match(subscriberError.message, /Panel Engine subscriber failed/);
 });
 
 test("open and close publish immutable snapshots while preserving Root", () => {
