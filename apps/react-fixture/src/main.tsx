@@ -1,23 +1,37 @@
-import * as core from "@squaredlemons/canvas-panels/core";
-import * as editor from "@squaredlemons/canvas-panels/extensions/editor";
-import * as resources from "@squaredlemons/canvas-panels/extensions/resources";
-import * as overlay from "@squaredlemons/canvas-panels/overlay";
-import * as canvasReact from "@squaredlemons/canvas-panels/react";
+import {
+  definePanel,
+  defineRootPanel,
+} from "@squaredlemons/canvas-panels/core";
 import "@squaredlemons/canvas-panels/styles.css";
-import * as testing from "@squaredlemons/canvas-panels/testing";
-import * as ui from "@squaredlemons/canvas-panels/ui";
+import { createCanvasModule } from "@squaredlemons/canvas-panels/ui";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
-const entrypoints = [
-  core,
-  editor,
-  resources,
-  overlay,
-  canvasReact,
-  testing,
-  ui,
-];
+const classes = defineRootPanel({ kind: "classes", title: "Classes" });
+const student = definePanel({
+  kind: "student",
+  title: (input: { name: string }) => input.name,
+});
+const Canvas = createCanvasModule({
+  root: classes,
+  panels: [student],
+  renderers: {
+    classes: ({ open, panel }) => (
+      <button
+        onClick={() =>
+          open({
+            originId: panel.instanceId,
+            panel: student.reference({ name: "Ada Lovelace" }),
+          })
+        }
+        type="button"
+      >
+        Open Ada Lovelace
+      </button>
+    ),
+    student: ({ panel }) => <p>Student record: {panel.title}</p>,
+  },
+});
 const root = document.getElementById("root");
 
 if (!root) {
@@ -26,8 +40,11 @@ if (!root) {
 
 createRoot(root).render(
   <StrictMode>
-    <main data-package-entrypoints={entrypoints.length}>
-      Canvas Panels package fixture
+    <main>
+      <h1>Canvas Panels package fixture</h1>
+      <Canvas.Provider>
+        <Canvas.Workspace label="Student records" />
+      </Canvas.Provider>
     </main>
   </StrictMode>,
 );

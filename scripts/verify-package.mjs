@@ -114,19 +114,59 @@ try {
   await writeFile(
     join(reactConsumer, "probe.mjs"),
     `import { readFile } from "node:fs/promises";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { definePanel, defineRootPanel } from "@squaredlemons/canvas-panels/core";
+import { createCanvasModule } from "@squaredlemons/canvas-panels/ui";
 
 await Promise.all([
-  import("@squaredlemons/canvas-panels/core"),
   import("@squaredlemons/canvas-panels/react"),
-  import("@squaredlemons/canvas-panels/ui"),
   import("@squaredlemons/canvas-panels/extensions/editor"),
   import("@squaredlemons/canvas-panels/extensions/resources"),
   import("@squaredlemons/canvas-panels/overlay"),
   import("@squaredlemons/canvas-panels/testing"),
 ]);
+
+const root = defineRootPanel({ kind: "classes", title: "Classes" });
+const student = definePanel({
+  kind: "student",
+  title: ({ name }) => name,
+});
+const Canvas = createCanvasModule({
+  root,
+  panels: [student],
+  renderers: {
+    classes: () => createElement("p", null, "Class list"),
+    student: ({ panel }) => createElement("p", null, "Student record: " + panel.title),
+  },
+});
+const engine = Canvas.createEngine();
+const rootId = engine.getSnapshot().panels[0].instanceId;
+const childId = engine.open({
+  originId: rootId,
+  panel: student.reference({ name: "Ada Lovelace" }),
+});
+const renderCanvas = () => renderToStaticMarkup(
+  createElement(
+    Canvas.Provider,
+    { engine },
+    createElement(Canvas.Workspace, { label: "Student records" }),
+  ),
+);
+
+const openedMarkup = renderCanvas();
+if (!openedMarkup.includes('aria-label="Student records"')) throw new Error("missing labelled packed Workspace");
+const rootHeadingId = openedMarkup.match(/aria-labelledby="([^"]+)"[^>]*data-panel-kind="classes"/)?.[1];
+if (!rootHeadingId || !openedMarkup.includes('id="' + rootHeadingId + '"')) throw new Error("missing labelled packed Root Panel");
+if (!openedMarkup.includes('aria-label="Close Ada Lovelace"')) throw new Error("missing accessible packed Child close control");
+if (!engine.close(childId)) throw new Error("packed Child Panel did not close");
+const closedMarkup = renderCanvas();
+if (!closedMarkup.includes("Classes")) throw new Error("packed Root Panel was not retained");
+if (closedMarkup.includes("Ada Lovelace")) throw new Error("packed Child Panel remained after close");
+
 const stylesheet = await readFile(new URL(import.meta.resolve("@squaredlemons/canvas-panels/styles.css")), "utf8");
 if (!stylesheet.includes("@layer canvas-panels")) throw new Error("missing Canvas stylesheet layer");
-console.log("verified packed React consumer");
+console.log("verified packed React Root-to-Child consumer");
 `,
   );
   await run(
