@@ -22,17 +22,21 @@ pnpm build
 
 Checked on 7 August 2026:
 
-- `npm whoami` returns `ENEEDAUTH`; this machine is not authenticated to npm.
-- npm CLI organization access lookup returns `E404 Scope not found` for `squaredlemons`.
-- `https://www.npmjs.com/org/squaredlemons` returns `NotFoundError: Scope not found` while signed out.
-- `@squaredlemons/canvas-panels` returns `E404`, so there is no publicly visible package occupying the intended name. A private package cannot be distinguished from an absent package while unauthenticated.
+- `npm whoami` returns `jonathangill`.
+- The npm profile has a verified email address and two-factor authentication set to `auth-and-writes`.
+- `npm org ls squaredlemons --json` confirms that `jonathangill` owns the `squaredlemons` organization.
+- `npm team ls squaredlemons:developers --json` confirms that `jonathangill` belongs to the default developers team.
+- `npm access list packages squaredlemons --json` succeeds and currently returns an empty package list.
+- An authenticated lookup of `@squaredlemons/canvas-panels` returns `E404`. Because the organization owner can see its private packages, this confirms that the intended package name has not been published within the scope.
 
-Therefore organization ownership, private-package billing/access, and developer read access remain an external prerequisite. An npm organization owner must create or confirm the `squaredlemons` organization and authenticate locally before those checks can be completed. No placeholder package should be published to reserve the name.
+The npm CLI does not expose the organization's billing plan. The organization owner must confirm in npm's web settings that the **Unlimited private packages** plan is active before the first restricted release. No placeholder package should be published to reserve the name.
 
-After authentication, verify without printing credentials:
+Reverify the access path without printing credentials:
 
 ```sh
 npm whoami
+npm org ls squaredlemons --json
+npm team ls squaredlemons:developers --json
 npm access list packages squaredlemons --json
 npm view @squaredlemons/canvas-panels name version --json
 ```
@@ -41,14 +45,15 @@ The final command should continue to return `E404` until the first approved rele
 
 ## Trusted publishing route
 
-npm's trusted-publishing documentation supports GitHub Actions through OIDC. When the first real release is authorized:
+npm's trusted-publishing documentation supports GitHub Actions through OIDC. Trusted publishers are configured in an existing package's settings, so they cannot be registered before the first real package version exists. When the complete Package Gate authorizes that release:
 
-1. Add a trusted publisher for GitHub organization `Squared-Lemons-Ltd`, repository `canvas-panels`, and the exact release workflow filename.
-2. Use a GitHub-hosted runner with `permissions: id-token: write` and `contents: read`.
-3. Configure `actions/setup-node` for `https://registry.npmjs.org`.
-4. Install private dependencies with a separate read-only token if needed; do not use it for publishing.
-5. Run the complete Package Gate before `npm publish`.
-6. Publish with OIDC and no long-lived publish token.
+1. Bootstrap the first approved restricted release from an organization owner's authenticated local npm session with write-protected 2FA; do not create an automation token.
+2. Add a trusted publisher in the new package's npm settings for GitHub organization `Squared-Lemons-Ltd`, repository `canvas-panels`, and the exact release workflow filename.
+3. Use a GitHub-hosted runner with `permissions: id-token: write` and `contents: read`.
+4. Configure `actions/setup-node` for `https://registry.npmjs.org`.
+5. Install private dependencies with a separate read-only token if needed; do not use it for publishing.
+6. Run the complete Package Gate before every `npm publish`.
+7. Publish subsequent releases with OIDC and no long-lived publish token.
 
 The normal CI workflow deliberately has only `contents: read` and contains no publishing command. A release workflow must not be added until a real package release is approved and the exact workflow identity can be registered on npm.
 
