@@ -25,17 +25,47 @@ globalThis.Node = dom.window.Node;
 globalThis.getComputedStyle = dom.window.getComputedStyle;
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
-test("a bound Canvas renders, opens, and closes an accessible Child while retaining Root", async () => {
+test("a bound Canvas navigates Root to Class to Learner with semantic reuse and branch replacement", async () => {
   const root = defineRootPanel({ kind: "classes", title: "Classes" });
-  const student = definePanel({
-    kind: "student",
+  const classPanel = definePanel({
+    kind: "class",
+    deduplication: "reuse",
+    key: ({ classId }) => classId,
+    title: ({ name }) => name,
+  });
+  const learner = definePanel({
+    kind: "learner",
+    deduplication: "allow-many",
     title: ({ name }) => name,
   });
   const Canvas = createCanvasModule({
     root,
-    panels: [student],
+    panels: [classPanel, learner],
     renderers: {
       classes: ({ open, panel }) =>
+        createElement(
+          "div",
+          null,
+          ...[
+            { classId: "class-a", name: "Class A" },
+            { classId: "class-b", name: "Class B" },
+          ].map((input) =>
+            createElement(
+              "button",
+              {
+                key: input.classId,
+                type: "button",
+                onClick: () =>
+                  open({
+                    originId: panel.instanceId,
+                    panel: classPanel.reference(input),
+                  }),
+              },
+              `Open ${input.name}`,
+            ),
+          ),
+        ),
+      class: ({ open, panel }) =>
         createElement(
           "button",
           {
@@ -43,13 +73,16 @@ test("a bound Canvas renders, opens, and closes an accessible Child while retain
             onClick: () =>
               open({
                 originId: panel.instanceId,
-                panel: student.reference({ name: "Ada Lovelace" }),
+                panel: learner.reference({
+                  learnerId: "learner-a",
+                  name: "Ada Lovelace",
+                }),
               }),
           },
           "Open Ada Lovelace",
         ),
-      student: ({ panel }) =>
-        createElement("p", null, `Student record: ${panel.title}`),
+      learner: ({ panel }) =>
+        createElement("p", null, `Learner record: ${panel.title}`),
     },
   });
   const engine = Canvas.createEngine();
@@ -66,13 +99,20 @@ test("a bound Canvas renders, opens, and closes an accessible Child while retain
   assert.ok(result.getByRole("region", { name: "Classes" }));
   assert.equal(result.queryByRole("button", { name: /^Close / }), null);
 
-  fireEvent.click(result.getByRole("button", { name: "Open Ada Lovelace" }));
+  fireEvent.click(result.getByRole("button", { name: "Open Class A" }));
 
   assert.equal(engine.getSnapshot().panels.length, 2);
+  const firstClassId = engine.getSnapshot().activePanelId;
+  assert.ok(result.getByRole("region", { name: "Class A" }));
+
+  fireEvent.click(result.getByRole("button", { name: "Open Ada Lovelace" }));
+
+  assert.equal(engine.getSnapshot().panels.length, 3);
   assert.ok(result.getByRole("region", { name: "Classes" }));
+  assert.ok(result.getByRole("region", { name: "Class A" }));
   assert.ok(result.getByRole("region", { name: "Ada Lovelace" }));
   assert.match(
-    result.getByText("Student record: Ada Lovelace").textContent,
+    result.getByText("Learner record: Ada Lovelace").textContent,
     /Ada/,
   );
 
@@ -85,11 +125,24 @@ test("a bound Canvas renders, opens, and closes an accessible Child while retain
     [],
   );
 
-  fireEvent.click(result.getByRole("button", { name: "Close Ada Lovelace" }));
+  fireEvent.click(result.getByRole("button", { name: "Open Class A" }));
 
+  assert.equal(engine.getSnapshot().panels.length, 2);
+  assert.equal(engine.getSnapshot().activePanelId, firstClassId);
+  assert.equal(result.queryByRole("region", { name: "Ada Lovelace" }), null);
+
+  fireEvent.click(result.getByRole("button", { name: "Open Class B" }));
+
+  assert.deepEqual(
+    engine.getSnapshot().panels.map(({ title }) => title),
+    ["Classes", "Class B"],
+  );
+  assert.equal(result.queryByRole("region", { name: "Class A" }), null);
+  assert.ok(result.getByRole("region", { name: "Class B" }));
+
+  fireEvent.click(result.getByRole("button", { name: "Close Class B" }));
   assert.equal(engine.getSnapshot().panels.length, 1);
   assert.ok(result.getByRole("region", { name: "Classes" }));
-  assert.equal(result.queryByRole("region", { name: "Ada Lovelace" }), null);
   result.unmount();
 });
 

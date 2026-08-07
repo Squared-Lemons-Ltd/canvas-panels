@@ -8,20 +8,48 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
 const classes = defineRootPanel({ kind: "classes", title: "Classes" });
-const student = definePanel({
-  kind: "student",
+const classPanel = definePanel({
+  kind: "class",
+  deduplication: "reuse",
+  key: (input: { classId: string; name: string }) => input.classId,
+  title: (input: { classId: string; name: string }) => input.name,
+});
+const learner = definePanel({
+  kind: "learner",
+  deduplication: "allow-many",
   title: (input: { name: string }) => input.name,
 });
 const Canvas = createCanvasModule({
   root: classes,
-  panels: [student],
+  panels: [classPanel, learner],
   renderers: {
     classes: ({ open, panel }) => (
+      <div>
+        {[
+          { classId: "class-a", name: "Class A" },
+          { classId: "class-b", name: "Class B" },
+        ].map((input) => (
+          <button
+            key={input.classId}
+            onClick={() =>
+              open({
+                originId: panel.instanceId,
+                panel: classPanel.reference(input),
+              })
+            }
+            type="button"
+          >
+            Open {input.name}
+          </button>
+        ))}
+      </div>
+    ),
+    class: ({ open, panel }) => (
       <button
         onClick={() =>
           open({
             originId: panel.instanceId,
-            panel: student.reference({ name: "Ada Lovelace" }),
+            panel: learner.reference({ name: "Ada Lovelace" }),
           })
         }
         type="button"
@@ -29,7 +57,7 @@ const Canvas = createCanvasModule({
         Open Ada Lovelace
       </button>
     ),
-    student: ({ panel }) => <p>Student record: {panel.title}</p>,
+    learner: ({ panel }) => <p>Learner record: {panel.title}</p>,
   },
 });
 const root = document.getElementById("root");
@@ -43,7 +71,7 @@ createRoot(root).render(
     <main>
       <h1>Canvas Panels package fixture</h1>
       <Canvas.Provider>
-        <Canvas.Workspace label="Student records" />
+        <Canvas.Workspace label="Class and learner records" />
       </Canvas.Provider>
     </main>
   </StrictMode>,

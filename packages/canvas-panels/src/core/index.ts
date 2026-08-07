@@ -1,5 +1,9 @@
 declare const panelInstanceIdBrand: unique symbol;
+declare const panelKeyBrand: unique symbol;
 declare const panelReferenceBrand: unique symbol;
+
+let nextEngineNumber = 1;
+const referenceDefinitions = new WeakMap<object, object>();
 
 export type DeepReadonly<Value> = Value extends (...args: never[]) => unknown
   ? Value
@@ -13,14 +17,21 @@ export type PanelInstanceId = string & {
   readonly [panelInstanceIdBrand]: "PanelInstanceId";
 };
 
+export type PanelKey = string & {
+  readonly [panelKeyBrand]: "PanelKey";
+};
+
 export type PanelReference<
   Kind extends string = string,
   Input = unknown,
 > = Readonly<{
   kind: Kind;
   input: DeepReadonly<Input>;
+  panelKey?: PanelKey;
   readonly [panelReferenceBrand]: "PanelReference";
 }>;
+
+export type PanelDeduplication = "reuse" | "replace" | "allow-many";
 
 export type RootPanelDefinition<Kind extends string = string> = Readonly<{
   role: "root";
@@ -35,6 +46,8 @@ export type PanelDefinition<
 > = Readonly<{
   role: "panel";
   kind: Kind;
+  deduplication: PanelDeduplication;
+  key?: (input: DeepReadonly<Input>) => string;
   title: (input: DeepReadonly<Input>) => string;
   reference: (input: Input) => PanelReference<Kind, Input>;
 }>;
@@ -44,32 +57,73 @@ export type OpenPanel = Readonly<{
   kind: string;
   title: string;
   isRoot: boolean;
+  panelKey?: PanelKey;
   reference: PanelReference;
 }>;
 
 export type PanelEngineSnapshot = Readonly<{
   panels: readonly OpenPanel[];
   activePanelId: PanelInstanceId;
+  deepestPanelId: PanelInstanceId;
+  visiblePanelIds: readonly PanelInstanceId[];
 }>;
 
 export type OpenPanelCommand<
   Reference extends PanelReference = PanelReference,
 > = Readonly<{
-  originId: PanelInstanceId;
+  originId?: PanelInstanceId;
   panel: Reference;
 }>;
+
+export type OpenPanelOutcome =
+  | Readonly<{
+      status: "opened";
+      instanceId: PanelInstanceId;
+      removedPanelIds: readonly PanelInstanceId[];
+    }>
+  | Readonly<{
+      status: "reused";
+      instanceId: PanelInstanceId;
+      removedPanelIds: readonly PanelInstanceId[];
+    }>
+  | Readonly<{
+      status: "replaced";
+      instanceId: PanelInstanceId;
+      replacedInstanceId: PanelInstanceId;
+      removedPanelIds: readonly PanelInstanceId[];
+    }>
+  | Readonly<{
+      status: "rejected";
+      reason: "stale-origin" | "invalid-origin";
+      originId: PanelInstanceId;
+    }>
+  | Readonly<{
+      status: "rejected";
+      reason: "invalid-panel-reference";
+      originId: PanelInstanceId;
+      panelKind: string;
+    }>
+  | Readonly<{
+      status: "rejected";
+      reason: "deduplication-conflict";
+      originId: PanelInstanceId;
+      panelKind: string;
+      panelKey: PanelKey;
+    }>;
 
 export type PanelEngine<Reference extends PanelReference = PanelReference> =
   Readonly<{
     getSnapshot: () => PanelEngineSnapshot;
     subscribe: (listener: () => void) => () => void;
-    open: (command: OpenPanelCommand<Reference>) => PanelInstanceId;
+    open: (command: OpenPanelCommand<Reference>) => OpenPanelOutcome;
     close: (instanceId: PanelInstanceId) => boolean;
   }>;
 
 type PanelDefinitionShape = Readonly<{
   role: "panel";
   kind: string;
+  deduplication: PanelDeduplication;
+  key?: (input: never) => string;
   title: (input: never) => string;
   reference: (input: never) => PanelReference<string, unknown>;
 }>;
@@ -155,20 +209,46 @@ export function defineRootPanel<const Kind extends string>(options: {
   });
 }
 
-export function definePanel<const Kind extends string, Input>(options: {
-  kind: Kind;
-  title: (input: DeepReadonly<Input>) => string;
-}): PanelDefinition<Kind, Input> {
-  return Object.freeze({
+export function definePanel<const Kind extends string, Input>(
+  options: {
+    kind: Kind;
+    title: (input: DeepReadonly<Input>) => string;
+  } & (
+    | {
+        deduplication: "reuse" | "replace";
+        key: (input: DeepReadonly<Input>) => string;
+      }
+    | {
+        deduplication?: "allow-many";
+        key?: (input: DeepReadonly<Input>) => string;
+      }
+  ),
+): PanelDefinition<Kind, Input> {
+  const definition = Object.freeze({
     role: "panel",
     kind: options.kind,
+    deduplication: options.deduplication ?? "allow-many",
+    ...(options.key === undefined ? {} : { key: options.key }),
     title: options.title,
-    reference: (input: Input) =>
-      Object.freeze({
+    reference: (input: Input) => {
+      const immutableInput = cloneAndFreezePanelInput(input);
+      const panelKey = options.key?.(immutableInput) as PanelKey | undefined;
+      if (
+        panelKey !== undefined &&
+        (typeof panelKey !== "string" || panelKey.length === 0)
+      ) {
+        throw new TypeError("Panel Keys must be non-empty strings");
+      }
+      const reference = Object.freeze({
         kind: options.kind,
-        input: cloneAndFreezePanelInput(input),
-      }) as PanelReference<Kind, Input>,
+        input: immutableInput,
+        ...(panelKey === undefined ? {} : { panelKey }),
+      }) as PanelReference<Kind, Input>;
+      referenceDefinitions.set(reference, definition);
+      return reference;
+    },
   });
+  return definition;
 }
 
 export function createPanelEngine<
@@ -178,9 +258,10 @@ export function createPanelEngine<
   panels: Definitions;
   onSubscriberError?: (error: AggregateError) => void;
 }): PanelEngine<ReferenceOf<Definitions[number]>> {
+  const engineNumber = nextEngineNumber++;
   let nextInstanceNumber = 1;
   const nextInstanceId = () =>
-    `canvas-panel-${nextInstanceNumber++}` as PanelInstanceId;
+    `canvas-panel-${engineNumber}-${nextInstanceNumber++}` as PanelInstanceId;
   const instanceId = nextInstanceId();
   const rootPanel = Object.freeze({
     instanceId,
@@ -189,9 +270,12 @@ export function createPanelEngine<
     isRoot: true,
     reference: options.root.reference,
   });
+  const issuedPanelIds = new Set<PanelInstanceId>([instanceId]);
   let snapshot = Object.freeze({
     panels: Object.freeze([rootPanel]),
     activePanelId: instanceId,
+    deepestPanelId: instanceId,
+    visiblePanelIds: Object.freeze([instanceId]),
   }) as PanelEngineSnapshot;
   const listeners = new Set<() => void>();
   const registeredKinds = new Set([options.root.kind]);
@@ -204,19 +288,33 @@ export function createPanelEngine<
   const definitions = new Map(
     options.panels.map((definition) => [
       definition.kind,
-      definition.title as (input: unknown) => string,
+      {
+        deduplication: definition.deduplication,
+        identity: definition,
+        title: definition.title as (input: unknown) => string,
+      },
     ]),
   );
 
-  const publish = (panels: readonly OpenPanel[]) => {
-    const activePanel = panels.at(-1);
-    if (!activePanel) {
+  const publish = (
+    panels: readonly OpenPanel[],
+    activePanelId = panels.at(-1)?.instanceId,
+  ) => {
+    const deepestPanel = panels.at(-1);
+    if (!deepestPanel || activePanelId === undefined) {
       throw new Error("A Canvas Workspace must retain its Root Panel");
+    }
+    if (!panels.some(({ instanceId }) => instanceId === activePanelId)) {
+      throw new Error("The Active Panel must belong to the Canvas Workspace");
     }
 
     snapshot = Object.freeze({
       panels: Object.freeze(panels),
-      activePanelId: activePanel.instanceId,
+      activePanelId,
+      deepestPanelId: deepestPanel.instanceId,
+      visiblePanelIds: Object.freeze(
+        panels.map(({ instanceId: visiblePanelId }) => visiblePanelId),
+      ),
     });
     const subscriberErrors: unknown[] = [];
     for (const listener of [...listeners]) {
@@ -245,29 +343,117 @@ export function createPanelEngine<
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
-    open: ({ originId, panel }) => {
+    open: ({ originId: requestedOriginId, panel }) => {
+      const originId = requestedOriginId ?? snapshot.activePanelId;
       const originIndex = snapshot.panels.findIndex(
         (candidate) => candidate.instanceId === originId,
       );
       if (originIndex < 0) {
-        throw new Error(`Unknown origin Panel Instance ID: ${originId}`);
+        return Object.freeze({
+          status: "rejected",
+          reason: issuedPanelIds.has(originId)
+            ? "stale-origin"
+            : "invalid-origin",
+          originId,
+        });
       }
 
-      const title = definitions.get(panel.kind);
-      if (!title) {
+      const definition = definitions.get(panel.kind);
+      if (!definition) {
         throw new Error(`Unknown Panel Kind: ${panel.kind}`);
+      }
+      if (referenceDefinitions.get(panel) !== definition.identity) {
+        return Object.freeze({
+          status: "rejected",
+          reason: "invalid-panel-reference",
+          originId,
+          panelKind: panel.kind,
+        });
+      }
+
+      const matchingIndex =
+        panel.panelKey === undefined
+          ? -1
+          : snapshot.panels.findIndex(
+              (candidate) =>
+                candidate.kind === panel.kind &&
+                candidate.panelKey === panel.panelKey,
+            );
+      if (definition.deduplication === "reuse" && matchingIndex >= 0) {
+        const matchedPanel = snapshot.panels[matchingIndex];
+        if (!matchedPanel) throw new Error("Matching Panel disappeared");
+        const reusedPanels =
+          matchingIndex < originIndex
+            ? snapshot.panels
+            : snapshot.panels.slice(0, matchingIndex + 1);
+        const removedPanelIds = Object.freeze(
+          snapshot.panels
+            .slice(reusedPanels.length)
+            .map(({ instanceId: removedPanelId }) => removedPanelId),
+        );
+        if (
+          removedPanelIds.length > 0 ||
+          snapshot.activePanelId !== matchedPanel.instanceId
+        ) {
+          publish(reusedPanels, matchedPanel.instanceId);
+        }
+        return Object.freeze({
+          status: "reused",
+          instanceId: matchedPanel.instanceId,
+          removedPanelIds,
+        });
+      }
+
+      if (
+        definition.deduplication === "replace" &&
+        matchingIndex >= 0 &&
+        matchingIndex <= originIndex
+      ) {
+        if (panel.panelKey === undefined) {
+          throw new Error(
+            "A replace Panel must provide its semantic Panel Key",
+          );
+        }
+        return Object.freeze({
+          status: "rejected",
+          reason: "deduplication-conflict",
+          originId,
+          panelKind: panel.kind,
+          panelKey: panel.panelKey,
+        });
       }
 
       const childId = nextInstanceId();
+      issuedPanelIds.add(childId);
       const child = Object.freeze({
         instanceId: childId,
         kind: panel.kind,
-        title: title(panel.input),
+        title: definition.title(panel.input),
         isRoot: false,
+        ...(panel.panelKey === undefined ? {} : { panelKey: panel.panelKey }),
         reference: panel,
       });
+      const removedPanels = snapshot.panels.slice(originIndex + 1);
+      const removedPanelIds = Object.freeze(
+        removedPanels.map(({ instanceId: removedPanelId }) => removedPanelId),
+      );
+      const replacedPanel =
+        definition.deduplication === "replace" && matchingIndex > originIndex
+          ? snapshot.panels[matchingIndex]
+          : undefined;
       publish([...snapshot.panels.slice(0, originIndex + 1), child]);
-      return childId;
+      return replacedPanel
+        ? Object.freeze({
+            status: "replaced",
+            instanceId: childId,
+            replacedInstanceId: replacedPanel.instanceId,
+            removedPanelIds,
+          })
+        : Object.freeze({
+            status: "opened",
+            instanceId: childId,
+            removedPanelIds,
+          });
     },
     close: (panelId) => {
       const index = snapshot.panels.findIndex(
