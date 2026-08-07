@@ -438,7 +438,7 @@ test("Panel Instance IDs distinguish separate engine runtimes", () => {
   );
 });
 
-test("an engine rejects a same-kind reference from another Panel definition", () => {
+test("an engine rejects references from unregistered Panel definitions", () => {
   const root = defineRootPanel({ kind: "classes", title: "Classes" });
   const registeredClass = definePanel({
     kind: "class",
@@ -451,6 +451,10 @@ test("an engine rejects a same-kind reference from another Panel definition", ()
     deduplication: "allow-many",
     title: ({ name }) => name,
   });
+  const foreignReport = definePanel({
+    kind: "report",
+    title: ({ name }) => name,
+  });
   const engine = createPanelEngine({ root, panels: [registeredClass] });
   const beforeRejection = engine.getSnapshot();
 
@@ -461,6 +465,16 @@ test("an engine rejects a same-kind reference from another Panel definition", ()
       reason: "invalid-panel-reference",
       originId: beforeRejection.activePanelId,
       panelKind: "class",
+    },
+  );
+  assert.equal(engine.getSnapshot(), beforeRejection);
+  assert.deepEqual(
+    engine.open({ panel: foreignReport.reference({ name: "Report A" }) }),
+    {
+      status: "rejected",
+      reason: "invalid-panel-reference",
+      originId: beforeRejection.activePanelId,
+      panelKind: "report",
     },
   );
   assert.equal(engine.getSnapshot(), beforeRejection);

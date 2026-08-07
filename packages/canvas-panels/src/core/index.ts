@@ -359,10 +359,10 @@ export function createPanelEngine<
       }
 
       const definition = definitions.get(panel.kind);
-      if (!definition) {
-        throw new Error(`Unknown Panel Kind: ${panel.kind}`);
-      }
-      if (referenceDefinitions.get(panel) !== definition.identity) {
+      if (
+        !definition ||
+        referenceDefinitions.get(panel) !== definition.identity
+      ) {
         return Object.freeze({
           status: "rejected",
           reason: "invalid-panel-reference",
