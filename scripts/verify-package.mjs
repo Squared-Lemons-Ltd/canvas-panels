@@ -133,6 +133,12 @@ const classPanel = definePanel({
   deduplication: "reuse",
   key: ({ classId }) => classId,
   title: ({ name }) => name,
+  update: {
+    validate: (update) => typeof update === "object" && update !== null && (update.type === "rename" || update.type === "noop"),
+    validateResult: (value) => typeof value === "object" && value !== null && typeof value.classId === "string" && typeof value.name === "string",
+    apply: (current, update) => update.type === "noop" ? current : { ...current, name: update.name },
+    navigation: "replace",
+  },
 });
 const learner = definePanel({
   kind: "learner",
@@ -160,6 +166,24 @@ const openedLearner = engine.open({
   panel: learner.reference({ name: "Ada Lovelace" }),
 });
 if (openedLearner.status !== "opened") throw new Error("packed Learner Panel did not open");
+const classTarget = engine.getSnapshot().panels[1].instanceRef;
+const updatedClass = engine.update({
+  definition: classPanel,
+  target: classTarget,
+  update: { type: "rename", name: "Class Alpha" },
+});
+if (updatedClass.status !== "updated" || engine.getSnapshot().panels[1].title !== "Class Alpha") {
+  throw new Error("packed typed Class update did not commit");
+}
+const beforeNoop = engine.getSnapshot();
+const noopUpdate = engine.update({
+  definition: classPanel,
+  target: classTarget,
+  update: { type: "noop" },
+});
+if (noopUpdate.status !== "unchanged" || engine.getSnapshot() !== beforeNoop) {
+  throw new Error("packed no-op update published a snapshot");
+}
 const renderCanvas = () => renderToStaticMarkup(
   createElement(
     Canvas.Provider,
@@ -172,7 +196,7 @@ const openedMarkup = renderCanvas();
 if (!openedMarkup.includes('aria-label="Class and learner records"')) throw new Error("missing labelled packed Workspace");
 const rootHeadingId = openedMarkup.match(/aria-labelledby="([^"]+)"[^>]*data-panel-kind="classes"/)?.[1];
 if (!rootHeadingId || !openedMarkup.includes('id="' + rootHeadingId + '"')) throw new Error("missing labelled packed Root Panel");
-if (!openedMarkup.includes('aria-label="Close Class A"')) throw new Error("missing accessible packed Class close control");
+if (!openedMarkup.includes('aria-label="Close Class Alpha"')) throw new Error("missing accessible packed Class close control");
 if (!openedMarkup.includes('aria-label="Close Ada Lovelace"')) throw new Error("missing accessible packed Learner close control");
 const reusedClass = engine.open({
   originId: rootId,
@@ -190,7 +214,18 @@ if (openedOtherClass.status !== "opened") throw new Error("packed replacement Cl
 if (engine.getSnapshot().panels.some(({ title }) => title === "Class A")) {
   throw new Error("packed Branch Replacement retained the prior Class");
 }
-if (!engine.close(openedOtherClass.instanceId)) throw new Error("packed Class Panel did not close");
+const otherClassTarget = engine.getSnapshot().panels[1].instanceRef;
+const nestedEngine = Canvas.createEngine();
+const foreignClose = nestedEngine.close({
+  target: otherClassTarget,
+});
+if (foreignClose.status !== "rejected" || foreignClose.reason !== "foreign-workspace") {
+  throw new Error("packed nested Workspace accepted a foreign command");
+}
+const closedClass = engine.close({
+  target: otherClassTarget,
+});
+if (closedClass.status !== "closed") throw new Error("packed Class Panel did not close");
 const closedMarkup = renderCanvas();
 if (!closedMarkup.includes("Classes")) throw new Error("packed Root Panel was not retained");
 if (closedMarkup.includes("Class B")) throw new Error("packed Class Panel remained after close");

@@ -60,6 +60,8 @@ const Canvas = createCanvasModule({
     learner: ({ panel }) => <p>Learner record: {panel.title}</p>,
   },
 });
+const parentEngine = Canvas.createEngine();
+const nestedEngine = Canvas.createEngine();
 const root = document.getElementById("root");
 
 if (!root) {
@@ -70,8 +72,11 @@ createRoot(root).render(
   <StrictMode>
     <main>
       <h1>Canvas Panels package fixture</h1>
-      <Canvas.Provider>
-        <Canvas.Workspace label="Class and learner records" />
+      <Canvas.Provider engine={parentEngine}>
+        <Canvas.Workspace label="Parent class and learner records" />
+        <Canvas.Provider engine={nestedEngine}>
+          <Canvas.Workspace label="Nested class and learner records" />
+        </Canvas.Provider>
       </Canvas.Provider>
     </main>
   </StrictMode>,

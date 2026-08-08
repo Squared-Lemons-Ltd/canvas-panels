@@ -15,6 +15,30 @@ const teacher = definePanel({
   kind: "teacher",
   title: (input: { name: string }) => input.name,
 });
+type StudentUpdate =
+  | Readonly<{ type: "rename"; name: string }>
+  | Readonly<{ type: "noop" }>;
+const updatableStudent = definePanel({
+  kind: "updatable-student",
+  title: (input: { name: string }) => input.name,
+  update: {
+    validate: (update: unknown): update is StudentUpdate =>
+      typeof update === "object" && update !== null && "type" in update,
+    validateResult: (value: unknown): value is { name: string } =>
+      typeof value === "object" &&
+      value !== null &&
+      "name" in value &&
+      typeof value.name === "string",
+    apply: (current, update: StudentUpdate) =>
+      update.type === "noop" ? current : { ...current, name: update.name },
+    navigation: "replace",
+  },
+});
+const pinnedStudent = definePanel({
+  kind: "pinned-student",
+  closable: false,
+  title: (input: { name: string }) => input.name,
+});
 const reusableClass = definePanel({
   kind: "class",
   deduplication: "reuse",
@@ -36,7 +60,7 @@ studentReference.input.name = "Mutated";
 
 const Canvas = createCanvasModule({
   root,
-  panels: [student],
+  panels: [student, updatableStudent, pinnedStudent],
   renderers: {
     classes: ({ open, panel }) => {
       const rootInput: undefined = panel.reference.input;
@@ -58,6 +82,8 @@ const Canvas = createCanvasModule({
       void studentName;
       return null;
     },
+    "updatable-student": () => null,
+    "pinned-student": () => null,
   },
 });
 
@@ -78,12 +104,75 @@ const semanticKey: PanelKey | undefined = classReference.panelKey;
 void semanticKey;
 // @ts-expect-error Semantic Panel Keys are branded separately from strings.
 const invalidPanelKey: PanelKey = "class-a";
-engine.close(rootId);
+const closeOutcome = engine.close({
+  target: rootPanel.instanceRef,
+});
+if (closeOutcome.status === "rejected") {
+  const closeReason:
+    | "stale-panel"
+    | "invalid-panel"
+    | "invalid-panel-reference"
+    | "foreign-workspace"
+    | "root-panel"
+    | "not-closable" = closeOutcome.reason;
+  void closeReason;
+}
+const updateOutcome = engine.update({
+  definition: updatableStudent,
+  target: rootPanel.instanceRef,
+  update: { type: "rename", name: "Grace Hopper" },
+});
+if (updateOutcome.status === "updated") {
+  const intent: "replace" | "none" = updateOutcome.navigationIntent;
+  void intent;
+} else if (updateOutcome.status === "unchanged") {
+  const command: "update" = updateOutcome.command;
+  void command;
+} else {
+  const command: "update" = updateOutcome.command;
+  void command;
+}
+const activateOutcome = engine.activate({ target: rootPanel.instanceRef });
+if (activateOutcome.status === "activated") {
+  const intent: "replace" = activateOutcome.navigationIntent;
+  void intent;
+} else {
+  const command: "activate" = activateOutcome.command;
+  void command;
+}
+const collapseOutcome = engine.collapse({ target: rootPanel.instanceRef });
+if (collapseOutcome.status === "collapsed") {
+  const intent: "push" = collapseOutcome.navigationIntent;
+  void intent;
+} else {
+  const command: "collapse" = collapseOutcome.command;
+  void command;
+}
+engine.update({
+  definition: updatableStudent,
+  target: rootPanel.instanceRef,
+  // @ts-expect-error Updates must belong to the definition's registered union.
+  update: { name: "arbitrary merge" },
+});
+engine.update({
+  definition: student,
+  target: rootPanel.instanceRef,
+  // @ts-expect-error Panel Kinds without update policies cannot be updated.
+  update: { type: "noop" },
+});
+
+// @ts-expect-error Root definitions cannot declare closability.
+defineRootPanel({ kind: "invalid-root", title: "Invalid", closable: true });
 
 // @ts-expect-error Panel Instance IDs are branded runtime identities.
 const invalidId: PanelInstanceId = "canvas-panel-1";
-// @ts-expect-error Commands do not accept unbranded strings as instance IDs.
-engine.close("canvas-panel-1");
+engine.close({
+  target: {
+    ...rootPanel.instanceRef,
+    // @ts-expect-error Commands do not accept unbranded strings as instance IDs.
+    instanceId: "canvas-panel-1",
+  },
+});
 
 void invalidId;
 void invalidPanelKey;

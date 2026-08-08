@@ -6,7 +6,6 @@ import {
   type PanelDeduplication,
   type PanelDefinition,
   type PanelEngine,
-  type PanelInstanceId,
   type PanelReference,
   type RootPanelDefinition,
 } from "../core/index.js";
@@ -18,9 +17,16 @@ type PanelDefinitionShape = Readonly<{
   role: "panel";
   kind: string;
   deduplication: PanelDeduplication;
+  closable: boolean;
   key?: (input: never) => string;
   title: (input: never) => string;
   reference: (input: never) => PanelReference<string, unknown>;
+  update?: Readonly<{
+    validate: (update: unknown) => boolean;
+    validateResult: (value: unknown) => boolean;
+    apply: (current: never, update: never) => unknown;
+    navigation: "replace" | "none";
+  }>;
 }>;
 
 type ReferenceOf<Definition> =
@@ -54,7 +60,7 @@ export type CanvasPanelRenderProps<
 > = Readonly<{
   panel: Panel;
   open: PanelEngine<Reference>["open"];
-  close: (instanceId: PanelInstanceId) => boolean;
+  close: CanvasBinding<Reference>["close"];
 }>;
 
 type CanvasRendererMap<
@@ -148,13 +154,13 @@ export function createCanvasModule<
             "header",
             { "data-canvas-panel-header": "" },
             createElement("h2", { id: headingId }, panel.title),
-            panel.isRoot
+            !panel.closable
               ? null
               : createElement(
                   "button",
                   {
                     "aria-label": `Close ${panel.title}`,
-                    onClick: () => close(panel.instanceId),
+                    onClick: () => close(panel.instanceRef),
                     type: "button",
                   },
                   "Close",

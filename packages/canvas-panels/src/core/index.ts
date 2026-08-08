@@ -1,6 +1,8 @@
 declare const panelInstanceIdBrand: unique symbol;
 declare const panelKeyBrand: unique symbol;
 declare const panelReferenceBrand: unique symbol;
+declare const workspaceIdBrand: unique symbol;
+declare const stackVersionBrand: unique symbol;
 
 let nextEngineNumber = 1;
 const referenceDefinitions = new WeakMap<object, object>();
@@ -16,6 +18,20 @@ export type DeepReadonly<Value> = Value extends (...args: never[]) => unknown
 export type PanelInstanceId = string & {
   readonly [panelInstanceIdBrand]: "PanelInstanceId";
 };
+
+export type WorkspaceId = string & {
+  readonly [workspaceIdBrand]: "WorkspaceId";
+};
+
+export type StackVersion = number & {
+  readonly [stackVersionBrand]: "StackVersion";
+};
+
+export type PanelInstanceRef = Readonly<{
+  workspaceId: WorkspaceId;
+  instanceId: PanelInstanceId;
+  kind: string;
+}>;
 
 export type PanelKey = string & {
   readonly [panelKeyBrand]: "PanelKey";
@@ -43,25 +59,37 @@ export type RootPanelDefinition<Kind extends string = string> = Readonly<{
 export type PanelDefinition<
   Kind extends string = string,
   Input = unknown,
+  Update = never,
 > = Readonly<{
   role: "panel";
   kind: Kind;
   deduplication: PanelDeduplication;
+  closable: boolean;
   key?: (input: DeepReadonly<Input>) => string;
   title: (input: DeepReadonly<Input>) => string;
   reference: (input: Input) => PanelReference<Kind, Input>;
+  update?: Readonly<{
+    validate: (update: unknown) => update is Update;
+    validateResult: (value: unknown) => value is Input;
+    apply: (current: DeepReadonly<Input>, update: Update) => Input;
+    navigation: "replace" | "none";
+  }>;
 }>;
 
 export type OpenPanel = Readonly<{
   instanceId: PanelInstanceId;
+  instanceRef: PanelInstanceRef;
   kind: string;
   title: string;
   isRoot: boolean;
+  closable: boolean;
   panelKey?: PanelKey;
   reference: PanelReference;
 }>;
 
 export type PanelEngineSnapshot = Readonly<{
+  workspaceId: WorkspaceId;
+  version: StackVersion;
   panels: readonly OpenPanel[];
   activePanelId: PanelInstanceId;
   deepestPanelId: PanelInstanceId;
@@ -109,6 +137,107 @@ export type OpenPanelOutcome =
       originId: PanelInstanceId;
       panelKind: string;
       panelKey: PanelKey;
+    }>
+  | Readonly<{
+      status: "rejected";
+      reason: "not-closable";
+      originId: PanelInstanceId;
+      panelId: PanelInstanceId;
+    }>;
+
+export type UpdatePanelOutcome =
+  | Readonly<{
+      status: "updated";
+      panelId: PanelInstanceId;
+      navigationIntent: "replace" | "none";
+    }>
+  | Readonly<{
+      status: "unchanged";
+      command: "update";
+      panelId: PanelInstanceId;
+      navigationIntent: "none";
+    }>
+  | Readonly<{
+      status: "rejected";
+      command: "update";
+      reason:
+        | "stale-panel"
+        | "invalid-panel"
+        | "foreign-workspace"
+        | "invalid-panel-reference"
+        | "not-updatable"
+        | "invalid-update"
+        | "identity-change";
+      panelId: PanelInstanceId;
+    }>;
+
+export type ActivatePanelOutcome =
+  | Readonly<{
+      status: "activated";
+      panelId: PanelInstanceId;
+      navigationIntent: "replace";
+    }>
+  | Readonly<{
+      status: "unchanged";
+      command: "activate";
+      panelId: PanelInstanceId;
+      navigationIntent: "none";
+    }>
+  | Readonly<{
+      status: "rejected";
+      command: "activate";
+      reason:
+        | "stale-panel"
+        | "invalid-panel"
+        | "invalid-panel-reference"
+        | "foreign-workspace";
+      panelId: PanelInstanceId;
+    }>;
+
+export type CollapsePanelOutcome =
+  | Readonly<{
+      status: "collapsed";
+      panelId: PanelInstanceId;
+      removedPanelIds: readonly PanelInstanceId[];
+      navigationIntent: "push";
+    }>
+  | Readonly<{
+      status: "unchanged";
+      command: "collapse";
+      panelId: PanelInstanceId;
+      navigationIntent: "none";
+    }>
+  | Readonly<{
+      status: "rejected";
+      command: "collapse";
+      reason:
+        | "stale-panel"
+        | "invalid-panel"
+        | "invalid-panel-reference"
+        | "foreign-workspace"
+        | "not-closable";
+      panelId: PanelInstanceId;
+    }>;
+
+export type ClosePanelOutcome =
+  | Readonly<{
+      status: "closed";
+      panelId: PanelInstanceId;
+      removedPanelIds: readonly PanelInstanceId[];
+      activePanelId: PanelInstanceId;
+      navigationIntent: "push";
+    }>
+  | Readonly<{
+      status: "rejected";
+      command: "close";
+      reason:
+        | "stale-panel"
+        | "invalid-panel"
+        | "invalid-panel-reference"
+        | "foreign-workspace"
+        | "root-panel"
+        | "not-closable";
+      panelId: PanelInstanceId;
     }>;
 
 export type PanelEngine<Reference extends PanelReference = PanelReference> =
@@ -116,16 +245,30 @@ export type PanelEngine<Reference extends PanelReference = PanelReference> =
     getSnapshot: () => PanelEngineSnapshot;
     subscribe: (listener: () => void) => () => void;
     open: (command: OpenPanelCommand<Reference>) => OpenPanelOutcome;
-    close: (instanceId: PanelInstanceId) => boolean;
+    activate: (command: { target: PanelInstanceRef }) => ActivatePanelOutcome;
+    collapse: (command: { target: PanelInstanceRef }) => CollapsePanelOutcome;
+    update: <Kind extends string, Input, Update>(command: {
+      definition: PanelDefinition<Kind, Input, Update>;
+      target: PanelInstanceRef;
+      update: NoInfer<Update>;
+    }) => UpdatePanelOutcome;
+    close: (command?: { target?: PanelInstanceRef }) => ClosePanelOutcome;
   }>;
 
 type PanelDefinitionShape = Readonly<{
   role: "panel";
   kind: string;
   deduplication: PanelDeduplication;
+  closable: boolean;
   key?: (input: never) => string;
   title: (input: never) => string;
   reference: (input: never) => PanelReference<string, unknown>;
+  update?: Readonly<{
+    validate: (update: unknown) => boolean;
+    validateResult: (value: unknown) => boolean;
+    apply: (current: never, update: never) => unknown;
+    navigation: "replace" | "none";
+  }>;
 }>;
 
 type ReferenceOf<Definition> =
@@ -209,10 +352,17 @@ export function defineRootPanel<const Kind extends string>(options: {
   });
 }
 
-export function definePanel<const Kind extends string, Input>(
+export function definePanel<const Kind extends string, Input, Update = never>(
   options: {
     kind: Kind;
     title: (input: DeepReadonly<Input>) => string;
+    closable?: boolean;
+    update?: Readonly<{
+      validate: (value: unknown) => value is Update;
+      validateResult: (value: unknown) => value is Input;
+      apply: (current: DeepReadonly<Input>, update: Update) => Input;
+      navigation: "replace" | "none";
+    }>;
   } & (
     | {
         deduplication: "reuse" | "replace";
@@ -223,13 +373,24 @@ export function definePanel<const Kind extends string, Input>(
         key?: (input: DeepReadonly<Input>) => string;
       }
   ),
-): PanelDefinition<Kind, Input> {
+): PanelDefinition<Kind, Input, Update> {
+  const updatePolicy =
+    options.update === undefined
+      ? undefined
+      : Object.freeze({
+          validate: options.update.validate,
+          validateResult: options.update.validateResult,
+          apply: options.update.apply,
+          navigation: options.update.navigation,
+        });
   const definition = Object.freeze({
     role: "panel",
     kind: options.kind,
     deduplication: options.deduplication ?? "allow-many",
+    closable: options.closable ?? true,
     ...(options.key === undefined ? {} : { key: options.key }),
     title: options.title,
+    ...(updatePolicy === undefined ? {} : { update: updatePolicy }),
     reference: (input: Input) => {
       const immutableInput = cloneAndFreezePanelInput(input);
       const panelKey = options.key?.(immutableInput) as PanelKey | undefined;
@@ -259,19 +420,30 @@ export function createPanelEngine<
   onSubscriberError?: (error: AggregateError) => void;
 }): PanelEngine<ReferenceOf<Definitions[number]>> {
   const engineNumber = nextEngineNumber++;
+  const workspaceId = `canvas-workspace-${engineNumber}` as WorkspaceId;
   let nextInstanceNumber = 1;
   const nextInstanceId = () =>
     `canvas-panel-${engineNumber}-${nextInstanceNumber++}` as PanelInstanceId;
   const instanceId = nextInstanceId();
+  const rootInstanceRef = Object.freeze({
+    workspaceId,
+    instanceId,
+    kind: options.root.kind,
+  });
   const rootPanel = Object.freeze({
     instanceId,
+    instanceRef: rootInstanceRef,
     kind: options.root.kind,
     title: options.root.title,
     isRoot: true,
+    closable: false,
     reference: options.root.reference,
   });
   const issuedPanelIds = new Set<PanelInstanceId>([instanceId]);
+  const issuedInstanceRefs = new WeakSet<object>([rootInstanceRef]);
   let snapshot = Object.freeze({
+    workspaceId,
+    version: 0 as StackVersion,
     panels: Object.freeze([rootPanel]),
     activePanelId: instanceId,
     deepestPanelId: instanceId,
@@ -289,9 +461,19 @@ export function createPanelEngine<
     options.panels.map((definition) => [
       definition.kind,
       {
+        closable: definition.closable,
         deduplication: definition.deduplication,
         identity: definition,
+        reference: definition.reference as (input: unknown) => PanelReference,
         title: definition.title as (input: unknown) => string,
+        update: definition.update as
+          | Readonly<{
+              validate: (update: unknown) => boolean;
+              validateResult: (value: unknown) => boolean;
+              apply: (current: unknown, update: unknown) => unknown;
+              navigation: "replace" | "none";
+            }>
+          | undefined,
       },
     ]),
   );
@@ -309,6 +491,8 @@ export function createPanelEngine<
     }
 
     snapshot = Object.freeze({
+      workspaceId,
+      version: (snapshot.version + 1) as StackVersion,
       panels: Object.freeze(panels),
       activePanelId,
       deepestPanelId: deepestPanel.instanceId,
@@ -386,10 +570,20 @@ export function createPanelEngine<
           matchingIndex < originIndex
             ? snapshot.panels
             : snapshot.panels.slice(0, matchingIndex + 1);
+        const removedPanels = snapshot.panels.slice(reusedPanels.length);
+        const blockingPanel = removedPanels.find(
+          (candidate) => !candidate.closable,
+        );
+        if (blockingPanel) {
+          return Object.freeze({
+            status: "rejected",
+            reason: "not-closable",
+            originId,
+            panelId: blockingPanel.instanceId,
+          });
+        }
         const removedPanelIds = Object.freeze(
-          snapshot.panels
-            .slice(reusedPanels.length)
-            .map(({ instanceId: removedPanelId }) => removedPanelId),
+          removedPanels.map(({ instanceId: removedPanelId }) => removedPanelId),
         );
         if (
           removedPanelIds.length > 0 ||
@@ -423,17 +617,35 @@ export function createPanelEngine<
         });
       }
 
+      const removedPanels = snapshot.panels.slice(originIndex + 1);
+      const blockingPanel = removedPanels.find(
+        (candidate) => !candidate.closable,
+      );
+      if (blockingPanel) {
+        return Object.freeze({
+          status: "rejected",
+          reason: "not-closable",
+          originId,
+          panelId: blockingPanel.instanceId,
+        });
+      }
       const childId = nextInstanceId();
       issuedPanelIds.add(childId);
       const child = Object.freeze({
         instanceId: childId,
+        instanceRef: Object.freeze({
+          workspaceId,
+          instanceId: childId,
+          kind: panel.kind,
+        }),
         kind: panel.kind,
         title: definition.title(panel.input),
         isRoot: false,
+        closable: definition.closable,
         ...(panel.panelKey === undefined ? {} : { panelKey: panel.panelKey }),
         reference: panel,
       });
-      const removedPanels = snapshot.panels.slice(originIndex + 1);
+      issuedInstanceRefs.add(child.instanceRef);
       const removedPanelIds = Object.freeze(
         removedPanels.map(({ instanceId: removedPanelId }) => removedPanelId),
       );
@@ -455,14 +667,356 @@ export function createPanelEngine<
             removedPanelIds,
           });
     },
-    close: (panelId) => {
+    activate: ({ target }) => {
+      const panelId = target.instanceId;
+      if (target.workspaceId !== workspaceId) {
+        return Object.freeze({
+          status: "rejected",
+          command: "activate",
+          reason: "foreign-workspace",
+          panelId,
+        });
+      }
+      if (!issuedInstanceRefs.has(target)) {
+        return Object.freeze({
+          status: "rejected",
+          command: "activate",
+          reason: "invalid-panel-reference",
+          panelId,
+        });
+      }
+
+      const panel = snapshot.panels.find(
+        (candidate) => candidate.instanceId === panelId,
+      );
+      if (!panel) {
+        return Object.freeze({
+          status: "rejected",
+          command: "activate",
+          reason: issuedPanelIds.has(panelId) ? "stale-panel" : "invalid-panel",
+          panelId,
+        });
+      }
+      if (panel.kind !== target.kind) {
+        return Object.freeze({
+          status: "rejected",
+          command: "activate",
+          reason: "invalid-panel-reference",
+          panelId,
+        });
+      }
+      if (snapshot.activePanelId === panelId) {
+        return Object.freeze({
+          status: "unchanged",
+          command: "activate",
+          panelId,
+          navigationIntent: "none",
+        });
+      }
+
+      publish(snapshot.panels, panelId);
+      return Object.freeze({
+        status: "activated",
+        panelId,
+        navigationIntent: "replace",
+      });
+    },
+    update: ({ definition: requestedDefinition, target, update }) => {
+      const panelId = target.instanceId;
+      if (target.workspaceId !== workspaceId) {
+        return Object.freeze({
+          status: "rejected",
+          command: "update",
+          reason: "foreign-workspace",
+          panelId,
+        });
+      }
+      if (!issuedInstanceRefs.has(target)) {
+        return Object.freeze({
+          status: "rejected",
+          command: "update",
+          reason: "invalid-panel-reference",
+          panelId,
+        });
+      }
+
       const index = snapshot.panels.findIndex(
         (panel) => panel.instanceId === panelId,
       );
-      if (index <= 0) return false;
+      if (index < 0) {
+        return Object.freeze({
+          status: "rejected",
+          command: "update",
+          reason: issuedPanelIds.has(panelId) ? "stale-panel" : "invalid-panel",
+          panelId,
+        });
+      }
 
-      publish(snapshot.panels.slice(0, index));
-      return true;
+      const panel = snapshot.panels[index];
+      const definition = definitions.get(requestedDefinition.kind);
+      if (
+        !panel ||
+        panel.isRoot ||
+        panel.kind !== target.kind ||
+        panel.kind !== requestedDefinition.kind ||
+        !definition ||
+        definition.identity !== requestedDefinition
+      ) {
+        return Object.freeze({
+          status: "rejected",
+          command: "update",
+          reason: "invalid-panel-reference",
+          panelId,
+        });
+      }
+      if (!definition.update) {
+        return Object.freeze({
+          status: "rejected",
+          command: "update",
+          reason: "not-updatable",
+          panelId,
+        });
+      }
+      let validUpdate = false;
+      try {
+        validUpdate = definition.update.validate(update);
+      } catch {
+        // Validation failures reject the proposed update without publication.
+      }
+      if (!validUpdate) {
+        return Object.freeze({
+          status: "rejected",
+          command: "update",
+          reason: "invalid-update",
+          panelId,
+        });
+      }
+
+      let nextInput: unknown;
+      try {
+        nextInput = definition.update.apply(panel.reference.input, update);
+      } catch {
+        return Object.freeze({
+          status: "rejected",
+          command: "update",
+          reason: "invalid-update",
+          panelId,
+        });
+      }
+      let validResult = false;
+      try {
+        validResult = definition.update.validateResult(nextInput);
+      } catch {
+        // Result validation failures reject without publication.
+      }
+      if (!validResult) {
+        return Object.freeze({
+          status: "rejected",
+          command: "update",
+          reason: "invalid-update",
+          panelId,
+        });
+      }
+      if (Object.is(nextInput, panel.reference.input)) {
+        return Object.freeze({
+          status: "unchanged",
+          command: "update",
+          panelId,
+          navigationIntent: "none",
+        });
+      }
+
+      let nextReference: PanelReference;
+      let nextTitle: string;
+      try {
+        nextReference = definition.reference(nextInput);
+        nextTitle = definition.title(nextReference.input);
+      } catch {
+        return Object.freeze({
+          status: "rejected",
+          command: "update",
+          reason: "invalid-update",
+          panelId,
+        });
+      }
+      if (nextReference.panelKey !== panel.panelKey) {
+        return Object.freeze({
+          status: "rejected",
+          command: "update",
+          reason: "identity-change",
+          panelId,
+        });
+      }
+
+      const nextPanel = Object.freeze({
+        ...panel,
+        title: nextTitle,
+        reference: nextReference,
+      });
+      publish(
+        [
+          ...snapshot.panels.slice(0, index),
+          nextPanel,
+          ...snapshot.panels.slice(index + 1),
+        ],
+        snapshot.activePanelId,
+      );
+      return Object.freeze({
+        status: "updated",
+        panelId,
+        navigationIntent: definition.update.navigation,
+      });
+    },
+    collapse: ({ target }) => {
+      const panelId = target.instanceId;
+      if (target.workspaceId !== workspaceId) {
+        return Object.freeze({
+          status: "rejected",
+          command: "collapse",
+          reason: "foreign-workspace",
+          panelId,
+        });
+      }
+      if (!issuedInstanceRefs.has(target)) {
+        return Object.freeze({
+          status: "rejected",
+          command: "collapse",
+          reason: "invalid-panel-reference",
+          panelId,
+        });
+      }
+
+      const index = snapshot.panels.findIndex(
+        (panel) => panel.instanceId === panelId,
+      );
+      if (index < 0) {
+        return Object.freeze({
+          status: "rejected",
+          command: "collapse",
+          reason: issuedPanelIds.has(panelId) ? "stale-panel" : "invalid-panel",
+          panelId,
+        });
+      }
+      if (snapshot.panels[index]?.kind !== target.kind) {
+        return Object.freeze({
+          status: "rejected",
+          command: "collapse",
+          reason: "invalid-panel-reference",
+          panelId,
+        });
+      }
+      if (index === snapshot.panels.length - 1) {
+        return Object.freeze({
+          status: "unchanged",
+          command: "collapse",
+          panelId,
+          navigationIntent: "none",
+        });
+      }
+
+      const removedPanels = snapshot.panels.slice(index + 1);
+      const blockingPanel = removedPanels.find(
+        (candidate) => !candidate.closable,
+      );
+      if (blockingPanel) {
+        return Object.freeze({
+          status: "rejected",
+          command: "collapse",
+          reason: "not-closable",
+          panelId: blockingPanel.instanceId,
+        });
+      }
+      const removedPanelIds = Object.freeze(
+        removedPanels.map(({ instanceId: removedPanelId }) => removedPanelId),
+      );
+      publish(snapshot.panels.slice(0, index + 1), panelId);
+      return Object.freeze({
+        status: "collapsed",
+        panelId,
+        removedPanelIds,
+        navigationIntent: "push",
+      });
+    },
+    close: ({ target } = {}) => {
+      const effectiveTarget =
+        target ??
+        snapshot.panels.find(
+          (panel) => panel.instanceId === snapshot.activePanelId,
+        )?.instanceRef;
+      if (!effectiveTarget) throw new Error("Active Panel disappeared");
+      const panelId = effectiveTarget.instanceId;
+      if (effectiveTarget.workspaceId !== workspaceId) {
+        return Object.freeze({
+          status: "rejected",
+          command: "close",
+          reason: "foreign-workspace",
+          panelId,
+        });
+      }
+      if (!issuedInstanceRefs.has(effectiveTarget)) {
+        return Object.freeze({
+          status: "rejected",
+          command: "close",
+          reason: "invalid-panel-reference",
+          panelId,
+        });
+      }
+
+      const index = snapshot.panels.findIndex(
+        (panel) => panel.instanceId === panelId,
+      );
+      if (index < 0) {
+        return Object.freeze({
+          status: "rejected",
+          command: "close",
+          reason: issuedPanelIds.has(panelId) ? "stale-panel" : "invalid-panel",
+          panelId,
+        });
+      }
+      const panel = snapshot.panels[index];
+      if (panel && panel.kind !== effectiveTarget.kind) {
+        return Object.freeze({
+          status: "rejected",
+          command: "close",
+          reason: "invalid-panel-reference",
+          panelId,
+        });
+      }
+      if (!panel || panel.isRoot) {
+        return Object.freeze({
+          status: "rejected",
+          command: "close",
+          reason: "root-panel",
+          panelId,
+        });
+      }
+      const removedPanels = snapshot.panels.slice(index);
+      const blockingPanel = removedPanels.find(
+        (candidate) => !candidate.closable,
+      );
+      if (blockingPanel) {
+        return Object.freeze({
+          status: "rejected",
+          command: "close",
+          reason: "not-closable",
+          panelId: blockingPanel.instanceId,
+        });
+      }
+
+      const retainedPanels = snapshot.panels.slice(0, index);
+      const activePanel = retainedPanels.at(-1);
+      if (!activePanel) throw new Error("Closing a Panel must retain Root");
+      const removedPanelIds = Object.freeze(
+        removedPanels.map(({ instanceId: removedPanelId }) => removedPanelId),
+      );
+      publish(retainedPanels, activePanel.instanceId);
+      return Object.freeze({
+        status: "closed",
+        panelId,
+        removedPanelIds,
+        activePanelId: activePanel.instanceId,
+        navigationIntent: "push",
+      });
     },
   });
 }
