@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { fireEvent, render } from "@testing-library/react";
+import { act, fireEvent, render } from "@testing-library/react";
 import { JSDOM } from "jsdom";
 import { createElement } from "react";
 
@@ -183,25 +183,45 @@ test("multiple Canvas Workspaces use unique heading relationships", () => {
   result.unmount();
 });
 
-test("nested Bound Canvas Modules retain their own engines", () => {
+test("nested Bound Canvas Modules isolate commands, identities, subscriptions, Active state, and versions", () => {
+  const classPanel = definePanel({
+    kind: "class",
+    title: ({ name }) => name,
+  });
+  const reportPanel = definePanel({
+    kind: "report",
+    title: ({ name }) => name,
+  });
   const ClassesCanvas = createCanvasModule({
     root: defineRootPanel({ kind: "classes", title: "Classes" }),
-    panels: [],
-    renderers: { classes: () => createElement("p", null, "Class list") },
+    panels: [classPanel],
+    renderers: {
+      classes: () => createElement("p", null, "Class list"),
+      class: ({ panel }) => createElement("p", null, panel.title),
+    },
   });
   const ReportsCanvas = createCanvasModule({
     root: defineRootPanel({ kind: "reports", title: "Reports" }),
-    panels: [],
-    renderers: { reports: () => createElement("p", null, "Report list") },
+    panels: [reportPanel],
+    renderers: {
+      reports: () => createElement("p", null, "Report list"),
+      report: ({ panel }) => createElement("p", null, panel.title),
+    },
   });
+  const classesEngine = ClassesCanvas.createEngine();
+  const reportsEngine = ReportsCanvas.createEngine();
+  let classNotifications = 0;
+  let reportNotifications = 0;
+  classesEngine.subscribe(() => classNotifications++);
+  reportsEngine.subscribe(() => reportNotifications++);
 
   const result = render(
     createElement(
       ClassesCanvas.Provider,
-      null,
+      { engine: classesEngine },
       createElement(
         ReportsCanvas.Provider,
-        null,
+        { engine: reportsEngine },
         createElement(ReportsCanvas.Workspace, { label: "Report records" }),
         createElement(ClassesCanvas.Workspace, { label: "Class records" }),
       ),
@@ -210,5 +230,125 @@ test("nested Bound Canvas Modules retain their own engines", () => {
 
   assert.ok(result.getByRole("region", { name: "Classes" }));
   assert.ok(result.getByRole("region", { name: "Reports" }));
+  let openedClass;
+  act(() => {
+    openedClass = classesEngine.open({
+      panel: classPanel.reference({ name: "Class A" }),
+    });
+  });
+  assert.equal(openedClass.status, "opened");
+  assert.equal(classesEngine.getSnapshot().version, 1);
+  assert.equal(reportsEngine.getSnapshot().version, 0);
+  assert.equal(classNotifications, 1);
+  assert.equal(reportNotifications, 0);
+  assert.ok(result.getByRole("region", { name: "Class A" }));
+
+  let openedReport;
+  act(() => {
+    openedReport = reportsEngine.open({
+      panel: reportPanel.reference({ name: "Report A" }),
+    });
+  });
+  assert.equal(openedReport.status, "opened");
+  assert.notEqual(openedClass.instanceId, openedReport.instanceId);
+  assert.equal(classesEngine.getSnapshot().version, 1);
+  assert.equal(reportsEngine.getSnapshot().version, 1);
+  assert.equal(classNotifications, 1);
+  assert.equal(reportNotifications, 1);
+  assert.ok(result.getByRole("region", { name: "Report A" }));
+
+  const parentBeforeForeignCommand = classesEngine.getSnapshot();
+  assert.deepEqual(
+    classesEngine.close({
+      target: reportsEngine.getSnapshot().panels[1].instanceRef,
+    }),
+    {
+      status: "rejected",
+      command: "close",
+      reason: "foreign-workspace",
+      panelId: openedReport.instanceId,
+    },
+  );
+  assert.equal(classesEngine.getSnapshot(), parentBeforeForeignCommand);
+  assert.equal(classNotifications, 1);
+  assert.equal(
+    reportsEngine.getSnapshot().activePanelId,
+    openedReport.instanceId,
+  );
+  result.unmount();
+});
+
+test("nested Providers from one Bound Canvas route commands to their owning Workspace", () => {
+  const classPanel = definePanel({
+    kind: "class",
+    title: ({ name }) => name,
+  });
+  const Canvas = createCanvasModule({
+    root: defineRootPanel({ kind: "classes", title: "Classes" }),
+    panels: [classPanel],
+    renderers: {
+      classes: () => createElement("p", null, "Class list"),
+      class: ({ panel }) => createElement("p", null, panel.title),
+    },
+  });
+  const parentEngine = Canvas.createEngine();
+  const nestedEngine = Canvas.createEngine();
+  let parentNotifications = 0;
+  let nestedNotifications = 0;
+  parentEngine.subscribe(() => parentNotifications++);
+  nestedEngine.subscribe(() => nestedNotifications++);
+
+  const result = render(
+    createElement(
+      Canvas.Provider,
+      { engine: parentEngine },
+      createElement(Canvas.Workspace, { label: "Parent classes" }),
+      createElement(
+        Canvas.Provider,
+        { engine: nestedEngine },
+        createElement(Canvas.Workspace, { label: "Nested classes" }),
+      ),
+    ),
+  );
+  let parentOpen;
+  let nestedOpen;
+  act(() => {
+    parentOpen = parentEngine.open({
+      panel: classPanel.reference({ name: "Parent Class" }),
+    });
+    nestedOpen = nestedEngine.open({
+      panel: classPanel.reference({ name: "Nested Class" }),
+    });
+  });
+  if (parentOpen.status !== "opened" || nestedOpen.status !== "opened") {
+    throw new Error("Expected isolated classes to open");
+  }
+
+  assert.notEqual(
+    parentEngine.getSnapshot().workspaceId,
+    nestedEngine.getSnapshot().workspaceId,
+  );
+  assert.equal(parentEngine.getSnapshot().version, 1);
+  assert.equal(nestedEngine.getSnapshot().version, 1);
+  assert.equal(parentNotifications, 1);
+  assert.equal(nestedNotifications, 1);
+  assert.ok(result.getByRole("region", { name: "Parent Class" }));
+  assert.ok(result.getByRole("region", { name: "Nested Class" }));
+
+  const parentBeforeForeign = parentEngine.getSnapshot();
+  assert.deepEqual(
+    parentEngine.collapse({
+      target: nestedEngine.getSnapshot().panels[1].instanceRef,
+    }),
+    {
+      status: "rejected",
+      command: "collapse",
+      reason: "foreign-workspace",
+      panelId: nestedOpen.instanceId,
+    },
+  );
+  assert.equal(parentEngine.getSnapshot(), parentBeforeForeign);
+  assert.equal(parentNotifications, 1);
+  assert.equal(nestedNotifications, 1);
   result.unmount();
 });

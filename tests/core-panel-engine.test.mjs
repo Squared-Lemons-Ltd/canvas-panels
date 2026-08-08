@@ -7,6 +7,14 @@ import {
   defineRootPanel,
 } from "../packages/canvas-panels/dist/core/index.js";
 
+function targetFor(engine, panelId) {
+  const panel = engine
+    .getSnapshot()
+    .panels.find((candidate) => candidate.instanceId === panelId);
+  if (!panel) throw new Error(`Missing command target: ${panelId}`);
+  return panel.instanceRef;
+}
+
 test("the engine starts with one permanent host-defined Root Panel", () => {
   const root = defineRootPanel({ kind: "classes", title: "Classes" });
   const student = definePanel({
@@ -28,12 +36,16 @@ test("the engine starts with one permanent host-defined Root Panel", () => {
   assert.match(rootId, /^canvas-panel-\d+-1$/);
   assert.deepEqual(snapshot.panels[0], {
     instanceId: rootId,
+    instanceRef: snapshot.panels[0].instanceRef,
     kind: "classes",
     title: "Classes",
     isRoot: true,
+    closable: false,
     reference: root.reference,
   });
   assert.equal(snapshot.activePanelId, snapshot.panels[0].instanceId);
+  assert.match(snapshot.workspaceId, /^canvas-workspace-\d+$/);
+  assert.equal(snapshot.version, 0);
   assert.equal(studentReference.kind, "student");
   assert.deepEqual(studentReference.input, {
     name: "Ada Lovelace",
@@ -228,9 +240,11 @@ test("open and close publish immutable snapshots while preserving Root", () => {
   assert.equal(openedSnapshot.panels.length, 2);
   assert.deepEqual(openedSnapshot.panels[1], {
     instanceId: childId,
+    instanceRef: openedSnapshot.panels[1].instanceRef,
     kind: "student",
     title: "Ada Lovelace",
     isRoot: false,
+    closable: true,
     reference: student.reference({ name: "Ada Lovelace" }),
   });
   assert.equal(openedSnapshot.activePanelId, childId);
@@ -238,7 +252,18 @@ test("open and close publish immutable snapshots while preserving Root", () => {
   assert.ok(Object.isFrozen(openedSnapshot.panels));
   assert.equal(notifications.length, 1);
 
-  assert.equal(engine.close(childId), true);
+  assert.deepEqual(
+    engine.close({
+      target: targetFor(engine, childId),
+    }),
+    {
+      status: "closed",
+      panelId: childId,
+      removedPanelIds: [childId],
+      activePanelId: initialSnapshot.panels[0].instanceId,
+      navigationIntent: "push",
+    },
+  );
   const closedSnapshot = engine.getSnapshot();
   assert.equal(closedSnapshot.panels.length, 1);
   assert.equal(
@@ -251,7 +276,17 @@ test("open and close publish immutable snapshots while preserving Root", () => {
   );
   assert.equal(notifications.length, 2);
 
-  assert.equal(engine.close(initialSnapshot.panels[0].instanceId), false);
+  assert.deepEqual(
+    engine.close({
+      target: targetFor(engine, initialSnapshot.panels[0].instanceId),
+    }),
+    {
+      status: "rejected",
+      command: "close",
+      reason: "root-panel",
+      panelId: initialSnapshot.panels[0].instanceId,
+    },
+  );
   assert.equal(engine.getSnapshot(), closedSnapshot);
   assert.equal(notifications.length, 2);
 
@@ -562,4 +597,525 @@ test("replace rejects a matching semantic identity at or before its Origin", () 
     },
   );
   assert.equal(engine.getSnapshot(), beforeRejection);
+});
+
+test("a Panel update policy validates typed updates and commits complete descriptors atomically", () => {
+  const root = defineRootPanel({ kind: "classes", title: "Classes" });
+  const classPanel = definePanel({
+    kind: "class",
+    title: ({ name }) => name,
+    update: {
+      validate: (update) =>
+        typeof update === "object" &&
+        update !== null &&
+        "type" in update &&
+        (update.type === "rename" || update.type === "noop") &&
+        (update.type !== "rename" ||
+          ("name" in update && typeof update.name === "string")),
+      validateResult: (value) =>
+        typeof value === "object" &&
+        value !== null &&
+        "classId" in value &&
+        typeof value.classId === "string" &&
+        "name" in value &&
+        typeof value.name === "string",
+      apply: (current, update) =>
+        update.type === "noop" ? current : { ...current, name: update.name },
+      navigation: "replace",
+    },
+  });
+  const engine = createPanelEngine({ root, panels: [classPanel] });
+  const opened = engine.open({
+    panel: classPanel.reference({ classId: "class-a", name: "Class A" }),
+  });
+  assert.equal(opened.status, "opened");
+  if (opened.status !== "opened") throw new Error("Expected opened Class");
+
+  assert.deepEqual(
+    engine.update({
+      definition: classPanel,
+      target: targetFor(engine, opened.instanceId),
+      update: { type: "rename", name: "Class Alpha" },
+    }),
+    {
+      status: "updated",
+      panelId: opened.instanceId,
+      navigationIntent: "replace",
+    },
+  );
+  const updatedSnapshot = engine.getSnapshot();
+  assert.equal(updatedSnapshot.version, 2);
+  assert.equal(updatedSnapshot.panels[1].title, "Class Alpha");
+  assert.deepEqual(updatedSnapshot.panels[1].reference.input, {
+    classId: "class-a",
+    name: "Class Alpha",
+  });
+  assert.equal(updatedSnapshot.panels[1].instanceId, opened.instanceId);
+
+  assert.deepEqual(
+    engine.update({
+      definition: classPanel,
+      target: targetFor(engine, opened.instanceId),
+      update: { type: "noop" },
+    }),
+    {
+      status: "unchanged",
+      command: "update",
+      panelId: opened.instanceId,
+      navigationIntent: "none",
+    },
+  );
+  assert.equal(engine.getSnapshot(), updatedSnapshot);
+
+  assert.deepEqual(
+    engine.update({
+      definition: classPanel,
+      target: targetFor(engine, opened.instanceId),
+      update: { name: "arbitrary shallow merge" },
+    }),
+    {
+      status: "rejected",
+      command: "update",
+      reason: "invalid-update",
+      panelId: opened.instanceId,
+    },
+  );
+  assert.equal(engine.getSnapshot(), updatedSnapshot);
+
+  const foreignClassPanel = definePanel({
+    kind: "class",
+    title: ({ name }) => name,
+  });
+  assert.deepEqual(
+    engine.update({
+      definition: foreignClassPanel,
+      target: targetFor(engine, opened.instanceId),
+      update: { type: "noop" },
+    }),
+    {
+      status: "rejected",
+      command: "update",
+      reason: "invalid-panel-reference",
+      panelId: opened.instanceId,
+    },
+  );
+  assert.equal(engine.getSnapshot(), updatedSnapshot);
+});
+
+test("Panel definitions capture immutable update policies at registration", () => {
+  const policy = {
+    validate: (update) => update?.type === "rename",
+    validateResult: (value) => typeof value?.name === "string",
+    apply: (current, update) => ({ ...current, name: update.name }),
+    navigation: "replace",
+  };
+  const root = defineRootPanel({ kind: "root", title: "Root" });
+  const record = definePanel({
+    kind: "record",
+    title: ({ name }) => name,
+    update: policy,
+  });
+  assert.ok(Object.isFrozen(record.update));
+  assert.notEqual(record.update, policy);
+  policy.apply = () => ({ name: "Mutated policy" });
+
+  const engine = createPanelEngine({ root, panels: [record] });
+  const opened = engine.open({ panel: record.reference({ name: "Original" }) });
+  if (opened.status !== "opened") throw new Error("Expected opened Record");
+  assert.deepEqual(
+    engine.update({
+      definition: record,
+      target: targetFor(engine, opened.instanceId),
+      update: { type: "rename", name: "Updated" },
+    }),
+    {
+      status: "updated",
+      panelId: opened.instanceId,
+      navigationIntent: "replace",
+    },
+  );
+  assert.equal(engine.getSnapshot().panels[1].title, "Updated");
+});
+
+test("activate changes Active without collapsing Deepest and reports no-op activation", () => {
+  const root = defineRootPanel({ kind: "classes", title: "Classes" });
+  const classPanel = definePanel({
+    kind: "class",
+    title: ({ name }) => name,
+  });
+  const learner = definePanel({
+    kind: "learner",
+    title: ({ name }) => name,
+  });
+  const engine = createPanelEngine({ root, panels: [classPanel, learner] });
+  const openedClass = engine.open({
+    panel: classPanel.reference({ name: "Class A" }),
+  });
+  const openedLearner = engine.open({
+    panel: learner.reference({ name: "Learner A" }),
+  });
+  assert.equal(openedClass.status, "opened");
+  assert.equal(openedLearner.status, "opened");
+  if (openedClass.status !== "opened" || openedLearner.status !== "opened") {
+    throw new Error("Expected open outcomes");
+  }
+
+  assert.deepEqual(
+    engine.activate({
+      target: targetFor(engine, openedClass.instanceId),
+    }),
+    {
+      status: "activated",
+      panelId: openedClass.instanceId,
+      navigationIntent: "replace",
+    },
+  );
+  const activated = engine.getSnapshot();
+  assert.equal(activated.version, 3);
+  assert.equal(activated.activePanelId, openedClass.instanceId);
+  assert.equal(activated.deepestPanelId, openedLearner.instanceId);
+
+  assert.deepEqual(
+    engine.activate({
+      target: targetFor(engine, openedClass.instanceId),
+    }),
+    {
+      status: "unchanged",
+      command: "activate",
+      panelId: openedClass.instanceId,
+      navigationIntent: "none",
+    },
+  );
+  assert.equal(engine.getSnapshot(), activated);
+});
+
+test("collapse retains its target, removes descendants, and rejects stale targets atomically", () => {
+  const root = defineRootPanel({ kind: "classes", title: "Classes" });
+  const classPanel = definePanel({
+    kind: "class",
+    title: ({ name }) => name,
+  });
+  const learner = definePanel({
+    kind: "learner",
+    title: ({ name }) => name,
+  });
+  const engine = createPanelEngine({ root, panels: [classPanel, learner] });
+  const openedClass = engine.open({
+    panel: classPanel.reference({ name: "Class A" }),
+  });
+  const openedLearner = engine.open({
+    panel: learner.reference({ name: "Learner A" }),
+  });
+  if (openedClass.status !== "opened" || openedLearner.status !== "opened") {
+    throw new Error("Expected open outcomes");
+  }
+
+  const beforeNoop = engine.getSnapshot();
+  const learnerTarget = targetFor(engine, openedLearner.instanceId);
+  assert.deepEqual(
+    engine.collapse({
+      target: learnerTarget,
+    }),
+    {
+      status: "unchanged",
+      command: "collapse",
+      panelId: openedLearner.instanceId,
+      navigationIntent: "none",
+    },
+  );
+  assert.equal(engine.getSnapshot(), beforeNoop);
+
+  assert.deepEqual(
+    engine.collapse({
+      target: targetFor(engine, openedClass.instanceId),
+    }),
+    {
+      status: "collapsed",
+      panelId: openedClass.instanceId,
+      removedPanelIds: [openedLearner.instanceId],
+      navigationIntent: "push",
+    },
+  );
+  const collapsed = engine.getSnapshot();
+  assert.equal(collapsed.version, 3);
+  assert.equal(collapsed.activePanelId, openedClass.instanceId);
+  assert.equal(collapsed.deepestPanelId, openedClass.instanceId);
+
+  assert.deepEqual(
+    engine.collapse({
+      target: learnerTarget,
+    }),
+    {
+      status: "rejected",
+      command: "collapse",
+      reason: "stale-panel",
+      panelId: openedLearner.instanceId,
+    },
+  );
+  assert.equal(engine.getSnapshot(), collapsed);
+});
+
+test("close removes a dependent suffix while enforcing Root and definition closability", () => {
+  const root = defineRootPanel({ kind: "classes", title: "Classes" });
+  const pinned = definePanel({
+    kind: "pinned",
+    closable: false,
+    title: ({ name }) => name,
+  });
+  const details = definePanel({
+    kind: "details",
+    title: ({ name }) => name,
+  });
+  const engine = createPanelEngine({ root, panels: [pinned, details] });
+  const openedPinned = engine.open({
+    panel: pinned.reference({ name: "Pinned" }),
+  });
+  const openedDetails = engine.open({
+    panel: details.reference({ name: "Details" }),
+  });
+  if (openedPinned.status !== "opened" || openedDetails.status !== "opened") {
+    throw new Error("Expected open outcomes");
+  }
+  const beforeRejections = engine.getSnapshot();
+
+  assert.deepEqual(
+    engine.close({
+      target: beforeRejections.panels[0].instanceRef,
+    }),
+    {
+      status: "rejected",
+      command: "close",
+      reason: "root-panel",
+      panelId: beforeRejections.panels[0].instanceId,
+    },
+  );
+  assert.deepEqual(
+    engine.close({
+      target: targetFor(engine, openedPinned.instanceId),
+    }),
+    {
+      status: "rejected",
+      command: "close",
+      reason: "not-closable",
+      panelId: openedPinned.instanceId,
+    },
+  );
+  assert.equal(engine.getSnapshot(), beforeRejections);
+
+  assert.deepEqual(engine.close(), {
+    status: "closed",
+    panelId: openedDetails.instanceId,
+    removedPanelIds: [openedDetails.instanceId],
+    activePanelId: openedPinned.instanceId,
+    navigationIntent: "push",
+  });
+  assert.equal(engine.getSnapshot().version, 3);
+  assert.equal(engine.getSnapshot().deepestPanelId, openedPinned.instanceId);
+});
+
+test("update failures reject without publishing partially validated descriptors", () => {
+  const root = defineRootPanel({ kind: "root", title: "Root" });
+  const editor = definePanel({
+    kind: "editor",
+    deduplication: "reuse",
+    key: ({ id }) => id,
+    title: ({ name }) => {
+      if (name === "invalid") throw new Error("invalid title input");
+      return name;
+    },
+    update: {
+      validate: (update) => {
+        if (update?.type === "validator-failure") {
+          throw new Error("validator failure");
+        }
+        return typeof update?.type === "string";
+      },
+      validateResult: (value) =>
+        typeof value === "object" &&
+        value !== null &&
+        "id" in value &&
+        typeof value.id === "string" &&
+        "name" in value &&
+        typeof value.name === "string",
+      apply: (current, update) =>
+        update.type === "change-identity"
+          ? { ...current, id: "changed" }
+          : { ...current, name: update.name },
+      navigation: "none",
+    },
+  });
+  const engine = createPanelEngine({ root, panels: [editor] });
+  const opened = engine.open({
+    panel: editor.reference({ id: "editor-a", name: "Editor A" }),
+  });
+  if (opened.status !== "opened") throw new Error("Expected opened Editor");
+  const beforeFailures = engine.getSnapshot();
+
+  for (const [update, reason] of [
+    [{ type: "validator-failure" }, "invalid-update"],
+    [{ type: "rename", name: "invalid" }, "invalid-update"],
+    [{ type: "invalid-result" }, "invalid-update"],
+    [{ type: "change-identity" }, "identity-change"],
+  ]) {
+    assert.deepEqual(
+      engine.update({
+        definition: editor,
+        target: targetFor(engine, opened.instanceId),
+        update,
+      }),
+      {
+        status: "rejected",
+        command: "update",
+        reason,
+        panelId: opened.instanceId,
+      },
+    );
+    assert.equal(engine.getSnapshot(), beforeFailures);
+  }
+});
+
+test("versioned commands isolate Workspaces and cannot remove non-closable descendants", () => {
+  const root = defineRootPanel({ kind: "root", title: "Root" });
+  const branch = definePanel({
+    kind: "branch",
+    deduplication: "reuse",
+    key: ({ id }) => id,
+    title: ({ name }) => name,
+  });
+  const pinned = definePanel({
+    kind: "pinned",
+    closable: false,
+    title: ({ name }) => name,
+  });
+  const leaf = definePanel({
+    kind: "leaf",
+    title: ({ name }) => name,
+  });
+  const engine = createPanelEngine({ root, panels: [branch, pinned, leaf] });
+  const openedBranch = engine.open({
+    panel: branch.reference({ id: "branch-a", name: "Branch A" }),
+  });
+  const openedPinned = engine.open({
+    panel: pinned.reference({ name: "Pinned" }),
+  });
+  const openedLeaf = engine.open({ panel: leaf.reference({ name: "Leaf" }) });
+  if (
+    openedBranch.status !== "opened" ||
+    openedPinned.status !== "opened" ||
+    openedLeaf.status !== "opened"
+  ) {
+    throw new Error("Expected branch fixture to open");
+  }
+  const branchTarget = targetFor(engine, openedBranch.instanceId);
+  const pinnedTarget = targetFor(engine, openedPinned.instanceId);
+  const beforeRejections = engine.getSnapshot();
+  let rejectionNotifications = 0;
+  const unsubscribe = engine.subscribe(() => rejectionNotifications++);
+
+  const forgedTarget = Object.freeze({ ...branchTarget });
+  assert.deepEqual(engine.activate({ target: forgedTarget }), {
+    status: "rejected",
+    command: "activate",
+    reason: "invalid-panel-reference",
+    panelId: openedBranch.instanceId,
+  });
+  assert.deepEqual(
+    engine.update({
+      definition: branch,
+      target: forgedTarget,
+      update: {},
+    }),
+    {
+      status: "rejected",
+      command: "update",
+      reason: "invalid-panel-reference",
+      panelId: openedBranch.instanceId,
+    },
+  );
+  assert.deepEqual(engine.collapse({ target: forgedTarget }), {
+    status: "rejected",
+    command: "collapse",
+    reason: "invalid-panel-reference",
+    panelId: openedBranch.instanceId,
+  });
+  assert.deepEqual(engine.close({ target: forgedTarget }), {
+    status: "rejected",
+    command: "close",
+    reason: "invalid-panel-reference",
+    panelId: openedBranch.instanceId,
+  });
+  assert.deepEqual(
+    engine.activate({
+      target: { ...branchTarget, kind: "forged-kind" },
+    }),
+    {
+      status: "rejected",
+      command: "activate",
+      reason: "invalid-panel-reference",
+      panelId: openedBranch.instanceId,
+    },
+  );
+  assert.deepEqual(
+    engine.close({
+      target: branchTarget,
+    }),
+    {
+      status: "rejected",
+      command: "close",
+      reason: "not-closable",
+      panelId: openedPinned.instanceId,
+    },
+  );
+  assert.deepEqual(
+    engine.collapse({
+      target: branchTarget,
+    }),
+    {
+      status: "rejected",
+      command: "collapse",
+      reason: "not-closable",
+      panelId: openedPinned.instanceId,
+    },
+  );
+  assert.deepEqual(
+    engine.open({
+      originId: openedBranch.instanceId,
+      panel: leaf.reference({ name: "Replacement" }),
+    }),
+    {
+      status: "rejected",
+      reason: "not-closable",
+      originId: openedBranch.instanceId,
+      panelId: openedPinned.instanceId,
+    },
+  );
+  assert.deepEqual(
+    engine.open({
+      originId: beforeRejections.panels[0].instanceId,
+      panel: branch.reference({ id: "branch-a", name: "Branch A" }),
+    }),
+    {
+      status: "rejected",
+      reason: "not-closable",
+      originId: beforeRejections.panels[0].instanceId,
+      panelId: openedPinned.instanceId,
+    },
+  );
+  assert.equal(engine.getSnapshot(), beforeRejections);
+  assert.equal(rejectionNotifications, 0);
+  unsubscribe();
+
+  const foreign = createPanelEngine({ root, panels: [branch, pinned, leaf] });
+  assert.deepEqual(
+    foreign.close({
+      target: pinnedTarget,
+    }),
+    {
+      status: "rejected",
+      command: "close",
+      reason: "foreign-workspace",
+      panelId: openedPinned.instanceId,
+    },
+  );
+  assert.equal(foreign.getSnapshot().version, 0);
 });

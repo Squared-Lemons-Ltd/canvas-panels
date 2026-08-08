@@ -1,9 +1,10 @@
 "use client";
 
 import type {
+  ClosePanelOutcome,
   PanelEngine,
   PanelEngineSnapshot,
-  PanelInstanceId,
+  PanelInstanceRef,
   PanelReference,
 } from "../core/index.js";
 import {
@@ -22,7 +23,7 @@ export type CanvasProviderProps<Reference extends PanelReference> = Readonly<{
 export type CanvasBinding<Reference extends PanelReference> = Readonly<{
   snapshot: PanelEngineSnapshot;
   open: PanelEngine<Reference>["open"];
-  close: (instanceId: PanelInstanceId) => boolean;
+  close: (target?: PanelInstanceRef) => ClosePanelOutcome;
 }>;
 
 export type CanvasBindings<Reference extends PanelReference> = Readonly<{
@@ -63,7 +64,7 @@ export function createCanvasBindings<
     return Object.freeze({
       snapshot,
       open: engine.open,
-      close: engine.close,
+      close: (target) => engine.close(target ? { target } : undefined),
     });
   }
 
