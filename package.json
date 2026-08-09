@@ -7,6 +7,7 @@
   },
   "scripts": {
     "build": "pnpm --filter @squaredlemons/canvas-panels build && pnpm --filter './apps/**' build",
+    "showcase:dev": "pnpm --filter @squaredlemons/canvas-panels build && pnpm --filter @canvas-panels/react-fixture exec vite",
     "format:check": "biome format .",
     "lint": "biome lint . && node scripts/check-boundaries.mjs",
     "test": "pnpm --filter @squaredlemons/canvas-panels build && node --test tests/core-panel-engine.test.mjs tests/dependency-boundaries.test.mjs tests/package-contract.test.mjs tests/react-canvas.test.mjs",
