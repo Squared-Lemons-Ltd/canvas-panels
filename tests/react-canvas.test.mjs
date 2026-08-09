@@ -352,3 +352,91 @@ test("nested Providers from one Bound Canvas route commands to their owning Work
   assert.equal(nestedNotifications, 1);
   result.unmount();
 });
+
+test("the guarded transition dialog keeps dirty work on Stay and saves before close", async () => {
+  const root = defineRootPanel({ kind: "root", title: "Documents" });
+  const editor = definePanel({ kind: "editor", title: ({ name }) => name });
+  const saves = [];
+  const Canvas = createCanvasModule({
+    root,
+    panels: [editor],
+    renderers: {
+      root: ({ open, panel }) =>
+        createElement(
+          "button",
+          {
+            type: "button",
+            onClick: () =>
+              open({
+                originId: panel.instanceId,
+                panel: editor.reference({ name: "Dirty draft" }),
+              }),
+          },
+          "Open draft",
+        ),
+      editor: () => {
+        Canvas.useLifecycle({
+          guard: () => ({
+            status: "confirm",
+            message: "Save your changes before closing?",
+          }),
+          save: async () => {
+            saves.push("saved");
+          },
+          discard: async () => {},
+        });
+        return createElement("label", null, "Draft", createElement("input"));
+      },
+    },
+  });
+  const engine = Canvas.createEngine();
+  const rendered = render(
+    createElement(Canvas.Provider, { engine }, createElement(Canvas.Workspace)),
+  );
+
+  fireEvent.click(rendered.getByRole("button", { name: "Open draft" }));
+  const closeButton = rendered.getByRole("button", {
+    name: "Close Dirty draft",
+  });
+  closeButton.focus();
+  fireEvent.click(closeButton);
+
+  const dialog = await rendered.findByRole("alertdialog", {
+    name: "Unsaved changes in Dirty draft",
+  });
+  const stayButton = rendered.getByRole("button", { name: "Stay" });
+  assert.equal(document.activeElement, stayButton);
+  fireEvent.keyDown(dialog, { key: "Tab" });
+  const saveButton = rendered.getByRole("button", { name: "Save" });
+  assert.equal(document.activeElement, saveButton);
+  fireEvent.keyDown(saveButton, { key: "Tab", shiftKey: true });
+  assert.equal(document.activeElement, stayButton);
+  assert.equal(
+    rendered.getByTestId("canvas-panels-application").hasAttribute("inert"),
+    true,
+  );
+  fireEvent.mouseDown(
+    rendered.getByTestId("canvas-panels-transition-backdrop"),
+  );
+  assert.equal(rendered.getByRole("alertdialog"), dialog);
+
+  await act(async () => {
+    fireEvent.keyDown(dialog, { key: "Escape" });
+  });
+  assert.equal(rendered.queryByRole("alertdialog"), null);
+  assert.equal(rendered.getByText("Draft").textContent, "Draft");
+  assert.equal(document.activeElement, closeButton);
+
+  fireEvent.click(closeButton);
+  await rendered.findByRole("alertdialog");
+  await act(async () => {
+    fireEvent.click(rendered.getByRole("button", { name: "Save" }));
+  });
+  assert.deepEqual(saves, ["saved"]);
+  assert.equal(rendered.queryByRole("alertdialog"), null);
+  assert.equal(rendered.queryByText("Draft"), null);
+  assert.equal(
+    document.activeElement,
+    rendered.getByRole("heading", { level: 2 }),
+  );
+});

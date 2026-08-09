@@ -1119,3 +1119,242 @@ test("versioned commands isolate Workspaces and cannot remove non-closable desce
   );
   assert.equal(foreign.getSnapshot().version, 0);
 });
+
+test("a dirty Panel stages close confirmation and Stay preserves its work", async () => {
+  const root = defineRootPanel({ kind: "root", title: "Root" });
+  const editor = definePanel({
+    kind: "editor",
+    title: ({ name }) => name,
+  });
+  const engine = createPanelEngine({ root, panels: [editor] });
+  const opened = engine.open({
+    panel: editor.reference({ name: "Draft article" }),
+  });
+  if (opened.status !== "opened") throw new Error("Expected editor to open");
+  const target = targetFor(engine, opened.instanceId);
+  const guardCalls = [];
+  engine.registerLifecycle({
+    target,
+    lifecycle: {
+      guard: (transition) => {
+        guardCalls.push(transition);
+        return {
+          status: "confirm",
+          message: "Save changes before closing?",
+        };
+      },
+      save: async () => {},
+      discard: async () => {},
+    },
+  });
+  const beforeClose = engine.getSnapshot();
+
+  assert.deepEqual(engine.close({ target }), {
+    status: "confirmation-required",
+    command: "close",
+    panelId: opened.instanceId,
+  });
+  const awaitingDecision = engine.getSnapshot();
+  assert.equal(awaitingDecision.version, beforeClose.version);
+  assert.equal(awaitingDecision.panels, beforeClose.panels);
+  assert.deepEqual(awaitingDecision.transition, {
+    command: "close",
+    panelId: opened.instanceId,
+    panelTitle: "Draft article",
+    message: "Save changes before closing?",
+  });
+  assert.deepEqual(guardCalls, [
+    {
+      command: "close",
+      removedPanelIds: [opened.instanceId],
+    },
+  ]);
+
+  assert.deepEqual(await engine.resolveTransition({ decision: "stay" }), {
+    status: "stayed",
+    command: "close",
+    panelId: opened.instanceId,
+  });
+  const stayed = engine.getSnapshot();
+  assert.equal(stayed.version, beforeClose.version);
+  assert.equal(stayed.panels, beforeClose.panels);
+  assert.equal(stayed.transition, null);
+});
+
+test("Save and Discard each run their lifecycle operation and commit close once", async () => {
+  for (const decision of ["save", "discard"]) {
+    const root = defineRootPanel({ kind: "root", title: "Root" });
+    const editor = definePanel({
+      kind: "editor",
+      title: ({ name }) => name,
+    });
+    const engine = createPanelEngine({ root, panels: [editor] });
+    const opened = engine.open({
+      panel: editor.reference({ name: `${decision} draft` }),
+    });
+    if (opened.status !== "opened") throw new Error("Expected editor to open");
+    const target = targetFor(engine, opened.instanceId);
+    const operations = [];
+    engine.registerLifecycle({
+      target,
+      lifecycle: {
+        guard: () => ({ status: "confirm", message: "Unsaved changes" }),
+        save: async () => operations.push("save"),
+        discard: async () => operations.push("discard"),
+      },
+    });
+    const beforeClose = engine.getSnapshot();
+    engine.close({ target });
+
+    const resolution = await engine.resolveTransition({ decision });
+    assert.equal(resolution.status, "committed");
+    assert.equal(resolution.decision, decision);
+    assert.equal(resolution.command, "close");
+    assert.equal(resolution.panelId, opened.instanceId);
+    assert.equal(resolution.outcome.status, "closed");
+    assert.equal(operations.length, 1);
+    assert.equal(operations[0], decision);
+    assert.equal(engine.getSnapshot().panels.length, 1);
+    assert.equal(engine.getSnapshot().version, beforeClose.version + 1);
+    assert.equal(engine.getSnapshot().transition, null);
+    assert.deepEqual(await engine.resolveTransition({ decision }), {
+      status: "rejected",
+      reason: "no-pending-transition",
+    });
+  }
+});
+
+test("Branch Replacement confirms before removing a dirty Panel", async () => {
+  const root = defineRootPanel({ kind: "root", title: "Root" });
+  const editor = definePanel({
+    kind: "editor",
+    title: ({ name }) => name,
+  });
+  const report = definePanel({
+    kind: "report",
+    title: ({ name }) => name,
+  });
+  const engine = createPanelEngine({ root, panels: [editor, report] });
+  const openedEditor = engine.open({
+    panel: editor.reference({ name: "Dirty draft" }),
+  });
+  if (openedEditor.status !== "opened") throw new Error("Expected editor");
+  const guardCalls = [];
+  engine.registerLifecycle({
+    target: targetFor(engine, openedEditor.instanceId),
+    lifecycle: {
+      guard: (proposal) => {
+        guardCalls.push(proposal);
+        return { status: "confirm", message: "Replace dirty draft?" };
+      },
+      save: async () => {},
+      discard: async () => {},
+    },
+  });
+  const beforeReplacement = engine.getSnapshot();
+
+  assert.deepEqual(
+    engine.open({
+      originId: beforeReplacement.panels[0].instanceId,
+      panel: report.reference({ name: "Attendance report" }),
+    }),
+    {
+      status: "confirmation-required",
+      command: "open",
+      panelId: openedEditor.instanceId,
+    },
+  );
+  assert.equal(engine.getSnapshot().version, beforeReplacement.version);
+  assert.equal(engine.getSnapshot().panels, beforeReplacement.panels);
+  assert.deepEqual(guardCalls, [
+    { command: "open", removedPanelIds: [openedEditor.instanceId] },
+  ]);
+
+  const resolution = await engine.resolveTransition({ decision: "discard" });
+  assert.equal(resolution.status, "committed");
+  assert.equal(resolution.decision, "discard");
+  assert.equal(resolution.command, "open");
+  assert.equal(resolution.panelId, openedEditor.instanceId);
+  assert.equal(resolution.outcome.status, "opened");
+  assert.deepEqual(
+    engine.getSnapshot().panels.map(({ title }) => title),
+    ["Root", "Attendance report"],
+  );
+  assert.equal(engine.getSnapshot().version, beforeReplacement.version + 1);
+});
+
+test("malformed lifecycle contracts and Guard Outcomes fail closed", () => {
+  const root = defineRootPanel({ kind: "root", title: "Root" });
+  const editor = definePanel({ kind: "editor", title: ({ name }) => name });
+  const engine = createPanelEngine({ root, panels: [editor] });
+  const opened = engine.open({ panel: editor.reference({ name: "Draft" }) });
+  if (opened.status !== "opened") throw new Error("Expected editor");
+  const target = targetFor(engine, opened.instanceId);
+
+  assert.throws(
+    () => engine.registerLifecycle({ target, lifecycle: {} }),
+    /requires guard, save, and discard functions/,
+  );
+
+  for (const malformed of [
+    null,
+    { status: "typo" },
+    { status: "confirm", message: "" },
+    { status: "block", reason: "" },
+  ]) {
+    const unregister = engine.registerLifecycle({
+      target,
+      lifecycle: {
+        guard: () => malformed,
+        save: async () => {},
+        discard: async () => {},
+      },
+    });
+    const before = engine.getSnapshot();
+    assert.deepEqual(engine.close({ target }), {
+      status: "rejected",
+      command: "close",
+      reason: "transition-blocked",
+      panelId: opened.instanceId,
+    });
+    assert.equal(engine.getSnapshot(), before);
+    unregister();
+  }
+});
+
+test("Branch Replacement validates its new descriptor before saving dirty work", () => {
+  const root = defineRootPanel({ kind: "root", title: "Root" });
+  const editor = definePanel({ kind: "editor", title: ({ name }) => name });
+  const invalid = definePanel({
+    kind: "invalid",
+    title: () => {
+      throw new Error("invalid replacement title");
+    },
+  });
+  const engine = createPanelEngine({ root, panels: [editor, invalid] });
+  const opened = engine.open({ panel: editor.reference({ name: "Draft" }) });
+  if (opened.status !== "opened") throw new Error("Expected editor");
+  let saves = 0;
+  engine.registerLifecycle({
+    target: targetFor(engine, opened.instanceId),
+    lifecycle: {
+      guard: () => ({ status: "confirm", message: "Unsaved" }),
+      save: async () => {
+        saves += 1;
+      },
+      discard: async () => {},
+    },
+  });
+  const before = engine.getSnapshot();
+
+  assert.throws(
+    () =>
+      engine.open({
+        originId: before.panels[0].instanceId,
+        panel: invalid.reference({}),
+      }),
+    /invalid replacement title/,
+  );
+  assert.equal(saves, 0);
+  assert.equal(engine.getSnapshot(), before);
+});

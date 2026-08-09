@@ -1,1 +1,27 @@
-@layer canvas-panels;
+@layer canvas-panels {
+  [data-canvas-transition-backdrop] {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: grid;
+    place-items: center;
+    padding: 1rem;
+    background: rgb(0 0 0 / 45%);
+  }
+
+  [data-canvas-transition-dialog] {
+    width: min(100%, 32rem);
+    padding: 1.5rem;
+    border-radius: 0.75rem;
+    background: Canvas;
+    color: CanvasText;
+    box-shadow: 0 1rem 3rem rgb(0 0 0 / 25%);
+  }
+
+  [data-canvas-transition-actions] {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 0.5rem;
+  }
+}

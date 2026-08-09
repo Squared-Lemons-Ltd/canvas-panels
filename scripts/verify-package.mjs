@@ -215,6 +215,15 @@ if (engine.getSnapshot().panels.some(({ title }) => title === "Class A")) {
   throw new Error("packed Branch Replacement retained the prior Class");
 }
 const otherClassTarget = engine.getSnapshot().panels[1].instanceRef;
+let discarded = 0;
+engine.registerLifecycle({
+  target: otherClassTarget,
+  lifecycle: {
+    guard: () => ({ status: "confirm", message: "Unsaved packed changes" }),
+    save: async () => {},
+    discard: async () => { discarded += 1; },
+  },
+});
 const nestedEngine = Canvas.createEngine();
 const foreignClose = nestedEngine.close({
   target: otherClassTarget,
@@ -225,7 +234,11 @@ if (foreignClose.status !== "rejected" || foreignClose.reason !== "foreign-works
 const closedClass = engine.close({
   target: otherClassTarget,
 });
-if (closedClass.status !== "closed") throw new Error("packed Class Panel did not close");
+if (closedClass.status !== "confirmation-required") throw new Error("packed dirty Class close did not request confirmation");
+const resolvedClass = await engine.resolveTransition({ decision: "discard" });
+if (resolvedClass.status !== "committed" || resolvedClass.outcome.status !== "closed" || discarded !== 1) {
+  throw new Error("packed guarded Class close did not discard and commit once");
+}
 const closedMarkup = renderCanvas();
 if (!closedMarkup.includes("Classes")) throw new Error("packed Root Panel was not retained");
 if (closedMarkup.includes("Class B")) throw new Error("packed Class Panel remained after close");
