@@ -285,6 +285,7 @@ function BriefPanel({ panel }: BriefRenderProps) {
   );
 
   useShowcaseLifecycle({
+    dirty,
     guard: () =>
       dirty
         ? {

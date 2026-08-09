@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { act, fireEvent, render } from "@testing-library/react";
+import { act, fireEvent, render, waitFor } from "@testing-library/react";
 import { JSDOM } from "jsdom";
-import { createElement } from "react";
+import { createElement, useState } from "react";
 
 import {
   definePanel,
@@ -439,4 +439,259 @@ test("the guarded transition dialog keeps dirty work on Stay and saves before cl
     document.activeElement,
     rendered.getByRole("heading", { level: 2 }),
   );
+});
+
+test("one aggregate dialog saves multiple dirty Panels deepest-first", async () => {
+  const root = defineRootPanel({ kind: "root", title: "Documents" });
+  const editor = definePanel({ kind: "editor", title: ({ name }) => name });
+  const operations = [];
+  let Canvas;
+  const Editor = ({ panel }) => {
+    Canvas.useLifecycle({
+      dirty: true,
+      guard: () => ({ status: "confirm", message: `Save ${panel.title}?` }),
+      save: async () => operations.push(`save:${panel.title}`),
+      discard: async () => operations.push(`discard:${panel.title}`),
+    });
+    return createElement("p", null, `${panel.title} contents`);
+  };
+  Canvas = createCanvasModule({
+    root,
+    panels: [editor],
+    renderers: {
+      root: () => createElement("p", null, "Document list"),
+      editor: Editor,
+    },
+  });
+  const engine = Canvas.createEngine();
+  const parent = engine.open({ panel: editor.reference({ name: "Parent" }) });
+  if (parent.status !== "opened") throw new Error("Expected parent");
+  const child = engine.open({
+    originId: parent.instanceId,
+    panel: editor.reference({ name: "Child" }),
+  });
+  if (child.status !== "opened") throw new Error("Expected child");
+  const rendered = render(
+    createElement(Canvas.Provider, { engine }, createElement(Canvas.Workspace)),
+  );
+
+  fireEvent.click(rendered.getByRole("button", { name: "Close Parent" }));
+  const dialog = await rendered.findByRole("alertdialog", {
+    name: "Unsaved changes in 2 panels",
+  });
+  assert.equal(rendered.getAllByRole("alertdialog").length, 1);
+  assert.match(dialog.textContent, /Child: Save Child\?/);
+  assert.match(dialog.textContent, /Parent: Save Parent\?/);
+  await act(async () => {
+    fireEvent.click(rendered.getByRole("button", { name: "Save all" }));
+  });
+  assert.deepEqual(operations, ["save:Child", "save:Parent"]);
+  assert.equal(engine.getSnapshot().panels.length, 1);
+  rendered.unmount();
+});
+
+test("a conflicting decision after a failed save keeps the dialog retryable", async () => {
+  const root = defineRootPanel({ kind: "root", title: "Documents" });
+  const editor = definePanel({ kind: "editor", title: ({ name }) => name });
+  let Canvas;
+  const Editor = ({ panel }) => {
+    Canvas.useLifecycle({
+      dirty: true,
+      guard: () => ({ status: "confirm", message: "Unsaved draft" }),
+      save: async () => {
+        throw new Error("Save failed");
+      },
+      discard: async () => {},
+    });
+    return createElement("p", null, panel.title);
+  };
+  Canvas = createCanvasModule({
+    root,
+    panels: [editor],
+    renderers: {
+      root: ({ open }) =>
+        createElement(
+          "button",
+          {
+            type: "button",
+            onClick: () => open({ panel: editor.reference({ name: "Draft" }) }),
+          },
+          "Open Draft",
+        ),
+      editor: Editor,
+    },
+  });
+  const rendered = render(
+    createElement(
+      Canvas.Provider,
+      null,
+      createElement(Canvas.Workspace, { label: "Retry Workspace" }),
+    ),
+  );
+  fireEvent.click(rendered.getByRole("button", { name: "Open Draft" }));
+  fireEvent.click(rendered.getByRole("button", { name: "Close Draft" }));
+  fireEvent.click(rendered.getByRole("button", { name: "Save" }));
+  await rendered.findByRole("alert");
+
+  fireEvent.click(rendered.getByRole("button", { name: "Discard" }));
+  assert.match(
+    (await rendered.findByRole("alert")).textContent ?? "",
+    /Retry the original Save or Discard decision/,
+  );
+  assert.equal(rendered.getByRole("button", { name: "Save" }).disabled, false);
+  assert.equal(rendered.getByRole("button", { name: "Stay" }).disabled, false);
+  fireEvent.click(rendered.getByRole("button", { name: "Stay" }));
+  await waitFor(() => assert.equal(rendered.queryByRole("alertdialog"), null));
+  assert.ok(rendered.getByRole("heading", { name: "Draft" }));
+  rendered.unmount();
+});
+
+test("beforeunload is prevented only while a mounted Panel reports dirty work", async () => {
+  const root = defineRootPanel({ kind: "root", title: "Documents" });
+  const editor = definePanel({ kind: "editor", title: ({ name }) => name });
+  let Canvas;
+  const Editor = () => {
+    const [dirty, setDirty] = useState(false);
+    Canvas.useLifecycle({
+      dirty,
+      guard: () => ({ status: "confirm", message: "Save draft?" }),
+      save: async () => setDirty(false),
+      discard: async () => setDirty(false),
+    });
+    return createElement(
+      "button",
+      { type: "button", onClick: () => setDirty((current) => !current) },
+      dirty ? "Mark clean" : "Mark dirty",
+    );
+  };
+  Canvas = createCanvasModule({
+    root,
+    panels: [editor],
+    renderers: {
+      root: () => null,
+      editor: Editor,
+    },
+  });
+  const engine = Canvas.createEngine();
+  engine.open({ panel: editor.reference({ name: "Draft" }) });
+  const rendered = render(
+    createElement(Canvas.Provider, { engine }, createElement(Canvas.Workspace)),
+  );
+  const dispatchUnload = () => {
+    const event = new window.Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(event);
+    return event.defaultPrevented;
+  };
+
+  assert.equal(dispatchUnload(), false);
+  fireEvent.click(rendered.getByRole("button", { name: "Mark dirty" }));
+  assert.equal(dispatchUnload(), true);
+  fireEvent.click(rendered.getByRole("button", { name: "Mark clean" }));
+  assert.equal(dispatchUnload(), false);
+  rendered.unmount();
+  assert.equal(dispatchUnload(), false);
+});
+
+test("Escape resolves only the innermost pending Workspace transition", async () => {
+  const innerRoot = defineRootPanel({ kind: "inner-root", title: "Inner" });
+  const innerEditor = definePanel({
+    kind: "inner-editor",
+    title: ({ name }) => name,
+  });
+  let InnerCanvas;
+  const InnerEditor = () => {
+    InnerCanvas.useLifecycle({
+      dirty: true,
+      guard: () => ({ status: "confirm", message: "Save inner draft?" }),
+      save: async () => {},
+      discard: async () => {},
+    });
+    return createElement("p", null, "Inner draft contents");
+  };
+  InnerCanvas = createCanvasModule({
+    root: innerRoot,
+    panels: [innerEditor],
+    renderers: {
+      "inner-root": ({ open }) =>
+        createElement(
+          "button",
+          {
+            onClick: () =>
+              open({ panel: innerEditor.reference({ name: "Inner draft" }) }),
+            type: "button",
+          },
+          "Open Inner Draft",
+        ),
+      "inner-editor": InnerEditor,
+    },
+  });
+
+  const outerRoot = defineRootPanel({ kind: "outer-root", title: "Outer" });
+  const outerEditor = definePanel({
+    kind: "outer-editor",
+    title: ({ name }) => name,
+  });
+  const innerEngine = InnerCanvas.createEngine();
+  let OuterCanvas;
+  const OuterEditor = () => {
+    OuterCanvas.useLifecycle({
+      dirty: true,
+      guard: () => ({ status: "confirm", message: "Save outer draft?" }),
+      save: async () => {},
+      discard: async () => {},
+    });
+    return createElement(
+      InnerCanvas.Provider,
+      { engine: innerEngine },
+      createElement(InnerCanvas.Workspace, { label: "Inner workspace" }),
+    );
+  };
+  OuterCanvas = createCanvasModule({
+    root: outerRoot,
+    panels: [outerEditor],
+    renderers: { "outer-root": () => null, "outer-editor": OuterEditor },
+  });
+  const outerEngine = OuterCanvas.createEngine();
+  const openedOuter = outerEngine.open({
+    panel: outerEditor.reference({ name: "Outer draft" }),
+  });
+  if (openedOuter.status !== "opened") throw new Error("Expected outer draft");
+  const rendered = render(
+    createElement(
+      OuterCanvas.Provider,
+      { engine: outerEngine },
+      createElement(OuterCanvas.Workspace, { label: "Outer workspace" }),
+    ),
+  );
+  fireEvent.click(rendered.getByRole("button", { name: "Open Inner Draft" }));
+  fireEvent.click(rendered.getByRole("button", { name: "Close Inner draft" }));
+  await rendered.findByRole("alertdialog", { name: /Inner draft/ });
+  const outerTarget = outerEngine
+    .getSnapshot()
+    .panels.find(
+      ({ instanceId }) => instanceId === openedOuter.instanceId,
+    )?.instanceRef;
+  if (!outerTarget) throw new Error("Outer draft disappeared");
+  await act(async () => {
+    outerEngine.close({ target: outerTarget });
+  });
+  assert.equal(rendered.getAllByRole("alertdialog").length, 1);
+  assert.ok(rendered.getByRole("alertdialog", { name: /Inner draft/ }));
+  assert.ok(outerEngine.getSnapshot().transition);
+  assert.ok(innerEngine.getSnapshot().transition);
+  assert.equal(outerEngine.getSnapshot().transition?.panels.length, 1);
+  assert.equal(innerEngine.getSnapshot().transition?.panels.length, 1);
+
+  await act(async () =>
+    fireEvent.keyDown(rendered.getByRole("alertdialog"), { key: "Escape" }),
+  );
+  await rendered.findByRole("alertdialog", { name: /Outer draft/ });
+  assert.equal(innerEngine.getSnapshot().transition, null);
+  assert.ok(outerEngine.getSnapshot().transition);
+  await act(async () =>
+    fireEvent.keyDown(rendered.getByRole("alertdialog"), { key: "Escape" }),
+  );
+  await waitFor(() => assert.equal(rendered.queryByRole("alertdialog"), null));
+  assert.equal(outerEngine.getSnapshot().transition, null);
+  rendered.unmount();
 });
