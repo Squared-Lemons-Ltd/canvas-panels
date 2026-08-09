@@ -5,6 +5,7 @@ import type {
   PanelEngine,
   PanelEngineSnapshot,
   PanelInstanceRef,
+  PanelLifecycle,
   PanelReference,
 } from "../core/index.js";
 import {
@@ -24,6 +25,11 @@ export type CanvasBinding<Reference extends PanelReference> = Readonly<{
   snapshot: PanelEngineSnapshot;
   open: PanelEngine<Reference>["open"];
   close: (target?: PanelInstanceRef) => ClosePanelOutcome;
+  registerLifecycle: (command: {
+    target: PanelInstanceRef;
+    lifecycle: PanelLifecycle;
+  }) => () => void;
+  resolveTransition: PanelEngine<Reference>["resolveTransition"];
 }>;
 
 export type CanvasBindings<Reference extends PanelReference> = Readonly<{
@@ -65,6 +71,8 @@ export function createCanvasBindings<
       snapshot,
       open: engine.open,
       close: (target) => engine.close(target ? { target } : undefined),
+      registerLifecycle: engine.registerLifecycle,
+      resolveTransition: engine.resolveTransition,
     });
   }
 

@@ -2,6 +2,7 @@ import {
   definePanel,
   defineRootPanel,
   type PanelInstanceId,
+  type PanelLifecycle,
   type PanelKey,
 } from "../../packages/canvas-panels/dist/core/index.js";
 import { createCanvasModule } from "../../packages/canvas-panels/dist/ui/index.js";
@@ -92,7 +93,11 @@ const [rootPanel] = engine.getSnapshot().panels;
 if (!rootPanel) throw new Error("Canvas Engine did not create its Root Panel");
 const rootId: PanelInstanceId = rootPanel.instanceId;
 const opened = engine.open({ originId: rootId, panel: studentReference });
-if (opened.status !== "rejected") {
+if (
+  opened.status === "opened" ||
+  opened.status === "reused" ||
+  opened.status === "replaced"
+) {
   const openedId: PanelInstanceId = opened.instanceId;
   void openedId;
 }
@@ -114,9 +119,25 @@ if (closeOutcome.status === "rejected") {
     | "invalid-panel-reference"
     | "foreign-workspace"
     | "root-panel"
-    | "not-closable" = closeOutcome.reason;
+    | "not-closable"
+    | "transition-blocked" = closeOutcome.reason;
   void closeReason;
 }
+const lifecycle: PanelLifecycle = {
+  guard: (transition) => {
+    const command: "open" | "close" = transition.command;
+    void command;
+    return { status: "confirm", message: "Unsaved changes" };
+  },
+  save: async () => {},
+  discard: async () => {},
+};
+const unregisterLifecycle = engine.registerLifecycle({
+  target: rootPanel.instanceRef,
+  lifecycle,
+});
+unregisterLifecycle();
+void engine.resolveTransition({ decision: "stay" });
 const updateOutcome = engine.update({
   definition: updatableStudent,
   target: rootPanel.instanceRef,

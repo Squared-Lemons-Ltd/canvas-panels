@@ -87,6 +87,31 @@ export type OpenPanel = Readonly<{
   reference: PanelReference;
 }>;
 
+export type GuardedTransitionCommand = "open" | "close";
+
+export type GuardedTransitionProposal = Readonly<{
+  command: GuardedTransitionCommand;
+  removedPanelIds: readonly PanelInstanceId[];
+}>;
+
+export type GuardOutcome =
+  | Readonly<{ status: "allow" }>
+  | Readonly<{ status: "confirm"; message: string }>
+  | Readonly<{ status: "block"; reason: string }>;
+
+export type PanelLifecycle = Readonly<{
+  guard: (transition: GuardedTransitionProposal) => GuardOutcome;
+  save: () => Promise<void>;
+  discard: () => Promise<void>;
+}>;
+
+export type PendingGuardedTransition = Readonly<{
+  command: GuardedTransitionCommand;
+  panelId: PanelInstanceId;
+  panelTitle: string;
+  message: string;
+}>;
+
 export type PanelEngineSnapshot = Readonly<{
   workspaceId: WorkspaceId;
   version: StackVersion;
@@ -94,6 +119,7 @@ export type PanelEngineSnapshot = Readonly<{
   activePanelId: PanelInstanceId;
   deepestPanelId: PanelInstanceId;
   visiblePanelIds: readonly PanelInstanceId[];
+  transition: PendingGuardedTransition | null;
 }>;
 
 export type OpenPanelCommand<
@@ -119,6 +145,17 @@ export type OpenPanelOutcome =
       instanceId: PanelInstanceId;
       replacedInstanceId: PanelInstanceId;
       removedPanelIds: readonly PanelInstanceId[];
+    }>
+  | Readonly<{
+      status: "confirmation-required";
+      command: "open";
+      panelId: PanelInstanceId;
+    }>
+  | Readonly<{
+      status: "rejected";
+      reason: "transition-blocked";
+      originId: PanelInstanceId;
+      panelId: PanelInstanceId;
     }>
   | Readonly<{
       status: "rejected";
@@ -228,6 +265,11 @@ export type ClosePanelOutcome =
       navigationIntent: "push";
     }>
   | Readonly<{
+      status: "confirmation-required";
+      command: "close";
+      panelId: PanelInstanceId;
+    }>
+  | Readonly<{
       status: "rejected";
       command: "close";
       reason:
@@ -236,8 +278,37 @@ export type ClosePanelOutcome =
         | "invalid-panel-reference"
         | "foreign-workspace"
         | "root-panel"
-        | "not-closable";
+        | "not-closable"
+        | "transition-blocked";
       panelId: PanelInstanceId;
+    }>;
+
+export type TransitionResolutionOutcome =
+  | Readonly<{
+      status: "committed";
+      decision: "save" | "discard";
+      command: "open";
+      panelId: PanelInstanceId;
+      outcome: Extract<
+        OpenPanelOutcome,
+        { status: "opened" | "reused" | "replaced" }
+      >;
+    }>
+  | Readonly<{
+      status: "committed";
+      decision: "save" | "discard";
+      command: "close";
+      panelId: PanelInstanceId;
+      outcome: Extract<ClosePanelOutcome, { status: "closed" }>;
+    }>
+  | Readonly<{
+      status: "stayed";
+      command: GuardedTransitionCommand;
+      panelId: PanelInstanceId;
+    }>
+  | Readonly<{
+      status: "rejected";
+      reason: "no-pending-transition";
     }>;
 
 export type PanelEngine<Reference extends PanelReference = PanelReference> =
@@ -253,6 +324,13 @@ export type PanelEngine<Reference extends PanelReference = PanelReference> =
       update: NoInfer<Update>;
     }) => UpdatePanelOutcome;
     close: (command?: { target?: PanelInstanceRef }) => ClosePanelOutcome;
+    registerLifecycle: (command: {
+      target: PanelInstanceRef;
+      lifecycle: PanelLifecycle;
+    }) => () => void;
+    resolveTransition: (command: {
+      decision: "save" | "discard" | "stay";
+    }) => Promise<TransitionResolutionOutcome>;
   }>;
 
 type PanelDefinitionShape = Readonly<{
@@ -448,8 +526,17 @@ export function createPanelEngine<
     activePanelId: instanceId,
     deepestPanelId: instanceId,
     visiblePanelIds: Object.freeze([instanceId]),
+    transition: null,
   }) as PanelEngineSnapshot;
   const listeners = new Set<() => void>();
+  const lifecycles = new Map<PanelInstanceId, PanelLifecycle>();
+  let pendingTransition:
+    | Readonly<{
+        readModel: PendingGuardedTransition;
+        lifecycle: PanelLifecycle;
+        commit: () => OpenPanelOutcome | ClosePanelOutcome;
+      }>
+    | undefined;
   const registeredKinds = new Set([options.root.kind]);
   for (const definition of options.panels) {
     if (registeredKinds.has(definition.kind)) {
@@ -478,28 +565,7 @@ export function createPanelEngine<
     ]),
   );
 
-  const publish = (
-    panels: readonly OpenPanel[],
-    activePanelId = panels.at(-1)?.instanceId,
-  ) => {
-    const deepestPanel = panels.at(-1);
-    if (!deepestPanel || activePanelId === undefined) {
-      throw new Error("A Canvas Workspace must retain its Root Panel");
-    }
-    if (!panels.some(({ instanceId }) => instanceId === activePanelId)) {
-      throw new Error("The Active Panel must belong to the Canvas Workspace");
-    }
-
-    snapshot = Object.freeze({
-      workspaceId,
-      version: (snapshot.version + 1) as StackVersion,
-      panels: Object.freeze(panels),
-      activePanelId,
-      deepestPanelId: deepestPanel.instanceId,
-      visiblePanelIds: Object.freeze(
-        panels.map(({ instanceId: visiblePanelId }) => visiblePanelId),
-      ),
-    });
+  const notifySubscribers = () => {
     const subscriberErrors: unknown[] = [];
     for (const listener of [...listeners]) {
       try {
@@ -521,11 +587,169 @@ export function createPanelEngine<
     }
   };
 
+  const publish = (
+    panels: readonly OpenPanel[],
+    activePanelId = panels.at(-1)?.instanceId,
+  ) => {
+    const deepestPanel = panels.at(-1);
+    if (!deepestPanel || activePanelId === undefined) {
+      throw new Error("A Canvas Workspace must retain its Root Panel");
+    }
+    if (!panels.some(({ instanceId }) => instanceId === activePanelId)) {
+      throw new Error("The Active Panel must belong to the Canvas Workspace");
+    }
+
+    snapshot = Object.freeze({
+      workspaceId,
+      version: (snapshot.version + 1) as StackVersion,
+      panels: Object.freeze(panels),
+      activePanelId,
+      deepestPanelId: deepestPanel.instanceId,
+      visiblePanelIds: Object.freeze(
+        panels.map(({ instanceId: visiblePanelId }) => visiblePanelId),
+      ),
+      transition: null,
+    });
+    notifySubscribers();
+  };
+
+  const setTransition = (transition: PendingGuardedTransition | null) => {
+    snapshot = Object.freeze({ ...snapshot, transition });
+    notifySubscribers();
+  };
+
+  const evaluateGuard = (
+    lifecycle: PanelLifecycle,
+    proposal: GuardedTransitionProposal,
+  ): GuardOutcome => {
+    let outcome: unknown;
+    try {
+      outcome = lifecycle.guard(proposal);
+    } catch {
+      return Object.freeze({ status: "block", reason: "Panel guard failed" });
+    }
+    if (
+      typeof outcome !== "object" ||
+      outcome === null ||
+      !("status" in outcome)
+    ) {
+      return Object.freeze({
+        status: "block",
+        reason: "Invalid Guard Outcome",
+      });
+    }
+    if (outcome.status === "allow") return Object.freeze({ status: "allow" });
+    if (
+      outcome.status === "confirm" &&
+      "message" in outcome &&
+      typeof outcome.message === "string" &&
+      outcome.message.trim().length > 0
+    ) {
+      return Object.freeze({ status: "confirm", message: outcome.message });
+    }
+    if (
+      outcome.status === "block" &&
+      "reason" in outcome &&
+      typeof outcome.reason === "string" &&
+      outcome.reason.trim().length > 0
+    ) {
+      return Object.freeze({ status: "block", reason: outcome.reason });
+    }
+    return Object.freeze({ status: "block", reason: "Invalid Guard Outcome" });
+  };
+
   return Object.freeze({
     getSnapshot: () => snapshot,
     subscribe: (listener: () => void) => {
       listeners.add(listener);
       return () => listeners.delete(listener);
+    },
+    registerLifecycle: ({ target, lifecycle }) => {
+      const panel = snapshot.panels.find(
+        (candidate) => candidate.instanceId === target.instanceId,
+      );
+      if (
+        target.workspaceId !== workspaceId ||
+        !issuedInstanceRefs.has(target) ||
+        !panel ||
+        panel.kind !== target.kind
+      ) {
+        throw new TypeError("A lifecycle must target a current issued Panel");
+      }
+      if (
+        typeof lifecycle !== "object" ||
+        lifecycle === null ||
+        typeof lifecycle.guard !== "function" ||
+        typeof lifecycle.save !== "function" ||
+        typeof lifecycle.discard !== "function"
+      ) {
+        throw new TypeError(
+          "A Panel lifecycle requires guard, save, and discard functions",
+        );
+      }
+      const registeredLifecycle = Object.freeze({
+        guard: lifecycle.guard,
+        save: lifecycle.save,
+        discard: lifecycle.discard,
+      });
+      lifecycles.set(target.instanceId, registeredLifecycle);
+      return () => {
+        if (lifecycles.get(target.instanceId) === registeredLifecycle) {
+          lifecycles.delete(target.instanceId);
+        }
+      };
+    },
+    resolveTransition: async ({ decision }) => {
+      const pending = pendingTransition;
+      if (!pending) {
+        return Object.freeze({
+          status: "rejected",
+          reason: "no-pending-transition",
+        });
+      }
+      pendingTransition = undefined;
+      if (decision === "stay") {
+        setTransition(null);
+        return Object.freeze({
+          status: "stayed",
+          command: pending.readModel.command,
+          panelId: pending.readModel.panelId,
+        });
+      }
+      let outcome: OpenPanelOutcome | ClosePanelOutcome;
+      try {
+        await pending.lifecycle[decision]();
+        outcome = pending.commit();
+      } catch (error) {
+        pendingTransition = pending;
+        throw error;
+      }
+      if (pending.readModel.command === "open") {
+        if (
+          outcome.status !== "opened" &&
+          outcome.status !== "reused" &&
+          outcome.status !== "replaced"
+        ) {
+          throw new Error("A guarded open did not produce a committed outcome");
+        }
+        return Object.freeze({
+          status: "committed",
+          decision,
+          command: "open",
+          panelId: pending.readModel.panelId,
+          outcome,
+        });
+      }
+      if (outcome.status !== "closed") {
+        throw new Error("A guarded close did not produce a committed outcome");
+      }
+      return Object.freeze({
+        status: "committed",
+        decision,
+        command: "close",
+        panelId: pending.readModel.panelId,
+        outcome,
+      });
     },
     open: ({ originId: requestedOriginId, panel }) => {
       const originId = requestedOriginId ?? snapshot.activePanelId;
@@ -585,17 +809,60 @@ export function createPanelEngine<
         const removedPanelIds = Object.freeze(
           removedPanels.map(({ instanceId: removedPanelId }) => removedPanelId),
         );
-        if (
-          removedPanelIds.length > 0 ||
-          snapshot.activePanelId !== matchedPanel.instanceId
-        ) {
-          publish(reusedPanels, matchedPanel.instanceId);
+        const commitReuse = (): OpenPanelOutcome => {
+          if (
+            removedPanelIds.length > 0 ||
+            snapshot.activePanelId !== matchedPanel.instanceId
+          ) {
+            publish(reusedPanels, matchedPanel.instanceId);
+          }
+          return Object.freeze({
+            status: "reused",
+            instanceId: matchedPanel.instanceId,
+            removedPanelIds,
+          });
+        };
+        const guardedPanel = [...removedPanels]
+          .reverse()
+          .find((candidate) => lifecycles.has(candidate.instanceId));
+        const lifecycle = guardedPanel
+          ? lifecycles.get(guardedPanel.instanceId)
+          : undefined;
+        if (guardedPanel && lifecycle) {
+          const proposal = Object.freeze({
+            command: "open" as const,
+            removedPanelIds,
+          });
+          const guardOutcome = evaluateGuard(lifecycle, proposal);
+          if (guardOutcome.status === "block") {
+            return Object.freeze({
+              status: "rejected",
+              reason: "transition-blocked",
+              originId,
+              panelId: guardedPanel.instanceId,
+            });
+          }
+          if (guardOutcome.status === "confirm") {
+            const readModel = Object.freeze({
+              command: "open" as const,
+              panelId: guardedPanel.instanceId,
+              panelTitle: guardedPanel.title,
+              message: guardOutcome.message,
+            });
+            pendingTransition = Object.freeze({
+              readModel,
+              lifecycle,
+              commit: commitReuse,
+            });
+            setTransition(readModel);
+            return Object.freeze({
+              status: "confirmation-required",
+              command: "open",
+              panelId: guardedPanel.instanceId,
+            });
+          }
         }
-        return Object.freeze({
-          status: "reused",
-          instanceId: matchedPanel.instanceId,
-          removedPanelIds,
-        });
+        return commitReuse();
       }
 
       if (
@@ -629,23 +896,6 @@ export function createPanelEngine<
           panelId: blockingPanel.instanceId,
         });
       }
-      const childId = nextInstanceId();
-      issuedPanelIds.add(childId);
-      const child = Object.freeze({
-        instanceId: childId,
-        instanceRef: Object.freeze({
-          workspaceId,
-          instanceId: childId,
-          kind: panel.kind,
-        }),
-        kind: panel.kind,
-        title: definition.title(panel.input),
-        isRoot: false,
-        closable: definition.closable,
-        ...(panel.panelKey === undefined ? {} : { panelKey: panel.panelKey }),
-        reference: panel,
-      });
-      issuedInstanceRefs.add(child.instanceRef);
       const removedPanelIds = Object.freeze(
         removedPanels.map(({ instanceId: removedPanelId }) => removedPanelId),
       );
@@ -653,19 +903,81 @@ export function createPanelEngine<
         definition.deduplication === "replace" && matchingIndex > originIndex
           ? snapshot.panels[matchingIndex]
           : undefined;
-      publish([...snapshot.panels.slice(0, originIndex + 1), child]);
-      return replacedPanel
-        ? Object.freeze({
-            status: "replaced",
+      const retainedPanels = snapshot.panels.slice(0, originIndex + 1);
+      const childTitle = definition.title(panel.input);
+      const commitOpen = (): OpenPanelOutcome => {
+        const childId = nextInstanceId();
+        issuedPanelIds.add(childId);
+        const child = Object.freeze({
+          instanceId: childId,
+          instanceRef: Object.freeze({
+            workspaceId,
             instanceId: childId,
-            replacedInstanceId: replacedPanel.instanceId,
-            removedPanelIds,
-          })
-        : Object.freeze({
-            status: "opened",
-            instanceId: childId,
-            removedPanelIds,
+            kind: panel.kind,
+          }),
+          kind: panel.kind,
+          title: childTitle,
+          isRoot: false,
+          closable: definition.closable,
+          ...(panel.panelKey === undefined ? {} : { panelKey: panel.panelKey }),
+          reference: panel,
+        });
+        issuedInstanceRefs.add(child.instanceRef);
+        publish([...retainedPanels, child]);
+        return replacedPanel
+          ? Object.freeze({
+              status: "replaced",
+              instanceId: childId,
+              replacedInstanceId: replacedPanel.instanceId,
+              removedPanelIds,
+            })
+          : Object.freeze({
+              status: "opened",
+              instanceId: childId,
+              removedPanelIds,
+            });
+      };
+      const guardedPanel = [...removedPanels]
+        .reverse()
+        .find((candidate) => lifecycles.has(candidate.instanceId));
+      const lifecycle = guardedPanel
+        ? lifecycles.get(guardedPanel.instanceId)
+        : undefined;
+      if (guardedPanel && lifecycle) {
+        const proposal = Object.freeze({
+          command: "open" as const,
+          removedPanelIds,
+        });
+        const guardOutcome = evaluateGuard(lifecycle, proposal);
+        if (guardOutcome.status === "block") {
+          return Object.freeze({
+            status: "rejected",
+            reason: "transition-blocked",
+            originId,
+            panelId: guardedPanel.instanceId,
           });
+        }
+        if (guardOutcome.status === "confirm") {
+          const readModel = Object.freeze({
+            command: "open" as const,
+            panelId: guardedPanel.instanceId,
+            panelTitle: guardedPanel.title,
+            message: guardOutcome.message,
+          });
+          pendingTransition = Object.freeze({
+            readModel,
+            lifecycle,
+            commit: commitOpen,
+          });
+          setTransition(readModel);
+          return Object.freeze({
+            status: "confirmation-required",
+            command: "open",
+            panelId: guardedPanel.instanceId,
+          });
+        }
+      }
+      return commitOpen();
     },
     activate: ({ target }) => {
       const panelId = target.instanceId;
@@ -1009,14 +1321,57 @@ export function createPanelEngine<
       const removedPanelIds = Object.freeze(
         removedPanels.map(({ instanceId: removedPanelId }) => removedPanelId),
       );
-      publish(retainedPanels, activePanel.instanceId);
-      return Object.freeze({
-        status: "closed",
-        panelId,
-        removedPanelIds,
-        activePanelId: activePanel.instanceId,
-        navigationIntent: "push",
-      });
+      const commitClose = (): ClosePanelOutcome => {
+        publish(retainedPanels, activePanel.instanceId);
+        return Object.freeze({
+          status: "closed",
+          panelId,
+          removedPanelIds,
+          activePanelId: activePanel.instanceId,
+          navigationIntent: "push",
+        });
+      };
+      const guardedPanel = [...removedPanels]
+        .reverse()
+        .find((candidate) => lifecycles.has(candidate.instanceId));
+      const lifecycle = guardedPanel
+        ? lifecycles.get(guardedPanel.instanceId)
+        : undefined;
+      if (guardedPanel && lifecycle) {
+        const proposal = Object.freeze({
+          command: "close" as const,
+          removedPanelIds,
+        });
+        const guardOutcome = evaluateGuard(lifecycle, proposal);
+        if (guardOutcome.status === "block") {
+          return Object.freeze({
+            status: "rejected",
+            command: "close",
+            reason: "transition-blocked",
+            panelId: guardedPanel.instanceId,
+          });
+        }
+        if (guardOutcome.status === "confirm") {
+          const readModel = Object.freeze({
+            command: "close" as const,
+            panelId: guardedPanel.instanceId,
+            panelTitle: guardedPanel.title,
+            message: guardOutcome.message,
+          });
+          pendingTransition = Object.freeze({
+            readModel,
+            lifecycle,
+            commit: commitClose,
+          });
+          setTransition(readModel);
+          return Object.freeze({
+            status: "confirmation-required",
+            command: "close",
+            panelId: guardedPanel.instanceId,
+          });
+        }
+      }
+      return commitClose();
     },
   });
 }

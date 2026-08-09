@@ -6,11 +6,23 @@ import {
   type PanelDeduplication,
   type PanelDefinition,
   type PanelEngine,
+  type PanelLifecycle,
   type PanelReference,
+  type PendingGuardedTransition,
   type RootPanelDefinition,
 } from "../core/index.js";
 import { type CanvasBinding, createCanvasBindings } from "../react/index.js";
-import { createElement, useId, useState } from "react";
+import {
+  createContext,
+  createElement,
+  useCallback,
+  useContext,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import type { ComponentType, ReactNode } from "react";
 
 type PanelDefinitionShape = Readonly<{
@@ -93,7 +105,126 @@ export type BoundCanvasModule<Reference extends PanelReference> = Readonly<{
   Workspace: ComponentType<CanvasWorkspaceProps>;
   createEngine: () => PanelEngine<Reference>;
   useCanvas: () => CanvasBinding<Reference>;
+  useLifecycle: (lifecycle: PanelLifecycle) => void;
 }>;
+
+function GuardedTransitionDialog({
+  transition,
+  resolveTransition,
+}: Readonly<{
+  transition: PendingGuardedTransition;
+  resolveTransition: PanelEngine["resolveTransition"];
+}>) {
+  const titleId = useId();
+  const messageId = useId();
+  const stayButton = useRef<HTMLButtonElement>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
+
+  useLayoutEffect(() => {
+    stayButton.current?.focus({ preventScroll: true });
+  }, []);
+
+  const decide = async (decision: "save" | "discard" | "stay") => {
+    if (busy) return;
+    setBusy(true);
+    setError(undefined);
+    try {
+      await resolveTransition({ decision });
+    } catch {
+      setError(
+        "The transition could not be completed. Your work is still open.",
+      );
+      setBusy(false);
+    }
+  };
+
+  return createElement(
+    "div",
+    {
+      "data-testid": "canvas-panels-transition-backdrop",
+      "data-canvas-transition-backdrop": "",
+      onMouseDown: (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+      },
+    },
+    createElement(
+      "div",
+      {
+        "aria-describedby": messageId,
+        "aria-labelledby": titleId,
+        "aria-modal": true,
+        "data-canvas-transition-dialog": "",
+        onKeyDown: (event) => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            event.stopPropagation();
+            void decide("stay");
+            return;
+          }
+          if (event.key !== "Tab") return;
+          const actions = Array.from(
+            event.currentTarget.querySelectorAll<HTMLButtonElement>(
+              "button:not(:disabled)",
+            ),
+          );
+          const first = actions[0];
+          const last = actions.at(-1);
+          if (
+            first &&
+            last &&
+            ((!event.shiftKey && document.activeElement === last) ||
+              (event.shiftKey && document.activeElement === first))
+          ) {
+            event.preventDefault();
+            (event.shiftKey ? last : first).focus();
+          }
+        },
+        role: "alertdialog",
+      },
+      createElement(
+        "h2",
+        { id: titleId },
+        `Unsaved changes in ${transition.panelTitle}`,
+      ),
+      createElement("p", { id: messageId }, transition.message),
+      error ? createElement("p", { role: "alert" }, error) : null,
+      createElement(
+        "div",
+        { "data-canvas-transition-actions": "" },
+        createElement(
+          "button",
+          {
+            disabled: busy,
+            onClick: () => void decide("save"),
+            type: "button",
+          },
+          "Save",
+        ),
+        createElement(
+          "button",
+          {
+            disabled: busy,
+            onClick: () => void decide("discard"),
+            type: "button",
+          },
+          "Discard",
+        ),
+        createElement(
+          "button",
+          {
+            disabled: busy,
+            onClick: () => void decide("stay"),
+            ref: stayButton,
+            type: "button",
+          },
+          "Stay",
+        ),
+      ),
+    ),
+  );
+}
 
 export function createCanvasModule<
   const Root extends RootPanelDefinition,
@@ -105,8 +236,60 @@ export function createCanvasModule<
 }): BoundCanvasModule<AllowedReference<Definitions>> {
   type Reference = AllowedReference<Definitions>;
   const bindings = createCanvasBindings<Reference>();
+  const LifecycleRegistrationContext = createContext<
+    ((lifecycle: PanelLifecycle) => () => void) | null
+  >(null);
   const createEngine = () =>
     createPanelEngine({ root: config.root, panels: config.panels });
+
+  function useLifecycle(lifecycle: PanelLifecycle): void {
+    const register = useContext(LifecycleRegistrationContext);
+    if (!register) {
+      throw new Error(
+        "Canvas lifecycle hooks must run inside a Panel renderer",
+      );
+    }
+    const latest = useRef(lifecycle);
+    useLayoutEffect(() => {
+      latest.current = lifecycle;
+    }, [lifecycle]);
+    useEffect(
+      () =>
+        register(
+          Object.freeze({
+            guard: (transition) => latest.current.guard(transition),
+            save: () => latest.current.save(),
+            discard: () => latest.current.discard(),
+          }),
+        ),
+      [register],
+    );
+  }
+
+  function ScopedRenderer({
+    Renderer,
+    panel,
+    open,
+    close,
+    registerLifecycle,
+  }: Readonly<{
+    Renderer: ComponentType<CanvasPanelRenderProps<Reference>>;
+    panel: OpenPanel;
+    open: PanelEngine<Reference>["open"];
+    close: CanvasBinding<Reference>["close"];
+    registerLifecycle: CanvasBinding<Reference>["registerLifecycle"];
+  }>) {
+    const register = useCallback(
+      (lifecycle: PanelLifecycle) =>
+        registerLifecycle({ target: panel.instanceRef, lifecycle }),
+      [panel.instanceRef, registerLifecycle],
+    );
+    return createElement(
+      LifecycleRegistrationContext.Provider,
+      { value: register },
+      createElement(Renderer, { panel, open, close }),
+    );
+  }
 
   function Provider({
     children,
@@ -117,11 +300,38 @@ export function createCanvasModule<
   }
 
   function Workspace({ label }: CanvasWorkspaceProps) {
-    const { snapshot, open, close } = bindings.useCanvas();
+    const { snapshot, open, close, registerLifecycle, resolveTransition } =
+      bindings.useCanvas();
     const workspaceId = useId();
+    const application = useRef<HTMLDivElement>(null);
+    const returnFocus = useRef<HTMLElement | null>(null);
+    const previousTransition = useRef(snapshot.transition);
     const renderers = config.renderers as Readonly<
       Record<string, ComponentType<CanvasPanelRenderProps<Reference>>>
     >;
+
+    useEffect(() => {
+      if (previousTransition.current && !snapshot.transition) {
+        const preferred = returnFocus.current;
+        const fallback =
+          application.current?.querySelector<HTMLElement>("[data-active] h2");
+        (preferred?.isConnected ? preferred : fallback)?.focus();
+        returnFocus.current = null;
+      }
+      previousTransition.current = snapshot.transition;
+    }, [snapshot.transition]);
+
+    const rememberFocus = () => {
+      returnFocus.current =
+        typeof document !== "undefined" &&
+        document.activeElement instanceof HTMLElement
+          ? document.activeElement
+          : null;
+    };
+    const guardedOpen: typeof open = (command) => {
+      rememberFocus();
+      return open(command);
+    };
 
     return createElement(
       "div",
@@ -130,45 +340,69 @@ export function createCanvasModule<
         "data-canvas-workspace": "",
         role: "region",
       },
-      snapshot.panels.map((panel, panelIndex) => {
-        const headingId = `${workspaceId}-panel-${panelIndex}-heading`;
-        const Renderer = renderers[panel.kind];
-        if (!Renderer) {
-          throw new Error(
-            `No renderer registered for Panel Kind: ${panel.kind}`,
-          );
-        }
+      createElement(
+        "div",
+        {
+          "data-testid": "canvas-panels-application",
+          "aria-hidden": snapshot.transition ? true : undefined,
+          inert: snapshot.transition ? true : undefined,
+          ref: application,
+        },
+        snapshot.panels.map((panel, panelIndex) => {
+          const headingId = `${workspaceId}-panel-${panelIndex}-heading`;
+          const Renderer = renderers[panel.kind];
+          if (!Renderer) {
+            throw new Error(
+              `No renderer registered for Panel Kind: ${panel.kind}`,
+            );
+          }
 
-        return createElement(
-          "section",
-          {
-            "aria-labelledby": headingId,
-            "data-active":
-              panel.instanceId === snapshot.activePanelId ? "" : undefined,
-            "data-canvas-panel": "",
-            "data-panel-kind": panel.kind,
-            key: panel.instanceId,
-            role: "region",
-          },
-          createElement(
-            "header",
-            { "data-canvas-panel-header": "" },
-            createElement("h2", { id: headingId }, panel.title),
-            !panel.closable
-              ? null
-              : createElement(
-                  "button",
-                  {
-                    "aria-label": `Close ${panel.title}`,
-                    onClick: () => close(panel.instanceRef),
-                    type: "button",
-                  },
-                  "Close",
-                ),
-          ),
-          createElement(Renderer, { panel, open, close }),
-        );
-      }),
+          return createElement(
+            "section",
+            {
+              "aria-labelledby": headingId,
+              "data-active":
+                panel.instanceId === snapshot.activePanelId ? "" : undefined,
+              "data-canvas-panel": "",
+              "data-panel-kind": panel.kind,
+              key: panel.instanceId,
+              role: "region",
+            },
+            createElement(
+              "header",
+              { "data-canvas-panel-header": "" },
+              createElement("h2", { id: headingId, tabIndex: -1 }, panel.title),
+              !panel.closable
+                ? null
+                : createElement(
+                    "button",
+                    {
+                      "aria-label": `Close ${panel.title}`,
+                      onClick: () => {
+                        rememberFocus();
+                        close(panel.instanceRef);
+                      },
+                      type: "button",
+                    },
+                    "Close",
+                  ),
+            ),
+            createElement(ScopedRenderer, {
+              Renderer,
+              panel,
+              open: guardedOpen,
+              close,
+              registerLifecycle,
+            }),
+          );
+        }),
+      ),
+      snapshot.transition
+        ? createElement(GuardedTransitionDialog, {
+            resolveTransition,
+            transition: snapshot.transition,
+          })
+        : null,
     );
   }
 
@@ -177,5 +411,6 @@ export function createCanvasModule<
     Workspace,
     createEngine,
     useCanvas: bindings.useCanvas,
+    useLifecycle,
   });
 }

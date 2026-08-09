@@ -8,8 +8,9 @@ The package is not yet published. Its first implemented vertical slice provides:
 - host-defined Root and Child Panel definitions;
 - an immutable framework-neutral Panel Engine with subscriptions, typed outcomes, and deterministic Branch Replacement;
 - typed `update`, `activate`, `close`, and `collapse` commands with Workspace-scoped versions;
-- React bindings based on `useSyncExternalStore`; and
-- a minimal Bound Canvas Module with labelled Workspace and Panel regions.
+- React bindings based on `useSyncExternalStore`;
+- scoped `useLifecycle` registration for guarded dirty Panels; and
+- a Bound Canvas Module with labelled regions and an accessible Save/Discard/Stay dialog.
 
 ```tsx
 import {
@@ -90,10 +91,12 @@ export const ClassesCanvas = createCanvasModule({
 });
 ```
 
-Render `ClassesCanvas.Provider` above `ClassesCanvas.Workspace`. The Root Panel is permanent: closing a Child restores its retained predecessor, while opening from an earlier Panel replaces its existing descendant branch atomically. Each Panel Kind chooses `reuse`, `replace`, or `allow-many`; `reuse` and `replace` require a registered semantic key. `open` returns a discriminated `opened`, `reused`, `replaced`, or `rejected` outcome. Omitting the Origin defaults to Active; stale or foreign Origins, foreign Panel references, and deduplication conflicts reject without changing the stack. Treat Panel Instance IDs and Panel Keys as distinct opaque values and create Panel references only through their registered definitions. Panel inputs are copied into deeply immutable read models and must contain only structured-cloneable plain objects, arrays, and primitive values.
+Render `ClassesCanvas.Provider` above `ClassesCanvas.Workspace`. The Root Panel is permanent: closing a Child restores its retained predecessor, while opening from an earlier Panel replaces its existing descendant branch atomically. Each Panel Kind chooses `reuse`, `replace`, or `allow-many`; `reuse` and `replace` require a registered semantic key. `open` returns a discriminated `opened`, `reused`, `replaced`, `confirmation-required`, or `rejected` outcome. Omitting the Origin defaults to Active; stale or foreign Origins, foreign Panel references, and deduplication conflicts reject without changing the stack. Treat Panel Instance IDs and Panel Keys as distinct opaque values and create Panel references only through their registered definitions. Panel inputs are copied into deeply immutable read models and must contain only structured-cloneable plain objects, arrays, and primitive values.
 
 Every Engine snapshot has a branded Workspace identity and monotonically increasing version. Pass a Panel's `instanceRef` to `update`, `activate`, `close`, or `collapse`; stale references and references owned by another Workspace reject without publication. Successful mutations increment the owning Workspace once, while rejected and no-op commands retain snapshot identity and version. Updates use each Panel definition's typed update union and pure reducer, validate both the update payload and complete reducer result, and reject semantic Panel Key changes. They never shallow-merge arbitrary patches.
 
 Root is always non-closable. A Child definition can set `closable: false`; any command or Branch Replacement that would remove that Panel rejects atomically, including closing an ancestor or collapsing/opening above it. Nested Providers—even from the same Bound Canvas Module—own independent stacks, Instance references, subscriptions, Active state, and versions, so commands cannot cross Workspace boundaries.
+
+A mounted renderer can call its Bound Canvas Module's `useLifecycle({ guard, save, discard })` hook. A pure guard returns `allow`, `confirm`, or `block`. Destructive close and Branch Replacement evaluate it before mutation. Confirmation exposes package-owned Save, Discard, and Stay controls: Save or Discard awaits the registered asynchronous operation before committing once, while Stay and Escape preserve the current branch. While the dialog is open, application content is inert and focus remains in the dialog before returning to the initiating control or retained Active Panel heading.
 
 Hosts using `createPanelEngine` directly may provide `onSubscriberError` to report subscriber failures. A failing subscriber never blocks the remaining subscribers or changes the result of a command whose snapshot has already been published.
