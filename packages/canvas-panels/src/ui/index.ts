@@ -1,5 +1,18 @@
 "use client";
 
+import type { ComponentType, ReactNode } from "react";
+import {
+  createContext,
+  createElement,
+  useCallback,
+  useContext,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   createPanelEngine,
   type OpenPanel,
@@ -12,18 +25,14 @@ import {
   type RootPanelDefinition,
 } from "../core/index.js";
 import { type CanvasBinding, createCanvasBindings } from "../react/index.js";
-import {
-  createContext,
-  createElement,
-  useCallback,
-  useContext,
-  useEffect,
-  useId,
-  useLayoutEffect,
-  useRef,
-  useState,
-} from "react";
-import type { ComponentType, ReactNode } from "react";
+
+type WorkspaceHierarchy = Readonly<{
+  reportPending: (workspaceId: string, pending: boolean) => void;
+}>;
+
+const WorkspaceHierarchyContext = createContext<WorkspaceHierarchy | null>(
+  null,
+);
 
 type PanelDefinitionShape = Readonly<{
   role: "panel";
@@ -130,7 +139,15 @@ function GuardedTransitionDialog({
     setBusy(true);
     setError(undefined);
     try {
-      await resolveTransition({ decision });
+      const outcome = await resolveTransition({ decision });
+      if (outcome.status === "rejected") {
+        setError(
+          outcome.reason === "transition-decision-conflict"
+            ? "Retry the original Save or Discard decision, or choose Stay."
+            : "Another transition operation is already in progress.",
+        );
+        setBusy(false);
+      }
     } catch {
       setError(
         "The transition could not be completed. Your work is still open.",
@@ -186,9 +203,21 @@ function GuardedTransitionDialog({
       createElement(
         "h2",
         { id: titleId },
-        `Unsaved changes in ${transition.panelTitle}`,
+        transition.panels.length === 1
+          ? `Unsaved changes in ${transition.panels[0]?.panelTitle}`
+          : `Unsaved changes in ${transition.panels.length} panels`,
       ),
-      createElement("p", { id: messageId }, transition.message),
+      createElement(
+        "div",
+        { id: messageId },
+        transition.panels.map((panel) =>
+          createElement(
+            "p",
+            { key: panel.panelId },
+            `${panel.panelTitle}: ${panel.message}`,
+          ),
+        ),
+      ),
       error ? createElement("p", { role: "alert" }, error) : null,
       createElement(
         "div",
@@ -200,7 +229,7 @@ function GuardedTransitionDialog({
             onClick: () => void decide("save"),
             type: "button",
           },
-          "Save",
+          transition.panels.length === 1 ? "Save" : "Save all",
         ),
         createElement(
           "button",
@@ -209,7 +238,7 @@ function GuardedTransitionDialog({
             onClick: () => void decide("discard"),
             type: "button",
           },
-          "Discard",
+          transition.panels.length === 1 ? "Discard" : "Discard all",
         ),
         createElement(
           "button",
@@ -250,19 +279,21 @@ export function createCanvasModule<
       );
     }
     const latest = useRef(lifecycle);
+    const dirty = lifecycle.dirty;
     useLayoutEffect(() => {
       latest.current = lifecycle;
     }, [lifecycle]);
     useEffect(
       () =>
         register(
-          Object.freeze({
+          Object.freeze<PanelLifecycle>({
+            ...(dirty === undefined ? {} : { dirty }),
             guard: (transition) => latest.current.guard(transition),
-            save: () => latest.current.save(),
-            discard: () => latest.current.discard(),
+            save: (operation) => latest.current.save(operation),
+            discard: (operation) => latest.current.discard(operation),
           }),
         ),
-      [register],
+      [dirty, register],
     );
   }
 
@@ -303,12 +334,44 @@ export function createCanvasModule<
     const { snapshot, open, close, registerLifecycle, resolveTransition } =
       bindings.useCanvas();
     const workspaceId = useId();
+    const parentWorkspace = useContext(WorkspaceHierarchyContext);
     const application = useRef<HTMLDivElement>(null);
     const returnFocus = useRef<HTMLElement | null>(null);
     const previousTransition = useRef(snapshot.transition);
+    const [dirtyPanelIds, setDirtyPanelIds] = useState<ReadonlySet<string>>(
+      () => new Set(),
+    );
+    const [pendingDescendantIds, setPendingDescendantIds] = useState<
+      ReadonlySet<string>
+    >(() => new Set());
     const renderers = config.renderers as Readonly<
       Record<string, ComponentType<CanvasPanelRenderProps<Reference>>>
     >;
+    const reportPending = useCallback(
+      (descendantWorkspaceId: string, pending: boolean) => {
+        setPendingDescendantIds((current) => {
+          if (current.has(descendantWorkspaceId) === pending) return current;
+          const next = new Set(current);
+          if (pending) next.add(descendantWorkspaceId);
+          else next.delete(descendantWorkspaceId);
+          return next;
+        });
+      },
+      [],
+    );
+    const hierarchy = useMemo<WorkspaceHierarchy>(
+      () => Object.freeze({ reportPending }),
+      [reportPending],
+    );
+    const hasPendingInSubtree =
+      snapshot.transition !== null || pendingDescendantIds.size > 0;
+    const deepestTransition =
+      pendingDescendantIds.size === 0 ? snapshot.transition : null;
+
+    useEffect(() => {
+      parentWorkspace?.reportPending(workspaceId, hasPendingInSubtree);
+      return () => parentWorkspace?.reportPending(workspaceId, false);
+    }, [hasPendingInSubtree, parentWorkspace, workspaceId]);
 
     useEffect(() => {
       if (previousTransition.current && !snapshot.transition) {
@@ -320,6 +383,43 @@ export function createCanvasModule<
       }
       previousTransition.current = snapshot.transition;
     }, [snapshot.transition]);
+
+    const registerWorkspaceLifecycle = useCallback<
+      CanvasBinding<Reference>["registerLifecycle"]
+    >(
+      (command) => {
+        const unregister = registerLifecycle(command);
+        const panelId = command.target.instanceId;
+        if (command.lifecycle.dirty ?? true) {
+          setDirtyPanelIds((current) => {
+            if (current.has(panelId)) return current;
+            const next = new Set(current);
+            next.add(panelId);
+            return next;
+          });
+        }
+        return () => {
+          unregister();
+          setDirtyPanelIds((current) => {
+            if (!current.has(panelId)) return current;
+            const next = new Set(current);
+            next.delete(panelId);
+            return next;
+          });
+        };
+      },
+      [registerLifecycle],
+    );
+
+    useEffect(() => {
+      if (dirtyPanelIds.size === 0 || typeof window === "undefined") return;
+      const preventUnload = (event: BeforeUnloadEvent) => {
+        event.preventDefault();
+        event.returnValue = "";
+      };
+      window.addEventListener("beforeunload", preventUnload);
+      return () => window.removeEventListener("beforeunload", preventUnload);
+    }, [dirtyPanelIds]);
 
     const rememberFocus = () => {
       returnFocus.current =
@@ -334,75 +434,83 @@ export function createCanvasModule<
     };
 
     return createElement(
-      "div",
-      {
-        "aria-label": label,
-        "data-canvas-workspace": "",
-        role: "region",
-      },
+      WorkspaceHierarchyContext.Provider,
+      { value: hierarchy },
       createElement(
         "div",
         {
-          "data-testid": "canvas-panels-application",
-          "aria-hidden": snapshot.transition ? true : undefined,
-          inert: snapshot.transition ? true : undefined,
-          ref: application,
+          "aria-label": label,
+          "data-canvas-workspace": "",
+          role: "region",
         },
-        snapshot.panels.map((panel, panelIndex) => {
-          const headingId = `${workspaceId}-panel-${panelIndex}-heading`;
-          const Renderer = renderers[panel.kind];
-          if (!Renderer) {
-            throw new Error(
-              `No renderer registered for Panel Kind: ${panel.kind}`,
-            );
-          }
+        createElement(
+          "div",
+          {
+            "data-testid": "canvas-panels-application",
+            "aria-hidden": deepestTransition ? true : undefined,
+            inert: deepestTransition ? true : undefined,
+            ref: application,
+          },
+          snapshot.panels.map((panel, panelIndex) => {
+            const headingId = `${workspaceId}-panel-${panelIndex}-heading`;
+            const Renderer = renderers[panel.kind];
+            if (!Renderer) {
+              throw new Error(
+                `No renderer registered for Panel Kind: ${panel.kind}`,
+              );
+            }
 
-          return createElement(
-            "section",
-            {
-              "aria-labelledby": headingId,
-              "data-active":
-                panel.instanceId === snapshot.activePanelId ? "" : undefined,
-              "data-canvas-panel": "",
-              "data-panel-kind": panel.kind,
-              key: panel.instanceId,
-              role: "region",
-            },
-            createElement(
-              "header",
-              { "data-canvas-panel-header": "" },
-              createElement("h2", { id: headingId, tabIndex: -1 }, panel.title),
-              !panel.closable
-                ? null
-                : createElement(
-                    "button",
-                    {
-                      "aria-label": `Close ${panel.title}`,
-                      onClick: () => {
-                        rememberFocus();
-                        close(panel.instanceRef);
+            return createElement(
+              "section",
+              {
+                "aria-labelledby": headingId,
+                "data-active":
+                  panel.instanceId === snapshot.activePanelId ? "" : undefined,
+                "data-canvas-panel": "",
+                "data-panel-kind": panel.kind,
+                key: panel.instanceId,
+                role: "region",
+              },
+              createElement(
+                "header",
+                { "data-canvas-panel-header": "" },
+                createElement(
+                  "h2",
+                  { id: headingId, tabIndex: -1 },
+                  panel.title,
+                ),
+                !panel.closable
+                  ? null
+                  : createElement(
+                      "button",
+                      {
+                        "aria-label": `Close ${panel.title}`,
+                        onClick: () => {
+                          rememberFocus();
+                          close(panel.instanceRef);
+                        },
+                        type: "button",
                       },
-                      type: "button",
-                    },
-                    "Close",
-                  ),
-            ),
-            createElement(ScopedRenderer, {
-              Renderer,
-              panel,
-              open: guardedOpen,
-              close,
-              registerLifecycle,
-            }),
-          );
-        }),
+                      "Close",
+                    ),
+              ),
+              createElement(ScopedRenderer, {
+                Renderer,
+                panel,
+                open: guardedOpen,
+                close,
+                registerLifecycle: registerWorkspaceLifecycle,
+              }),
+            );
+          }),
+        ),
+        deepestTransition
+          ? createElement(GuardedTransitionDialog, {
+              resolveTransition,
+              transition: deepestTransition,
+            })
+          : null,
       ),
-      snapshot.transition
-        ? createElement(GuardedTransitionDialog, {
-            resolveTransition,
-            transition: snapshot.transition,
-          })
-        : null,
     );
   }
 

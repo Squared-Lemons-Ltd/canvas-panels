@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -216,12 +216,17 @@ if (engine.getSnapshot().panels.some(({ title }) => title === "Class A")) {
 }
 const otherClassTarget = engine.getSnapshot().panels[1].instanceRef;
 let discarded = 0;
+let receivedAbortSignal;
 engine.registerLifecycle({
   target: otherClassTarget,
   lifecycle: {
+    dirty: true,
     guard: () => ({ status: "confirm", message: "Unsaved packed changes" }),
     save: async () => {},
-    discard: async () => { discarded += 1; },
+    discard: async ({ signal }) => {
+      receivedAbortSignal = signal;
+      discarded += 1;
+    },
   },
 });
 const nestedEngine = Canvas.createEngine();
@@ -236,7 +241,13 @@ const closedClass = engine.close({
 });
 if (closedClass.status !== "confirmation-required") throw new Error("packed dirty Class close did not request confirmation");
 const resolvedClass = await engine.resolveTransition({ decision: "discard" });
-if (resolvedClass.status !== "committed" || resolvedClass.outcome.status !== "closed" || discarded !== 1) {
+if (
+  resolvedClass.status !== "committed" ||
+  resolvedClass.outcome.status !== "closed" ||
+  resolvedClass.panelIds.length !== 1 ||
+  discarded !== 1 ||
+  !(receivedAbortSignal instanceof AbortSignal)
+) {
   throw new Error("packed guarded Class close did not discard and commit once");
 }
 const closedMarkup = renderCanvas();

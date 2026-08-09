@@ -2,8 +2,8 @@ import {
   definePanel,
   defineRootPanel,
   type PanelInstanceId,
-  type PanelLifecycle,
   type PanelKey,
+  type PanelLifecycle,
 } from "../../packages/canvas-panels/dist/core/index.js";
 import { createCanvasModule } from "../../packages/canvas-panels/dist/ui/index.js";
 
@@ -120,17 +120,27 @@ if (closeOutcome.status === "rejected") {
     | "foreign-workspace"
     | "root-panel"
     | "not-closable"
-    | "transition-blocked" = closeOutcome.reason;
+    | "transition-blocked"
+    | "transition-in-progress" = closeOutcome.reason;
   void closeReason;
 }
 const lifecycle: PanelLifecycle = {
+  dirty: true,
   guard: (transition) => {
     const command: "open" | "close" = transition.command;
     void command;
     return { status: "confirm", message: "Unsaved changes" };
   },
-  save: async () => {},
-  discard: async () => {},
+  save: async ({ signal, transition }) => {
+    const abortSignal: AbortSignal = signal;
+    const command: "open" | "close" = transition.command;
+    void abortSignal;
+    void command;
+  },
+  discard: async ({ signal }) => {
+    const abortSignal: AbortSignal = signal;
+    void abortSignal;
+  },
 };
 const unregisterLifecycle = engine.registerLifecycle({
   target: rootPanel.instanceRef,
