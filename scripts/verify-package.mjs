@@ -134,7 +134,7 @@ const classPanel = definePanel({
   key: ({ classId }) => classId,
   title: ({ name }) => name,
   persistence: {
-    mode: "navigation",
+    mode: "navigation-with-loader",
     version: 1,
     codec: {
       encode: ({ classId, name }) => ({ classId, name }),
@@ -142,6 +142,9 @@ const classPanel = definePanel({
       decode: ({ classId, name }) => ({ classId, name }),
       migrations: [],
     },
+    restore: async (_input, { signal }) => signal.aborted
+      ? { status: "unavailable" }
+      : { status: "available" },
   },
   update: {
     validate: (update) => typeof update === "object" && update !== null && (update.type === "rename" || update.type === "noop"),
@@ -186,6 +189,18 @@ if (
   decodedNavigation.references[0].input.classId !== "class-a"
 ) {
   throw new Error("packed persistent Class did not round-trip through a Navigation Document");
+}
+const restoredNavigation = await engine.restoreNavigationDocument(
+  navigationDocument,
+  { signal: new AbortController().signal },
+);
+if (
+  restoredNavigation.status !== "restored" ||
+  restoredNavigation.navigationIntent !== "none" ||
+  restoredNavigation.references.length !== 1 ||
+  restoredNavigation.references[0].input.classId !== "class-a"
+) {
+  throw new Error("packed persistent Class did not restore through its availability loader");
 }
 const classTarget = engine.getSnapshot().panels[1].instanceRef;
 const updatedClass = engine.update({

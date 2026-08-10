@@ -74,7 +74,8 @@ export type PanelDescriptorCodec<
 
 export type PanelRestoreOutcome =
   | Readonly<{ status: "available" }>
-  | Readonly<{ status: "unavailable" }>;
+  | Readonly<{ status: "unavailable" }>
+  | Readonly<{ status: "denied" }>;
 
 export type PanelPersistence<Input, Descriptor extends JsonValue = JsonValue> =
   | Readonly<{ mode: "transient" }>
@@ -409,6 +410,35 @@ export type NavigationDocumentDecodeOutcome<
       diagnostic: NavigationDocumentDiagnostic;
     }>;
 
+export type NavigationRecoveryReason =
+  | "invalid-document"
+  | "unavailable"
+  | "denied"
+  | "loader-failed"
+  | "aborted";
+
+export type NavigationRecoveryIntent = Readonly<{
+  kind: "recovery-panel";
+  reason: NavigationRecoveryReason;
+  failedPanelIndex: number | null;
+}>;
+
+export type NavigationRestorationOutcome<
+  Reference extends PanelReference = PanelReference,
+> =
+  | Readonly<{
+      status: "restored";
+      references: readonly Reference[];
+      navigationIntent: "none" | "replace";
+      recovery: null;
+    }>
+  | Readonly<{
+      status: "recovered";
+      references: readonly Reference[];
+      navigationIntent: "replace";
+      recovery: NavigationRecoveryIntent;
+    }>;
+
 export type PanelEngine<Reference extends PanelReference = PanelReference> =
   Readonly<{
     getSnapshot: () => PanelEngineSnapshot;
@@ -416,6 +446,10 @@ export type PanelEngine<Reference extends PanelReference = PanelReference> =
     decodeNavigationDocument: (
       encoded: string,
     ) => NavigationDocumentDecodeOutcome<Reference>;
+    restoreNavigationDocument: (
+      encoded: string,
+      context: Readonly<{ signal: AbortSignal }>,
+    ) => Promise<NavigationRestorationOutcome<Reference>>;
     subscribe: (listener: () => void) => () => void;
     open: (command: OpenPanelCommand<Reference>) => OpenPanelOutcome;
     activate: (command: { target: PanelInstanceRef }) => ActivatePanelOutcome;
@@ -1203,7 +1237,16 @@ export function createPanelEngine<
     });
   };
 
-  return Object.freeze({
+  const rejectedNavigationDetails = new WeakMap<
+    object,
+    Readonly<{
+      references: readonly ReferenceOf<Definitions[number]>[];
+      failedPanelIndex: number | null;
+    }>
+  >();
+  type EngineApi = PanelEngine<ReferenceOf<Definitions[number]>>;
+  let engineApi: EngineApi;
+  engineApi = Object.freeze({
     getSnapshot: () => snapshot,
     encodeNavigationDocument: () => {
       const panels: Array<{
@@ -1251,14 +1294,27 @@ export function createPanelEngine<
       return encoded;
     },
     decodeNavigationDocument: (encoded: string) => {
+      const references: PanelReference[] = [];
       const reject = (
         code: NavigationDocumentDiagnostic["code"],
         path: string,
-      ): NavigationDocumentDecodeOutcome<ReferenceOf<Definitions[number]>> =>
-        Object.freeze({
+        failedPanelIndex: number | null = null,
+      ): NavigationDocumentDecodeOutcome<ReferenceOf<Definitions[number]>> => {
+        const outcome = {
           status: "rejected",
           diagnostic: Object.freeze({ code, path }),
-        });
+        } as const;
+        rejectedNavigationDetails.set(
+          outcome,
+          Object.freeze({
+            references: Object.freeze([...references]) as readonly ReferenceOf<
+              Definitions[number]
+            >[],
+            failedPanelIndex,
+          }),
+        );
+        return Object.freeze(outcome);
+      };
       if (
         typeof encoded !== "string" ||
         utf8ByteLength(encoded) > maximumNavigationDocumentBytes
@@ -1288,7 +1344,6 @@ export function createPanelEngine<
       if (document.panels.length > maximumNavigationDocumentPanels) {
         return reject("too-many-panels", "$.panels");
       }
-      const references: PanelReference[] = [];
       let normalized = false;
       for (let index = 0; index < document.panels.length; index += 1) {
         const path = `$.panels[${index}]`;
@@ -1302,23 +1357,23 @@ export function createPanelEngine<
           (encodedPanel.version as number) < 1 ||
           !("descriptor" in encodedPanel)
         ) {
-          return reject("invalid-document", path);
+          return reject("invalid-document", path, index);
         }
         const definition = definitions.get(encodedPanel.kind);
-        if (!definition) return reject("unknown-kind", `${path}.kind`);
+        if (!definition) return reject("unknown-kind", `${path}.kind`, index);
         const persistence = definition.persistence;
         if (persistence.mode === "transient") {
-          return reject("transient-kind", `${path}.kind`);
+          return reject("transient-kind", `${path}.kind`, index);
         }
         const encodedVersion = encodedPanel.version as number;
         if (encodedVersion > persistence.version) {
-          return reject("unsupported-codec-version", `${path}.version`);
+          return reject("unsupported-codec-version", `${path}.version`, index);
         }
         let descriptor: unknown = encodedPanel.descriptor;
         try {
           canonicalJson(descriptor);
         } catch {
-          return reject("invalid-descriptor", `${path}.descriptor`);
+          return reject("invalid-descriptor", `${path}.descriptor`, index);
         }
         for (
           let version = encodedVersion;
@@ -1328,12 +1383,14 @@ export function createPanelEngine<
           const migration = persistence.codec.migrations.find(
             (candidate) => candidate.from === version,
           );
-          if (!migration) return reject("missing-migration", `${path}.version`);
+          if (!migration) {
+            return reject("missing-migration", `${path}.version`, index);
+          }
           try {
             descriptor = migration.migrate(descriptor);
             canonicalJson(descriptor);
           } catch {
-            return reject("migration-failed", `${path}.descriptor`);
+            return reject("migration-failed", `${path}.descriptor`, index);
           }
           normalized = true;
         }
@@ -1341,16 +1398,16 @@ export function createPanelEngine<
         try {
           validDescriptor = persistence.codec.validate(descriptor);
         } catch {
-          return reject("invalid-descriptor", `${path}.descriptor`);
+          return reject("invalid-descriptor", `${path}.descriptor`, index);
         }
         if (!validDescriptor) {
-          return reject("invalid-descriptor", `${path}.descriptor`);
+          return reject("invalid-descriptor", `${path}.descriptor`, index);
         }
         try {
           const input = persistence.codec.decode(descriptor as JsonValue);
           references.push(definition.reference(input));
         } catch {
-          return reject("decode-failed", `${path}.descriptor`);
+          return reject("decode-failed", `${path}.descriptor`, index);
         }
       }
       return Object.freeze({
@@ -1359,6 +1416,98 @@ export function createPanelEngine<
           Definitions[number]
         >[],
         normalized,
+      });
+    },
+    restoreNavigationDocument: async (encoded, { signal }) => {
+      const decoded = engineApi.decodeNavigationDocument(encoded);
+      const rejectedDetails =
+        decoded.status === "rejected"
+          ? rejectedNavigationDetails.get(decoded)
+          : undefined;
+      const decodedReferences =
+        decoded.status === "decoded"
+          ? decoded.references
+          : (rejectedDetails?.references ?? Object.freeze([]));
+      const documentFailureIndex: number | null =
+        decoded.status === "rejected"
+          ? (rejectedDetails?.failedPanelIndex ?? null)
+          : null;
+      const recover = (
+        references: readonly ReferenceOf<Definitions[number]>[],
+        reason: NavigationRecoveryReason,
+        failedPanelIndex: number | null,
+      ): NavigationRestorationOutcome<ReferenceOf<Definitions[number]>> =>
+        Object.freeze({
+          status: "recovered",
+          references: Object.freeze(references),
+          navigationIntent: "replace",
+          recovery: Object.freeze({
+            kind: "recovery-panel",
+            reason,
+            failedPanelIndex,
+          }),
+        });
+
+      if (decoded.status === "rejected") {
+        return recover(
+          decodedReferences,
+          "invalid-document",
+          documentFailureIndex,
+        );
+      }
+      for (let index = 0; index < decodedReferences.length; index += 1) {
+        const reference = decodedReferences[index];
+        if (!reference) continue;
+        if (signal.aborted) {
+          return recover(decodedReferences.slice(0, index), "aborted", index);
+        }
+        const definition = definitions.get(reference.kind);
+        if (definition?.persistence.mode !== "navigation-with-loader") {
+          continue;
+        }
+        let availabilityStatus: PanelRestoreOutcome["status"] | undefined;
+        try {
+          const availability = await definition.persistence.restore(
+            reference.input,
+            { signal },
+          );
+          if (
+            availability.status === "available" ||
+            availability.status === "unavailable" ||
+            availability.status === "denied"
+          ) {
+            availabilityStatus = availability.status;
+          }
+        } catch {
+          return recover(
+            decodedReferences.slice(0, index),
+            signal.aborted ? "aborted" : "loader-failed",
+            index,
+          );
+        }
+        if (signal.aborted) {
+          return recover(decodedReferences.slice(0, index), "aborted", index);
+        }
+        if (!availabilityStatus) {
+          return recover(
+            decodedReferences.slice(0, index),
+            "loader-failed",
+            index,
+          );
+        }
+        if (availabilityStatus !== "available") {
+          return recover(
+            decodedReferences.slice(0, index),
+            availabilityStatus,
+            index,
+          );
+        }
+      }
+      return Object.freeze({
+        status: "restored",
+        references: decodedReferences,
+        navigationIntent: decoded.normalized ? "replace" : "none",
+        recovery: null,
       });
     },
     subscribe: (listener: () => void) => {
@@ -2134,4 +2283,5 @@ export function createPanelEngine<
       return commitClose();
     },
   });
+  return engineApi;
 }
