@@ -133,6 +133,16 @@ const classPanel = definePanel({
   deduplication: "reuse",
   key: ({ classId }) => classId,
   title: ({ name }) => name,
+  persistence: {
+    mode: "navigation",
+    version: 1,
+    codec: {
+      encode: ({ classId, name }) => ({ classId, name }),
+      validate: (value) => typeof value === "object" && value !== null && typeof value.classId === "string" && typeof value.name === "string",
+      decode: ({ classId, name }) => ({ classId, name }),
+      migrations: [],
+    },
+  },
   update: {
     validate: (update) => typeof update === "object" && update !== null && (update.type === "rename" || update.type === "noop"),
     validateResult: (value) => typeof value === "object" && value !== null && typeof value.classId === "string" && typeof value.name === "string",
@@ -166,6 +176,17 @@ const openedLearner = engine.open({
   panel: learner.reference({ name: "Ada Lovelace" }),
 });
 if (openedLearner.status !== "opened") throw new Error("packed Learner Panel did not open");
+const navigationDocument = engine.encodeNavigationDocument();
+const decodedNavigation = engine.decodeNavigationDocument(navigationDocument);
+if (
+  decodedNavigation.status !== "decoded" ||
+  decodedNavigation.normalized ||
+  decodedNavigation.references.length !== 1 ||
+  decodedNavigation.references[0].kind !== "class" ||
+  decodedNavigation.references[0].input.classId !== "class-a"
+) {
+  throw new Error("packed persistent Class did not round-trip through a Navigation Document");
+}
 const classTarget = engine.getSnapshot().panels[1].instanceRef;
 const updatedClass = engine.update({
   definition: classPanel,

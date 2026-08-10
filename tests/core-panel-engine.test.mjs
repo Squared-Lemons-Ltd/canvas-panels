@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
@@ -1794,4 +1795,403 @@ test("Branch Replacement validates its new descriptor before saving dirty work",
   );
   assert.equal(saves, 0);
   assert.equal(engine.getSnapshot(), before);
+});
+
+test("a complete persistent Panel Stack round-trips through a canonical Navigation Document", () => {
+  const root = defineRootPanel({ kind: "classes", title: "Classes" });
+  const classPanel = definePanel({
+    kind: "class",
+    title: ({ name }) => name,
+    persistence: {
+      mode: "navigation",
+      version: 1,
+      codec: {
+        encode: ({ classId, name }) => ({ name, classId }),
+        validate: (value) =>
+          typeof value === "object" &&
+          value !== null &&
+          "classId" in value &&
+          typeof value.classId === "string" &&
+          "name" in value &&
+          typeof value.name === "string",
+        decode: (value) => ({ classId: value.classId, name: value.name }),
+        migrations: [],
+      },
+    },
+  });
+  const learnerPanel = definePanel({
+    kind: "learner",
+    title: ({ name }) => name,
+    persistence: {
+      mode: "navigation-with-loader",
+      version: 1,
+      codec: {
+        encode: ({ learnerId, name }) => ({ name, learnerId }),
+        validate: (value) =>
+          typeof value === "object" &&
+          value !== null &&
+          "learnerId" in value &&
+          typeof value.learnerId === "string" &&
+          "name" in value &&
+          typeof value.name === "string",
+        decode: (value) => ({ learnerId: value.learnerId, name: value.name }),
+        migrations: [],
+      },
+      restore: async () => ({ status: "available" }),
+    },
+  });
+  const transientPanel = definePanel({
+    kind: "transient-help",
+    title: ({ title }) => title,
+    persistence: { mode: "transient" },
+  });
+  const engine = createPanelEngine({
+    root,
+    panels: [classPanel, learnerPanel, transientPanel],
+  });
+  const openedClass = engine.open({
+    panel: classPanel.reference({ classId: "class-b", name: "Biology" }),
+  });
+  if (openedClass.status !== "opened") throw new Error("Expected Class");
+  const openedLearner = engine.open({
+    originId: openedClass.instanceId,
+    panel: learnerPanel.reference({ learnerId: "learner-a", name: "Ada" }),
+  });
+  if (openedLearner.status !== "opened") throw new Error("Expected Learner");
+
+  const encoded = engine.encodeNavigationDocument();
+  assert.equal(
+    encoded,
+    '{"panels":[{"descriptor":{"classId":"class-b","name":"Biology"},"kind":"class","version":1},{"descriptor":{"learnerId":"learner-a","name":"Ada"},"kind":"learner","version":1}],"version":1}',
+  );
+  const decoded = engine.decodeNavigationDocument(encoded);
+  assert.equal(decoded.status, "decoded");
+  if (decoded.status !== "decoded") return;
+  assert.equal(decoded.normalized, false);
+  assert.deepEqual(
+    decoded.references.map(({ kind, input }) => ({ kind, input })),
+    [
+      { kind: "class", input: { classId: "class-b", name: "Biology" } },
+      {
+        kind: "learner",
+        input: { learnerId: "learner-a", name: "Ada" },
+      },
+    ],
+  );
+});
+
+test("historical descriptor versions migrate deterministically while new encoding uses the newest version", async () => {
+  const root = defineRootPanel({ kind: "root", title: "Root" });
+  const report = definePanel({
+    kind: "report",
+    title: ({ reportId, view }) => `${reportId}:${view}`,
+    persistence: {
+      mode: "navigation",
+      version: 2,
+      codec: {
+        encode: ({ reportId, view }) => ({ reportId, view }),
+        validate: (value) =>
+          typeof value === "object" &&
+          value !== null &&
+          "reportId" in value &&
+          typeof value.reportId === "string" &&
+          "view" in value &&
+          typeof value.view === "string",
+        decode: (value) => ({ reportId: value.reportId, view: value.view }),
+        migrations: [
+          {
+            from: 1,
+            migrate: (value) => ({
+              reportId: value.id,
+              view: "summary",
+            }),
+          },
+        ],
+      },
+    },
+  });
+  const engine = createPanelEngine({ root, panels: [report] });
+  const historical = await readFile(
+    new URL("./fixtures/navigation-document-v1.json", import.meta.url),
+    "utf8",
+  );
+
+  const decoded = engine.decodeNavigationDocument(historical);
+  assert.equal(decoded.status, "decoded");
+  if (decoded.status !== "decoded") return;
+  assert.equal(decoded.normalized, true);
+  assert.deepEqual(decoded.references[0].input, {
+    reportId: "report-a",
+    view: "summary",
+  });
+  const opened = engine.open({ panel: decoded.references[0] });
+  assert.equal(opened.status, "opened");
+  assert.equal(
+    engine.encodeNavigationDocument(),
+    '{"panels":[{"descriptor":{"reportId":"report-a","view":"summary"},"kind":"report","version":2}],"version":1}',
+  );
+});
+
+test("Navigation Documents reject malformed, duplicate, oversized, unsafe, and unsupported content with safe diagnostics", () => {
+  const root = defineRootPanel({ kind: "root", title: "Root" });
+  const report = definePanel({
+    kind: "report",
+    title: ({ id }) => id,
+    persistence: {
+      mode: "navigation",
+      version: 1,
+      codec: {
+        encode: ({ id }) => ({ id }),
+        validate: (value) =>
+          typeof value === "object" &&
+          value !== null &&
+          "id" in value &&
+          typeof value.id === "string",
+        decode: (value) => ({ id: value.id }),
+        migrations: [],
+      },
+    },
+  });
+  const transient = definePanel({
+    kind: "transient",
+    title: () => "Transient",
+  });
+  const engine = createPanelEngine({ root, panels: [report, transient] });
+  const tooManyPanels = Array.from({ length: 33 }, () => ({
+    descriptor: { id: "report-a" },
+    kind: "report",
+    version: 1,
+  }));
+  const cases = [
+    ["not json", "invalid-json", "$"],
+    ['{"version":1,"version":1,"panels":[]}', "duplicate-key", "$"],
+    [
+      '{"panels":[{"descriptor":{"customer-secret-123":"first","customer-secret-123":"second","id":"report-a"},"kind":"report","version":1}],"version":1}',
+      "duplicate-key",
+      "$",
+    ],
+    ['{"extra":true,"panels":[],"version":1}', "invalid-document", "$"],
+    [
+      JSON.stringify({ panels: tooManyPanels, version: 1 }),
+      "too-many-panels",
+      "$.panels",
+    ],
+    [
+      JSON.stringify({
+        panels: [{ descriptor: {}, kind: "missing", version: 1 }],
+        version: 1,
+      }),
+      "unknown-kind",
+      "$.panels[0].kind",
+    ],
+    [
+      JSON.stringify({
+        panels: [{ descriptor: {}, kind: "transient", version: 1 }],
+        version: 1,
+      }),
+      "transient-kind",
+      "$.panels[0].kind",
+    ],
+    [
+      JSON.stringify({
+        panels: [
+          { descriptor: { id: "report-a" }, kind: "report", version: 2 },
+        ],
+        version: 1,
+      }),
+      "unsupported-codec-version",
+      "$.panels[0].version",
+    ],
+    [
+      JSON.stringify({
+        panels: [{ descriptor: [], kind: "report", version: 1 }],
+        version: 1,
+      }),
+      "invalid-descriptor",
+      "$.panels[0].descriptor",
+    ],
+    [
+      '{"panels":[{"descriptor":{"__proto__":{},"id":"report-a"},"kind":"report","version":1}],"version":1}',
+      "invalid-descriptor",
+      "$.panels[0].descriptor",
+    ],
+    ["x".repeat(16_385), "document-too-large", "$"],
+  ];
+
+  for (const [encoded, code, path] of cases) {
+    assert.deepEqual(engine.decodeNavigationDocument(encoded), {
+      status: "rejected",
+      diagnostic: { code, path },
+    });
+  }
+});
+
+test("transient Panels and their descendants are omitted without reparenting persistent descendants", () => {
+  const root = defineRootPanel({ kind: "root", title: "Root" });
+  const codec = {
+    encode: ({ id }) => ({ id }),
+    validate: (value) =>
+      typeof value === "object" &&
+      value !== null &&
+      "id" in value &&
+      typeof value.id === "string",
+    decode: (value) => ({ id: value.id }),
+    migrations: [],
+  };
+  const parent = definePanel({
+    kind: "parent",
+    title: ({ id }) => id,
+    persistence: { mode: "navigation", version: 1, codec },
+  });
+  const transient = definePanel({
+    kind: "transient",
+    title: () => "Transient",
+  });
+  const child = definePanel({
+    kind: "child",
+    title: ({ id }) => id,
+    persistence: { mode: "navigation", version: 1, codec },
+  });
+  const engine = createPanelEngine({
+    root,
+    panels: [parent, transient, child],
+  });
+  const openedParent = engine.open({
+    panel: parent.reference({ id: "parent-a" }),
+  });
+  if (openedParent.status !== "opened") throw new Error("Expected Parent");
+  const openedTransient = engine.open({
+    originId: openedParent.instanceId,
+    panel: transient.reference({}),
+  });
+  if (openedTransient.status !== "opened")
+    throw new Error("Expected Transient");
+  engine.open({
+    originId: openedTransient.instanceId,
+    panel: child.reference({ id: "child-a" }),
+  });
+
+  assert.equal(
+    engine.encodeNavigationDocument(),
+    '{"panels":[{"descriptor":{"id":"parent-a"},"kind":"parent","version":1}],"version":1}',
+  );
+});
+
+test("encoding rejects codec-invalid and structurally unsafe descriptors", () => {
+  const root = defineRootPanel({ kind: "root", title: "Root" });
+  const invalidCodec = definePanel({
+    kind: "invalid-codec",
+    title: ({ id }) => id,
+    persistence: {
+      mode: "navigation",
+      version: 1,
+      codec: {
+        encode: () => ({ id: 42 }),
+        validate: (value) =>
+          typeof value === "object" &&
+          value !== null &&
+          "id" in value &&
+          typeof value.id === "string",
+        decode: (value) => ({ id: value.id }),
+        migrations: [],
+      },
+    },
+  });
+  const invalidEngine = createPanelEngine({ root, panels: [invalidCodec] });
+  invalidEngine.open({ panel: invalidCodec.reference({ id: "valid-input" }) });
+  assert.throws(
+    () => invalidEngine.encodeNavigationDocument(),
+    /descriptor codec emitted an invalid descriptor/,
+  );
+
+  const sparseCodec = definePanel({
+    kind: "sparse-codec",
+    title: () => "Sparse",
+    persistence: {
+      mode: "navigation",
+      version: 1,
+      codec: {
+        encode: () => Array(2),
+        validate: (value) => Array.isArray(value),
+        decode: () => ({}),
+        migrations: [],
+      },
+    },
+  });
+  const sparseEngine = createPanelEngine({ root, panels: [sparseCodec] });
+  sparseEngine.open({ panel: sparseCodec.reference({}) });
+  assert.throws(
+    () => sparseEngine.encodeNavigationDocument(),
+    /Navigation descriptor arrays must be dense JSON arrays/,
+  );
+});
+
+test("persistence configuration rejects unknown modes fail-closed", () => {
+  assert.throws(
+    () =>
+      definePanel({
+        kind: "unknown-persistence",
+        title: () => "Unknown",
+        persistence: {
+          mode: "typo",
+          version: 1,
+          codec: {
+            encode: () => ({}),
+            validate: () => true,
+            decode: () => ({}),
+            migrations: [],
+          },
+          restore: async () => ({ status: "available" }),
+        },
+      }),
+    /Unknown Panel persistence mode/,
+  );
+});
+
+test("canonical encoding preserves the documented descriptor depth and rejects accessors", () => {
+  const root = defineRootPanel({ kind: "root", title: "Root" });
+  let nested = "leaf";
+  for (let depth = 0; depth < 32; depth += 1) nested = { value: nested };
+  const deepPanel = definePanel({
+    kind: "deep",
+    title: () => "Deep",
+    persistence: {
+      mode: "navigation",
+      version: 1,
+      codec: {
+        encode: () => nested,
+        validate: () => true,
+        decode: () => ({}),
+        migrations: [],
+      },
+    },
+  });
+  const deepEngine = createPanelEngine({ root, panels: [deepPanel] });
+  deepEngine.open({ panel: deepPanel.reference({}) });
+  assert.doesNotThrow(() => deepEngine.encodeNavigationDocument());
+
+  const accessorPanel = definePanel({
+    kind: "accessor",
+    title: () => "Accessor",
+    persistence: {
+      mode: "navigation",
+      version: 1,
+      codec: {
+        encode: () =>
+          Object.defineProperty({}, "id", {
+            enumerable: true,
+            get: () => "secret",
+          }),
+        validate: () => true,
+        decode: () => ({}),
+        migrations: [],
+      },
+    },
+  });
+  const accessorEngine = createPanelEngine({ root, panels: [accessorPanel] });
+  accessorEngine.open({ panel: accessorPanel.reference({}) });
+  assert.throws(
+    () => accessorEngine.encodeNavigationDocument(),
+    /Navigation descriptors require data properties/,
+  );
 });

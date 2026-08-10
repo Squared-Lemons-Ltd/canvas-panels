@@ -40,6 +40,38 @@ const pinnedStudent = definePanel({
   closable: false,
   title: (input: { name: string }) => input.name,
 });
+const persistentStudent = definePanel({
+  kind: "persistent-student",
+  title: (input: { studentId: string; name: string }) => input.name,
+  persistence: {
+    mode: "navigation-with-loader",
+    version: 1,
+    codec: {
+      encode: ({ studentId, name }) => ({ studentId, name }),
+      validate: (
+        value: unknown,
+      ): value is { studentId: string; name: string } =>
+        typeof value === "object" &&
+        value !== null &&
+        "studentId" in value &&
+        typeof value.studentId === "string" &&
+        "name" in value &&
+        typeof value.name === "string",
+      decode: (descriptor) => ({
+        studentId: descriptor.studentId,
+        name: descriptor.name,
+      }),
+      migrations: [],
+    },
+    restore: async (input, { signal }) => {
+      const studentId: string = input.studentId;
+      const aborted: boolean = signal.aborted;
+      void studentId;
+      void aborted;
+      return { status: "available" };
+    },
+  },
+});
 const reusableClass = definePanel({
   kind: "class",
   deduplication: "reuse",
@@ -61,7 +93,7 @@ studentReference.input.name = "Mutated";
 
 const Canvas = createCanvasModule({
   root,
-  panels: [student, updatableStudent, pinnedStudent],
+  panels: [student, updatableStudent, pinnedStudent, persistentStudent],
   renderers: {
     classes: ({ open, panel }) => {
       const rootInput: undefined = panel.reference.input;
@@ -85,10 +117,31 @@ const Canvas = createCanvasModule({
     },
     "updatable-student": () => null,
     "pinned-student": () => null,
+    "persistent-student": ({ panel }) => {
+      const studentId: string = panel.reference.input.studentId;
+      void studentId;
+      return null;
+    },
   },
 });
 
 const engine = Canvas.createEngine();
+const navigationDocument: string = engine.encodeNavigationDocument();
+const decodedNavigation = engine.decodeNavigationDocument(navigationDocument);
+if (decodedNavigation.status === "decoded") {
+  const normalized: boolean = decodedNavigation.normalized;
+  const kind:
+    | "student"
+    | "updatable-student"
+    | "pinned-student"
+    | "persistent-student"
+    | undefined = decodedNavigation.references[0]?.kind;
+  void normalized;
+  void kind;
+} else {
+  const path: string = decodedNavigation.diagnostic.path;
+  void path;
+}
 const [rootPanel] = engine.getSnapshot().panels;
 if (!rootPanel) throw new Error("Canvas Engine did not create its Root Panel");
 const rootId: PanelInstanceId = rootPanel.instanceId;

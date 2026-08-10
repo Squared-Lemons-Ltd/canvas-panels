@@ -49,6 +49,50 @@ export type PanelReference<
 
 export type PanelDeduplication = "reuse" | "replace" | "allow-many";
 
+export type JsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | readonly JsonValue[]
+  | Readonly<{ [key: string]: JsonValue }>;
+
+export type PanelDescriptorMigration = Readonly<{
+  from: number;
+  migrate: (descriptor: unknown) => unknown;
+}>;
+
+export type PanelDescriptorCodec<
+  Input,
+  Descriptor extends JsonValue = JsonValue,
+> = Readonly<{
+  encode: (input: DeepReadonly<Input>) => Descriptor;
+  validate: (descriptor: unknown) => descriptor is Descriptor;
+  decode: (descriptor: Descriptor) => Input;
+  migrations: readonly PanelDescriptorMigration[];
+}>;
+
+export type PanelRestoreOutcome =
+  | Readonly<{ status: "available" }>
+  | Readonly<{ status: "unavailable" }>;
+
+export type PanelPersistence<Input, Descriptor extends JsonValue = JsonValue> =
+  | Readonly<{ mode: "transient" }>
+  | Readonly<{
+      mode: "navigation";
+      version: number;
+      codec: PanelDescriptorCodec<Input, Descriptor>;
+    }>
+  | Readonly<{
+      mode: "navigation-with-loader";
+      version: number;
+      codec: PanelDescriptorCodec<Input, Descriptor>;
+      restore: (
+        input: DeepReadonly<Input>,
+        context: Readonly<{ signal: AbortSignal }>,
+      ) => Promise<PanelRestoreOutcome>;
+    }>;
+
 export type RootPanelDefinition<Kind extends string = string> = Readonly<{
   role: "root";
   kind: Kind;
@@ -60,6 +104,7 @@ export type PanelDefinition<
   Kind extends string = string,
   Input = unknown,
   Update = never,
+  Descriptor extends JsonValue = JsonValue,
 > = Readonly<{
   role: "panel";
   kind: Kind;
@@ -68,6 +113,7 @@ export type PanelDefinition<
   key?: (input: DeepReadonly<Input>) => string;
   title: (input: DeepReadonly<Input>) => string;
   reference: (input: Input) => PanelReference<Kind, Input>;
+  persistence: PanelPersistence<Input, Descriptor>;
   update?: Readonly<{
     validate: (update: unknown) => update is Update;
     validateResult: (value: unknown) => value is Input;
@@ -332,9 +378,44 @@ export type TransitionResolutionOutcome =
         | "transition-decision-conflict";
     }>;
 
+export type NavigationDocumentDiagnostic = Readonly<{
+  code:
+    | "invalid-json"
+    | "duplicate-key"
+    | "document-too-large"
+    | "invalid-document"
+    | "unsupported-schema"
+    | "too-many-panels"
+    | "unknown-kind"
+    | "transient-kind"
+    | "unsupported-codec-version"
+    | "missing-migration"
+    | "migration-failed"
+    | "invalid-descriptor"
+    | "decode-failed";
+  path: string;
+}>;
+
+export type NavigationDocumentDecodeOutcome<
+  Reference extends PanelReference = PanelReference,
+> =
+  | Readonly<{
+      status: "decoded";
+      references: readonly Reference[];
+      normalized: boolean;
+    }>
+  | Readonly<{
+      status: "rejected";
+      diagnostic: NavigationDocumentDiagnostic;
+    }>;
+
 export type PanelEngine<Reference extends PanelReference = PanelReference> =
   Readonly<{
     getSnapshot: () => PanelEngineSnapshot;
+    encodeNavigationDocument: () => string;
+    decodeNavigationDocument: (
+      encoded: string,
+    ) => NavigationDocumentDecodeOutcome<Reference>;
     subscribe: (listener: () => void) => () => void;
     open: (command: OpenPanelCommand<Reference>) => OpenPanelOutcome;
     activate: (command: { target: PanelInstanceRef }) => ActivatePanelOutcome;
@@ -362,6 +443,7 @@ type PanelDefinitionShape = Readonly<{
   key?: (input: never) => string;
   title: (input: never) => string;
   reference: (input: never) => PanelReference<string, unknown>;
+  persistence?: unknown;
   update?: Readonly<{
     validate: (update: unknown) => boolean;
     validateResult: (value: unknown) => boolean;
@@ -371,7 +453,12 @@ type PanelDefinitionShape = Readonly<{
 }>;
 
 type ReferenceOf<Definition> =
-  Definition extends PanelDefinition<infer Kind, infer Input>
+  Definition extends PanelDefinition<
+    infer Kind,
+    infer Input,
+    infer _Update,
+    infer _Descriptor
+  >
     ? PanelReference<Kind, Input>
     : never;
 
@@ -434,6 +521,215 @@ function cloneAndFreezePanelInput<Input>(input: Input): DeepReadonly<Input> {
   return clone as DeepReadonly<Input>;
 }
 
+const navigationDocumentSchemaVersion = 1;
+const maximumNavigationDocumentBytes = 16_384;
+const maximumNavigationDocumentPanels = 32;
+const maximumNavigationDescriptorDepth = 32;
+
+function utf8ByteLength(value: string): number {
+  let bytes = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const codeUnit = value.charCodeAt(index);
+    if (codeUnit <= 0x7f) {
+      bytes += 1;
+    } else if (codeUnit <= 0x7ff) {
+      bytes += 2;
+    } else if (
+      codeUnit >= 0xd800 &&
+      codeUnit <= 0xdbff &&
+      index + 1 < value.length &&
+      value.charCodeAt(index + 1) >= 0xdc00 &&
+      value.charCodeAt(index + 1) <= 0xdfff
+    ) {
+      bytes += 4;
+      index += 1;
+    } else {
+      bytes += 3;
+    }
+  }
+  return bytes;
+}
+
+function canonicalJson(
+  value: unknown,
+  maximumDepth = maximumNavigationDescriptorDepth,
+): string {
+  const ancestors = new WeakSet<object>();
+  const visit = (candidate: unknown, depth: number): string => {
+    if (depth > maximumDepth) {
+      throw new TypeError("Navigation descriptor nesting is too deep");
+    }
+    if (candidate === null || typeof candidate === "boolean") {
+      return String(candidate);
+    }
+    if (typeof candidate === "string") return JSON.stringify(candidate);
+    if (typeof candidate === "number") {
+      if (!Number.isFinite(candidate)) {
+        throw new TypeError("Navigation descriptors require finite numbers");
+      }
+      return Object.is(candidate, -0) ? "0" : String(candidate);
+    }
+    if (typeof candidate !== "object") {
+      throw new TypeError("Navigation descriptors must contain JSON values");
+    }
+    if (ancestors.has(candidate)) {
+      throw new TypeError("Navigation descriptors may not contain cycles");
+    }
+    ancestors.add(candidate);
+    try {
+      if (Array.isArray(candidate)) {
+        const expectedKeys = new Set<PropertyKey>(["length"]);
+        const values: string[] = [];
+        for (let index = 0; index < candidate.length; index += 1) {
+          const property = Object.getOwnPropertyDescriptor(candidate, index);
+          if (!property || !("value" in property) || !property.enumerable) {
+            throw new TypeError(
+              "Navigation descriptor arrays must be dense JSON arrays",
+            );
+          }
+          expectedKeys.add(String(index));
+          values.push(visit(property.value, depth + 1));
+        }
+        if (Reflect.ownKeys(candidate).some((key) => !expectedKeys.has(key))) {
+          throw new TypeError(
+            "Navigation descriptor arrays must be dense JSON arrays",
+          );
+        }
+        return `[${values.join(",")}]`;
+      }
+      const prototype = Object.getPrototypeOf(candidate);
+      if (prototype !== Object.prototype && prototype !== null) {
+        throw new TypeError("Navigation descriptors require plain objects");
+      }
+      const keys = Object.keys(candidate).sort();
+      if (
+        keys.some((key) =>
+          ["__proto__", "constructor", "prototype"].includes(key),
+        )
+      ) {
+        throw new TypeError("Navigation descriptors contain an unsafe key");
+      }
+      if (Reflect.ownKeys(candidate).length !== keys.length) {
+        throw new TypeError("Navigation descriptors require string keys");
+      }
+      return `{${keys
+        .map((key) => {
+          const property = Object.getOwnPropertyDescriptor(candidate, key);
+          if (!property || !("value" in property) || !property.enumerable) {
+            throw new TypeError(
+              "Navigation descriptors require data properties",
+            );
+          }
+          return `${JSON.stringify(key)}:${visit(property.value, depth + 1)}`;
+        })
+        .join(",")}}`;
+    } finally {
+      ancestors.delete(candidate);
+    }
+  };
+  return visit(value, 0);
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function hasExactKeys(
+  value: Record<string, unknown>,
+  expected: readonly string[],
+): boolean {
+  const keys = Object.keys(value).sort();
+  return (
+    keys.length === expected.length &&
+    keys.every((key, index) => key === expected[index])
+  );
+}
+
+function findDuplicateJsonKey(source: string): string | undefined {
+  let index = 0;
+  let duplicate: string | undefined;
+  const skipWhitespace = () => {
+    while (/\s/u.test(source[index] ?? "")) index += 1;
+  };
+  const readString = (): string => {
+    const start = index;
+    index += 1;
+    while (index < source.length) {
+      if (source[index] === "\\") {
+        index += 2;
+        continue;
+      }
+      if (source[index] === '"') {
+        index += 1;
+        break;
+      }
+      index += 1;
+    }
+    return JSON.parse(source.slice(start, index)) as string;
+  };
+  const childPath = (path: string, key: string) =>
+    /^[A-Za-z_$][A-Za-z0-9_$]*$/u.test(key)
+      ? `${path}.${key}`
+      : `${path}[${JSON.stringify(key)}]`;
+  const visit = (path: string): void => {
+    skipWhitespace();
+    if (source[index] === "{") {
+      index += 1;
+      const keys = new Set<string>();
+      skipWhitespace();
+      while (index < source.length && source[index] !== "}") {
+        if (source[index] !== '"') return;
+        const key = readString();
+        const keyPath = childPath(path, key);
+        if (keys.has(key)) duplicate ??= keyPath;
+        keys.add(key);
+        skipWhitespace();
+        if (source[index] !== ":") return;
+        index += 1;
+        visit(keyPath);
+        skipWhitespace();
+        if (source[index] !== ",") break;
+        index += 1;
+        skipWhitespace();
+      }
+      if (source[index] === "}") index += 1;
+      return;
+    }
+    if (source[index] === "[") {
+      index += 1;
+      let itemIndex = 0;
+      skipWhitespace();
+      while (index < source.length && source[index] !== "]") {
+        visit(`${path}[${itemIndex}]`);
+        itemIndex += 1;
+        skipWhitespace();
+        if (source[index] !== ",") break;
+        index += 1;
+        skipWhitespace();
+      }
+      if (source[index] === "]") index += 1;
+      return;
+    }
+    if (source[index] === '"') {
+      readString();
+      return;
+    }
+    while (index < source.length && !/[\s,\]}]/u.test(source[index] ?? "")) {
+      index += 1;
+    }
+  };
+  try {
+    visit("$");
+  } catch {
+    return undefined;
+  }
+  return duplicate;
+}
+
 function panelReferencesEqual(
   left: PanelReference,
   right: PanelReference,
@@ -490,11 +786,17 @@ export function defineRootPanel<const Kind extends string>(options: {
   });
 }
 
-export function definePanel<const Kind extends string, Input, Update = never>(
+export function definePanel<
+  const Kind extends string,
+  Input,
+  Update = never,
+  Descriptor extends JsonValue = JsonValue,
+>(
   options: {
     kind: Kind;
     title: (input: DeepReadonly<Input>) => string;
     closable?: boolean;
+    persistence?: PanelPersistence<Input, Descriptor>;
     update?: Readonly<{
       validate: (value: unknown) => value is Update;
       validateResult: (value: unknown) => value is Input;
@@ -511,7 +813,7 @@ export function definePanel<const Kind extends string, Input, Update = never>(
         key?: (input: DeepReadonly<Input>) => string;
       }
   ),
-): PanelDefinition<Kind, Input, Update> {
+): PanelDefinition<Kind, Input, Update, Descriptor> {
   const updatePolicy =
     options.update === undefined
       ? undefined
@@ -521,6 +823,90 @@ export function definePanel<const Kind extends string, Input, Update = never>(
           apply: options.update.apply,
           navigation: options.update.navigation,
         });
+  const suppliedPersistence = options.persistence;
+  const suppliedMode = (
+    suppliedPersistence as Readonly<{ mode?: unknown }> | undefined
+  )?.mode;
+  if (
+    suppliedPersistence !== undefined &&
+    suppliedMode !== "transient" &&
+    suppliedMode !== "navigation" &&
+    suppliedMode !== "navigation-with-loader"
+  ) {
+    throw new TypeError("Unknown Panel persistence mode");
+  }
+  let persistence: PanelPersistence<Input, Descriptor>;
+  if (
+    suppliedPersistence === undefined ||
+    suppliedPersistence.mode === "transient"
+  ) {
+    persistence = Object.freeze({ mode: "transient" });
+  } else {
+    if (
+      !Number.isSafeInteger(suppliedPersistence.version) ||
+      suppliedPersistence.version < 1
+    ) {
+      throw new TypeError(
+        "Panel persistence versions must be positive integers",
+      );
+    }
+    if (
+      typeof suppliedPersistence.codec?.encode !== "function" ||
+      typeof suppliedPersistence.codec.validate !== "function" ||
+      typeof suppliedPersistence.codec.decode !== "function" ||
+      !Array.isArray(suppliedPersistence.codec.migrations) ||
+      (suppliedPersistence.mode === "navigation-with-loader" &&
+        typeof suppliedPersistence.restore !== "function")
+    ) {
+      throw new TypeError(
+        "Panel persistence requires a valid descriptor codec",
+      );
+    }
+    const seenVersions = new Set<number>();
+    const migrations = suppliedPersistence.codec.migrations.map((migration) =>
+      Object.freeze({ from: migration.from, migrate: migration.migrate }),
+    );
+    for (const migration of migrations) {
+      if (
+        !Number.isSafeInteger(migration.from) ||
+        migration.from < 1 ||
+        migration.from >= suppliedPersistence.version ||
+        seenVersions.has(migration.from) ||
+        typeof migration.migrate !== "function"
+      ) {
+        throw new TypeError(
+          "Panel descriptor migrations must have unique valid versions",
+        );
+      }
+      seenVersions.add(migration.from);
+    }
+    for (let version = 1; version < suppliedPersistence.version; version += 1) {
+      if (!seenVersions.has(version)) {
+        throw new TypeError(
+          `Missing Panel descriptor migration from version ${version}`,
+        );
+      }
+    }
+    const codec = Object.freeze({
+      encode: suppliedPersistence.codec.encode,
+      validate: suppliedPersistence.codec.validate,
+      decode: suppliedPersistence.codec.decode,
+      migrations: Object.freeze(migrations),
+    });
+    persistence =
+      suppliedPersistence.mode === "navigation"
+        ? Object.freeze({
+            mode: "navigation",
+            version: suppliedPersistence.version,
+            codec,
+          })
+        : Object.freeze({
+            mode: "navigation-with-loader",
+            version: suppliedPersistence.version,
+            codec,
+            restore: suppliedPersistence.restore,
+          });
+  }
   const definition = Object.freeze({
     role: "panel",
     kind: options.kind,
@@ -528,6 +914,7 @@ export function definePanel<const Kind extends string, Input, Update = never>(
     closable: options.closable ?? true,
     ...(options.key === undefined ? {} : { key: options.key }),
     title: options.title,
+    persistence,
     ...(updatePolicy === undefined ? {} : { update: updatePolicy }),
     reference: (input: Input) => {
       const immutableInput = cloneAndFreezePanelInput(input);
@@ -628,6 +1015,7 @@ export function createPanelEngine<
         closable: definition.closable,
         deduplication: definition.deduplication,
         identity: definition,
+        persistence: definition.persistence as PanelPersistence<unknown>,
         reference: definition.reference as (input: unknown) => PanelReference,
         title: definition.title as (input: unknown) => string,
         update: definition.update as
@@ -817,6 +1205,162 @@ export function createPanelEngine<
 
   return Object.freeze({
     getSnapshot: () => snapshot,
+    encodeNavigationDocument: () => {
+      const panels: Array<{
+        kind: string;
+        version: number;
+        descriptor: JsonValue;
+      }> = [];
+      for (const panel of snapshot.panels.slice(1)) {
+        const definition = definitions.get(panel.kind);
+        if (!definition || definition.persistence.mode === "transient") break;
+        if (panels.length >= maximumNavigationDocumentPanels) {
+          throw new RangeError("Navigation Document exceeds the Panel limit");
+        }
+        const descriptor = definition.persistence.codec.encode(
+          panel.reference.input,
+        );
+        const canonicalDescriptor = canonicalJson(descriptor);
+        let validDescriptor = false;
+        try {
+          validDescriptor = definition.persistence.codec.validate(descriptor);
+        } catch {
+          // Codec exceptions are normalized below.
+        }
+        if (!validDescriptor) {
+          throw new TypeError(
+            "Panel descriptor codec emitted an invalid descriptor",
+          );
+        }
+        panels.push({
+          descriptor: JSON.parse(canonicalDescriptor) as JsonValue,
+          kind: panel.kind,
+          version: definition.persistence.version,
+        });
+      }
+      const encoded = canonicalJson(
+        {
+          panels,
+          version: navigationDocumentSchemaVersion,
+        },
+        maximumNavigationDescriptorDepth + 3,
+      );
+      if (utf8ByteLength(encoded) > maximumNavigationDocumentBytes) {
+        throw new RangeError("Navigation Document exceeds the byte limit");
+      }
+      return encoded;
+    },
+    decodeNavigationDocument: (encoded: string) => {
+      const reject = (
+        code: NavigationDocumentDiagnostic["code"],
+        path: string,
+      ): NavigationDocumentDecodeOutcome<ReferenceOf<Definitions[number]>> =>
+        Object.freeze({
+          status: "rejected",
+          diagnostic: Object.freeze({ code, path }),
+        });
+      if (
+        typeof encoded !== "string" ||
+        utf8ByteLength(encoded) > maximumNavigationDocumentBytes
+      ) {
+        return reject("document-too-large", "$");
+      }
+      const duplicateKey = findDuplicateJsonKey(encoded);
+      if (duplicateKey) return reject("duplicate-key", "$");
+      let document: unknown;
+      try {
+        document = JSON.parse(encoded);
+      } catch {
+        return reject("invalid-json", "$");
+      }
+      if (
+        !isPlainRecord(document) ||
+        !hasExactKeys(document, ["panels", "version"])
+      ) {
+        return reject("invalid-document", "$");
+      }
+      if (document.version !== navigationDocumentSchemaVersion) {
+        return reject("unsupported-schema", "$.version");
+      }
+      if (!Array.isArray(document.panels)) {
+        return reject("invalid-document", "$.panels");
+      }
+      if (document.panels.length > maximumNavigationDocumentPanels) {
+        return reject("too-many-panels", "$.panels");
+      }
+      const references: PanelReference[] = [];
+      let normalized = false;
+      for (let index = 0; index < document.panels.length; index += 1) {
+        const path = `$.panels[${index}]`;
+        const encodedPanel = document.panels[index];
+        if (
+          !isPlainRecord(encodedPanel) ||
+          !hasExactKeys(encodedPanel, ["descriptor", "kind", "version"]) ||
+          typeof encodedPanel.kind !== "string" ||
+          encodedPanel.kind.length === 0 ||
+          !Number.isSafeInteger(encodedPanel.version) ||
+          (encodedPanel.version as number) < 1 ||
+          !("descriptor" in encodedPanel)
+        ) {
+          return reject("invalid-document", path);
+        }
+        const definition = definitions.get(encodedPanel.kind);
+        if (!definition) return reject("unknown-kind", `${path}.kind`);
+        const persistence = definition.persistence;
+        if (persistence.mode === "transient") {
+          return reject("transient-kind", `${path}.kind`);
+        }
+        const encodedVersion = encodedPanel.version as number;
+        if (encodedVersion > persistence.version) {
+          return reject("unsupported-codec-version", `${path}.version`);
+        }
+        let descriptor: unknown = encodedPanel.descriptor;
+        try {
+          canonicalJson(descriptor);
+        } catch {
+          return reject("invalid-descriptor", `${path}.descriptor`);
+        }
+        for (
+          let version = encodedVersion;
+          version < persistence.version;
+          version += 1
+        ) {
+          const migration = persistence.codec.migrations.find(
+            (candidate) => candidate.from === version,
+          );
+          if (!migration) return reject("missing-migration", `${path}.version`);
+          try {
+            descriptor = migration.migrate(descriptor);
+            canonicalJson(descriptor);
+          } catch {
+            return reject("migration-failed", `${path}.descriptor`);
+          }
+          normalized = true;
+        }
+        let validDescriptor = false;
+        try {
+          validDescriptor = persistence.codec.validate(descriptor);
+        } catch {
+          return reject("invalid-descriptor", `${path}.descriptor`);
+        }
+        if (!validDescriptor) {
+          return reject("invalid-descriptor", `${path}.descriptor`);
+        }
+        try {
+          const input = persistence.codec.decode(descriptor as JsonValue);
+          references.push(definition.reference(input));
+        } catch {
+          return reject("decode-failed", `${path}.descriptor`);
+        }
+      }
+      return Object.freeze({
+        status: "decoded",
+        references: Object.freeze(references) as readonly ReferenceOf<
+          Definitions[number]
+        >[],
+        normalized,
+      });
+    },
     subscribe: (listener: () => void) => {
       listeners.add(listener);
       return () => listeners.delete(listener);

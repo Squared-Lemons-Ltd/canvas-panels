@@ -42,6 +42,7 @@ type PanelDefinitionShape = Readonly<{
   key?: (input: never) => string;
   title: (input: never) => string;
   reference: (input: never) => PanelReference<string, unknown>;
+  persistence: unknown;
   update?: Readonly<{
     validate: (update: unknown) => boolean;
     validateResult: (value: unknown) => boolean;
@@ -51,7 +52,12 @@ type PanelDefinitionShape = Readonly<{
 }>;
 
 type ReferenceOf<Definition> =
-  Definition extends PanelDefinition<infer Kind, infer Input>
+  Definition extends PanelDefinition<
+    infer Kind,
+    infer Input,
+    infer _Update,
+    infer _Descriptor
+  >
     ? PanelReference<Kind, Input>
     : never;
 
@@ -66,7 +72,12 @@ type OpenPanelForDefinition<Definition> =
           kind: Kind;
           reference: PanelReference<Kind, undefined>;
         }>
-    : Definition extends PanelDefinition<infer Kind, infer Input>
+    : Definition extends PanelDefinition<
+          infer Kind,
+          infer Input,
+          infer _Update,
+          infer _Descriptor
+        >
       ? Omit<OpenPanel, "isRoot" | "kind" | "reference"> &
           Readonly<{
             isRoot: false;
