@@ -2452,3 +2452,51 @@ test("restoration retains a valid prefix for malformed descendants and normalize
     failedPanelIndex: null,
   });
 });
+
+test("an aborted restoration retains navigation-only Panels before the next loader", async () => {
+  const root = defineRootPanel({ kind: "root", title: "Root" });
+  const codec = {
+    encode: ({ id }) => ({ id }),
+    validate: (value) =>
+      typeof value === "object" &&
+      value !== null &&
+      "id" in value &&
+      typeof value.id === "string",
+    decode: (value) => ({ id: value.id }),
+    migrations: [],
+  };
+  const section = definePanel({
+    kind: "section",
+    title: ({ id }) => id,
+    persistence: { mode: "navigation", version: 1, codec },
+  });
+  const record = definePanel({
+    kind: "record",
+    title: ({ id }) => id,
+    persistence: {
+      mode: "navigation-with-loader",
+      version: 1,
+      codec,
+      restore: async () => ({ status: "available" }),
+    },
+  });
+  const engine = createPanelEngine({ root, panels: [section, record] });
+  const controller = new AbortController();
+  controller.abort();
+
+  const outcome = await engine.restoreNavigationDocument(
+    '{"panels":[{"descriptor":{"id":"section-a"},"kind":"section","version":1},{"descriptor":{"id":"record-a"},"kind":"record","version":1}],"version":1}',
+    { signal: controller.signal },
+  );
+
+  assert.equal(outcome.status, "recovered");
+  assert.deepEqual(
+    outcome.references.map(({ kind }) => kind),
+    ["section"],
+  );
+  assert.deepEqual(outcome.recovery, {
+    kind: "recovery-panel",
+    reason: "aborted",
+    failedPanelIndex: 1,
+  });
+});

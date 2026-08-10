@@ -1458,12 +1458,12 @@ export function createPanelEngine<
       for (let index = 0; index < decodedReferences.length; index += 1) {
         const reference = decodedReferences[index];
         if (!reference) continue;
-        if (signal.aborted) {
-          return recover(decodedReferences.slice(0, index), "aborted", index);
-        }
         const definition = definitions.get(reference.kind);
         if (definition?.persistence.mode !== "navigation-with-loader") {
           continue;
+        }
+        if (signal.aborted) {
+          return recover(decodedReferences.slice(0, index), "aborted", index);
         }
         let availabilityStatus: PanelRestoreOutcome["status"] | undefined;
         try {
