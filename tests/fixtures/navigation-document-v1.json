@@ -1,0 +1,12 @@
+{
+  "panels": [
+    {
+      "descriptor": {
+        "id": "report-a"
+      },
+      "kind": "report",
+      "version": 1
+    }
+  ],
+  "version": 1
+}
