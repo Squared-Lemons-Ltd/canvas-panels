@@ -2350,12 +2350,13 @@ test("restoration normalizes denied, throwing, and aborted loaders without leaki
       controller.abort();
       throw new Error("secret-abort-detail");
     },
-    malformed: async () =>
-      Object.defineProperty({}, "status", {
+    malformed: async () => {
+      return Object.defineProperty({}, "status", {
         get: () => {
           throw new Error("secret-status-detail");
         },
-      }),
+      });
+    },
   };
 
   for (const [kind, restore] of Object.entries(outcomes)) {

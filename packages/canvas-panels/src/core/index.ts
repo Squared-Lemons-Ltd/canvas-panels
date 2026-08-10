@@ -1471,12 +1471,13 @@ export function createPanelEngine<
             reference.input,
             { signal },
           );
+          const status = availability.status;
           if (
-            availability.status === "available" ||
-            availability.status === "unavailable" ||
-            availability.status === "denied"
+            status === "available" ||
+            status === "unavailable" ||
+            status === "denied"
           ) {
-            availabilityStatus = availability.status;
+            availabilityStatus = status;
           }
         } catch {
           return recover(
