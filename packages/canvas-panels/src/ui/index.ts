@@ -1,9 +1,11 @@
 "use client";
 
-import type { ComponentType, ReactNode } from "react";
+import { Component } from "react";
+import type { ComponentType, ReactNode, RefObject } from "react";
 import {
   createContext,
   createElement,
+  Fragment,
   useCallback,
   useContext,
   useEffect,
@@ -12,13 +14,18 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 import {
   createPanelEngine,
+  type DeepReadonly,
   type OpenPanel,
   type PanelDeduplication,
   type PanelDefinition,
   type PanelEngine,
+  type PanelEngineSnapshot,
+  type PanelInstanceId,
+  type PanelInstanceRef,
   type PanelLifecycle,
   type PanelReference,
   type PendingGuardedTransition,
@@ -33,6 +40,87 @@ type WorkspaceHierarchy = Readonly<{
 const WorkspaceHierarchyContext = createContext<WorkspaceHierarchy | null>(
   null,
 );
+const NavigationInitiatorContext = createContext<(() => void) | null>(null);
+
+export type RendererErrorReport = Readonly<{
+  kind: string;
+  panel: PanelInstanceRef;
+}>;
+
+declare const canvasContextBrand: unique symbol;
+
+export type CanvasContextDefinition<Signal> = Readonly<{
+  readonly [canvasContextBrand]: Signal;
+}>;
+
+export function defineCanvasContext<Signal>(): CanvasContextDefinition<Signal> {
+  return Object.freeze({}) as CanvasContextDefinition<Signal>;
+}
+
+export type CanvasActionProps = Readonly<{
+  id: string;
+  label: string;
+  priority?: number;
+  disabled?: boolean;
+  destructive?: boolean;
+  onSelect: () => void;
+}>;
+
+export type CanvasPanelLifecycle = PanelLifecycle &
+  Readonly<{
+    dirtyLabel?: string;
+    initialFocus?: RefObject<HTMLElement | null>;
+    fallbackFocus?: RefObject<HTMLElement | null>;
+  }>;
+
+class PanelRendererBoundary extends Component<
+  Readonly<{
+    children?: ReactNode;
+    kind: string;
+    panel: PanelInstanceRef;
+    onError?: (report: RendererErrorReport) => void;
+  }>,
+  Readonly<{ failed: boolean; retryKey: number }>
+> {
+  state = Object.freeze({ failed: false, retryKey: 0 });
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  componentDidCatch() {
+    this.props.onError?.(
+      Object.freeze({ kind: this.props.kind, panel: this.props.panel }),
+    );
+  }
+
+  render() {
+    if (!this.state.failed) {
+      return createElement(
+        Fragment,
+        { key: this.state.retryKey },
+        this.props.children,
+      );
+    }
+    return createElement(
+      "div",
+      { role: "alert" },
+      createElement("p", null, "This Panel could not be displayed."),
+      createElement(
+        "button",
+        {
+          onClick: () =>
+            this.setState(({ retryKey }) => ({
+              failed: false,
+              retryKey: retryKey + 1,
+            })),
+          type: "button",
+        },
+        "Retry panel",
+      ),
+    );
+  }
+}
 
 type PanelDefinitionShape = Readonly<{
   role: "panel";
@@ -64,36 +152,46 @@ type ReferenceOf<Definition> =
 type AllowedReference<Definitions extends readonly PanelDefinitionShape[]> =
   ReferenceOf<Definitions[number]>;
 
-type OpenPanelForDefinition<Definition> =
+type InputOf<Definition> = Definition extends RootPanelDefinition
+  ? undefined
+  : Definition extends PanelDefinition<
+        string,
+        infer Input,
+        infer _Update,
+        infer _Descriptor
+      >
+    ? Input
+    : never;
+
+type UpdateOf<Definition> =
+  Definition extends PanelDefinition<
+    string,
+    infer _Input,
+    infer Update,
+    infer _Descriptor
+  >
+    ? Update
+    : never;
+
+export type CanvasPanelRenderProps<
+  Descriptor = unknown,
+  Kind extends string = string,
+> = Readonly<{
+  panel: PanelInstanceRef & Readonly<{ kind: Kind }>;
+  descriptor: DeepReadonly<Descriptor>;
+}>;
+
+type RenderPropsForDefinition<Definition> =
   Definition extends RootPanelDefinition<infer Kind>
-    ? Omit<OpenPanel, "isRoot" | "kind" | "reference"> &
-        Readonly<{
-          isRoot: true;
-          kind: Kind;
-          reference: PanelReference<Kind, undefined>;
-        }>
+    ? CanvasPanelRenderProps<undefined, Kind>
     : Definition extends PanelDefinition<
           infer Kind,
           infer Input,
           infer _Update,
           infer _Descriptor
         >
-      ? Omit<OpenPanel, "isRoot" | "kind" | "reference"> &
-          Readonly<{
-            isRoot: false;
-            kind: Kind;
-            reference: PanelReference<Kind, Input>;
-          }>
+      ? CanvasPanelRenderProps<Input, Kind>
       : never;
-
-export type CanvasPanelRenderProps<
-  Reference extends PanelReference = PanelReference,
-  Panel extends OpenPanel = OpenPanel,
-> = Readonly<{
-  panel: Panel;
-  open: PanelEngine<Reference>["open"];
-  close: CanvasBinding<Reference>["close"];
-}>;
 
 type CanvasRendererMap<
   Root extends RootPanelDefinition,
@@ -102,10 +200,7 @@ type CanvasRendererMap<
   [Definition in
     | Root
     | Definitions[number] as Definition["kind"]]: ComponentType<
-    CanvasPanelRenderProps<
-      AllowedReference<Definitions>,
-      OpenPanelForDefinition<Definition>
-    >
+    RenderPropsForDefinition<Definition>
   >;
 }>;
 
@@ -113,19 +208,93 @@ export type CanvasWorkspaceProps = Readonly<{
   label: string;
 }>;
 
-export type CanvasModuleProviderProps<
-  Reference extends PanelReference = PanelReference,
-> = Readonly<{
+export type CanvasModuleProviderProps = Readonly<{
   children: ReactNode;
-  engine?: PanelEngine<Reference>;
 }>;
 
-export type BoundCanvasModule<Reference extends PanelReference> = Readonly<{
-  Provider: ComponentType<CanvasModuleProviderProps<Reference>>;
+type InternalCanvasModuleProviderProps<Reference extends PanelReference> =
+  CanvasModuleProviderProps & Readonly<{ engine?: PanelEngine<Reference> }>;
+
+export type CanvasPanelReadModel<
+  Descriptor = unknown,
+  Kind extends string = string,
+> = Readonly<{
+  panel: PanelInstanceRef & Readonly<{ kind: Kind }>;
+  descriptor: DeepReadonly<Descriptor>;
+  kind: Kind;
+  title: string;
+  closable: boolean;
+  active: boolean;
+  deepest: boolean;
+  visible: boolean;
+}>;
+
+type ReadModelForDefinition<Definition> = CanvasPanelReadModel<
+  InputOf<Definition>,
+  Definition extends { kind: infer Kind extends string } ? Kind : never
+>;
+
+export type CanvasTransitionStatus = Readonly<{
+  pending: boolean;
+  command: "open" | "close" | null;
+  panelCount: number;
+}>;
+
+export type CanvasPresentation = Readonly<{
+  active: boolean;
+  deepest: boolean;
+  visible: boolean;
+  closable: boolean;
+  title: string;
+}>;
+
+export type CanvasNavigation<
+  Reference extends PanelReference,
+  RegisteredDefinition extends PanelDefinitionShape,
+> = Readonly<{
+  open: <Definition extends RegisteredDefinition>(
+    definition: Definition,
+    descriptor: InputOf<Definition>,
+    options?: Readonly<{ origin?: PanelInstanceRef }>,
+  ) => ReturnType<PanelEngine<Reference>["open"]>;
+  update: <Definition extends RegisteredDefinition>(
+    definition: Definition,
+    update: UpdateOf<Definition>,
+    target?: PanelInstanceRef,
+  ) => ReturnType<PanelEngine<Reference>["update"]>;
+  activate: (target?: PanelInstanceRef) => ReturnType<PanelEngine["activate"]>;
+  collapse: (target?: PanelInstanceRef) => ReturnType<PanelEngine["collapse"]>;
+  close: (target?: PanelInstanceRef) => ReturnType<PanelEngine["close"]>;
+}>;
+
+export type BoundCanvasModule<
+  Reference extends PanelReference,
+  Root extends RootPanelDefinition,
+  RegisteredDefinition extends PanelDefinitionShape = PanelDefinitionShape,
+  Signal = never,
+> = Readonly<{
+  Action: ComponentType<CanvasActionProps>;
+  Provider: ComponentType<CanvasModuleProviderProps>;
   Workspace: ComponentType<CanvasWorkspaceProps>;
-  createEngine: () => PanelEngine<Reference>;
-  useCanvas: () => CanvasBinding<Reference>;
-  useLifecycle: (lifecycle: PanelLifecycle) => void;
+  useNavigation: () => CanvasNavigation<Reference, RegisteredDefinition>;
+  usePanel: {
+    (
+      target?: PanelInstanceRef,
+    ): ReadModelForDefinition<Root | RegisteredDefinition>;
+    <Definition extends Root | RegisteredDefinition>(
+      definition: Definition,
+      target: PanelInstanceRef & Readonly<{ kind: Definition["kind"] }>,
+    ): ReadModelForDefinition<Definition> | null;
+  };
+  useStack: () => readonly CanvasPanelReadModel[];
+  useTransitionStatus: () => CanvasTransitionStatus;
+  usePresentation: (target?: PanelInstanceRef) => CanvasPresentation;
+  useLifecycle: (lifecycle: CanvasPanelLifecycle) => void;
+  useHeader: (header: Readonly<{ visualTitle?: ReactNode }>) => void;
+  useContextSignal: (signal: Signal) => void;
+  useContextTarget: (
+    target?: "active" | "deepest" | "focused" | PanelInstanceRef,
+  ) => Readonly<{ panel: PanelInstanceRef | null; signal: Signal | undefined }>;
 }>;
 
 function GuardedTransitionDialog({
@@ -269,22 +438,52 @@ function GuardedTransitionDialog({
 export function createCanvasModule<
   const Root extends RootPanelDefinition,
   const Definitions extends readonly PanelDefinitionShape[],
+  Signal = never,
 >(config: {
+  context?: CanvasContextDefinition<Signal>;
   root: Root;
   panels: Definitions;
   renderers: CanvasRendererMap<Root, Definitions>;
-}): BoundCanvasModule<AllowedReference<Definitions>> {
+  onRendererError?: (report: RendererErrorReport) => void;
+}): BoundCanvasModule<
+  AllowedReference<Definitions>,
+  Root,
+  Definitions[number],
+  Signal
+> {
   type Reference = AllowedReference<Definitions>;
   const bindings = createCanvasBindings<Reference>();
   const LifecycleRegistrationContext = createContext<
     ((lifecycle: PanelLifecycle) => () => void) | null
   >(null);
+  type HeaderRegistration = Readonly<{
+    visualTitle?: ReactNode;
+    dirtyLabel?: string;
+    initialFocus?: RefObject<HTMLElement | null>;
+    fallbackFocus?: RefObject<HTMLElement | null>;
+  }>;
+  type PanelScope = Readonly<{
+    panel: OpenPanel;
+    registerAction: (action: CanvasActionProps) => () => void;
+    registerHeader: (header: HeaderRegistration) => () => void;
+  }>;
+  type SignalStore = Readonly<{
+    subscribe: (listener: () => void) => () => void;
+    getVersion: () => number;
+    publish: (panel: PanelInstanceRef, signal: Signal) => () => void;
+    read: (panel: PanelInstanceRef) => Signal | undefined;
+    setFocused: (panel: PanelInstanceRef | null) => void;
+    getFocused: () => PanelInstanceRef | null;
+  }>;
+  const PanelScopeContext = createContext<PanelScope | null>(null);
+  const SignalStoreContext = createContext<SignalStore | null>(null);
   const createEngine = () =>
     createPanelEngine({ root: config.root, panels: config.panels });
 
-  function useLifecycle(lifecycle: PanelLifecycle): void {
+  function useLifecycle(lifecycle: CanvasPanelLifecycle): void {
     const register = useContext(LifecycleRegistrationContext);
-    if (!register) {
+    const scope = useContext(PanelScopeContext);
+    if (!register || !scope) {
       throw new Error(
         "Canvas lifecycle hooks must run inside a Panel renderer",
       );
@@ -294,70 +493,505 @@ export function createCanvasModule<
     useLayoutEffect(() => {
       latest.current = lifecycle;
     }, [lifecycle]);
+    useEffect(() => {
+      const unregisterLifecycle = register(
+        Object.freeze<PanelLifecycle>({
+          ...(dirty === undefined ? {} : { dirty }),
+          guard: (transition) => latest.current.guard(transition),
+          save: (operation) => latest.current.save(operation),
+          discard: (operation) => latest.current.discard(operation),
+        }),
+      );
+      const unregisterHeader = scope.registerHeader({
+        ...(lifecycle.dirtyLabel === undefined
+          ? {}
+          : { dirtyLabel: lifecycle.dirtyLabel }),
+        ...(lifecycle.initialFocus === undefined
+          ? {}
+          : { initialFocus: lifecycle.initialFocus }),
+        ...(lifecycle.fallbackFocus === undefined
+          ? {}
+          : { fallbackFocus: lifecycle.fallbackFocus }),
+      });
+      return () => {
+        unregisterHeader();
+        unregisterLifecycle();
+      };
+    }, [
+      dirty,
+      lifecycle.dirtyLabel,
+      lifecycle.fallbackFocus,
+      lifecycle.initialFocus,
+      register,
+      scope,
+    ]);
+  }
+
+  function useHeader(header: Readonly<{ visualTitle?: ReactNode }>): void {
+    const scope = useContext(PanelScopeContext);
+    if (!scope)
+      throw new Error("Canvas header hooks must run inside a Panel renderer");
+    const { visualTitle } = header;
+    useEffect(
+      () => scope.registerHeader({ visualTitle }),
+      [scope, visualTitle],
+    );
+  }
+
+  function Action(action: CanvasActionProps): null {
+    const scope = useContext(PanelScopeContext);
+    if (!scope)
+      throw new Error("Canvas Actions must render inside a Panel renderer");
+    const { destructive, disabled, id, label, onSelect, priority } = action;
+    const latest = useRef(onSelect);
+    useLayoutEffect(() => {
+      latest.current = onSelect;
+    }, [onSelect]);
     useEffect(
       () =>
-        register(
-          Object.freeze<PanelLifecycle>({
-            ...(dirty === undefined ? {} : { dirty }),
-            guard: (transition) => latest.current.guard(transition),
-            save: (operation) => latest.current.save(operation),
-            discard: (operation) => latest.current.discard(operation),
-          }),
+        scope.registerAction({
+          id,
+          label,
+          onSelect: () => latest.current(),
+          ...(destructive === undefined ? {} : { destructive }),
+          ...(disabled === undefined ? {} : { disabled }),
+          ...(priority === undefined ? {} : { priority }),
+        }),
+      [destructive, disabled, id, label, priority, scope],
+    );
+    return null;
+  }
+
+  function useContextSignal(signal: Signal): void {
+    const scope = useContext(PanelScopeContext);
+    const store = useContext(SignalStoreContext);
+    if (!scope || !store) {
+      throw new Error(
+        "Canvas Context Signals must run inside a Panel renderer",
+      );
+    }
+    useEffect(
+      () => store.publish(scope.panel.instanceRef, signal),
+      [scope, signal, store],
+    );
+  }
+
+  function useContextTarget(
+    target: "active" | "deepest" | "focused" | PanelInstanceRef = "active",
+  ): Readonly<{ panel: PanelInstanceRef | null; signal: Signal | undefined }> {
+    const store = useContext(SignalStoreContext);
+    if (!store)
+      throw new Error("Canvas Context Target requires a Canvas Provider");
+    const selectedPanel = bindings.useSelector((snapshot) =>
+      typeof target === "object"
+        ? (snapshot.panels.find(({ instanceRef }) => instanceRef === target)
+            ?.instanceRef ?? null)
+        : target === "focused"
+          ? null
+          : (snapshot.panels.find(
+              ({ instanceId }) =>
+                instanceId ===
+                (target === "deepest"
+                  ? snapshot.deepestPanelId
+                  : snapshot.activePanelId),
+            )?.instanceRef ?? null),
+    );
+    useSyncExternalStore(store.subscribe, store.getVersion, store.getVersion);
+    const panel = target === "focused" ? store.getFocused() : selectedPanel;
+    return Object.freeze({
+      panel,
+      signal: panel ? store.read(panel) : undefined,
+    });
+  }
+
+  function currentTarget(
+    scoped: PanelScope | null,
+    snapshot: PanelEngineSnapshot,
+  ): PanelInstanceRef {
+    const target =
+      scoped?.panel.instanceRef ??
+      snapshot.panels.find(
+        ({ instanceId }) => instanceId === snapshot.activePanelId,
+      )?.instanceRef;
+    if (!target) throw new Error("Canvas navigation requires a Panel target");
+    return target;
+  }
+
+  function useNavigation(): CanvasNavigation<Reference, Definitions[number]> {
+    const engine = bindings.useEngine();
+    const scoped = useContext(PanelScopeContext);
+    const rememberInitiator = useContext(NavigationInitiatorContext);
+    return Object.freeze({
+      open: <Definition extends Definitions[number]>(
+        definition: Definition,
+        descriptor: InputOf<Definition>,
+        options?: Readonly<{ origin?: PanelInstanceRef }>,
+      ) => {
+        rememberInitiator?.();
+        return engine.open({
+          originId: (
+            options?.origin ?? currentTarget(scoped, engine.getSnapshot())
+          ).instanceId,
+          panel: definition.reference(descriptor as never) as Reference,
+        });
+      },
+      update: <Definition extends Definitions[number]>(
+        definition: Definition,
+        update: UpdateOf<Definition>,
+        target?: PanelInstanceRef,
+      ) => {
+        rememberInitiator?.();
+        return engine.update({
+          definition: definition as never,
+          target: target ?? currentTarget(scoped, engine.getSnapshot()),
+          update: update as never,
+        });
+      },
+      activate: (target?: PanelInstanceRef) =>
+        engine.activate({
+          target: target ?? currentTarget(scoped, engine.getSnapshot()),
+        }),
+      collapse: (target?: PanelInstanceRef) => {
+        rememberInitiator?.();
+        return engine.collapse({
+          target: target ?? currentTarget(scoped, engine.getSnapshot()),
+        });
+      },
+      close: (target?: PanelInstanceRef) => {
+        rememberInitiator?.();
+        return engine.close({
+          target: target ?? currentTarget(scoped, engine.getSnapshot()),
+        });
+      },
+    });
+  }
+
+  function toPanelReadModel(
+    panel: OpenPanel,
+    snapshot: PanelEngineSnapshot,
+  ): CanvasPanelReadModel {
+    return Object.freeze({
+      panel: panel.instanceRef,
+      descriptor: panel.reference.input,
+      kind: panel.kind,
+      title: panel.title,
+      closable: panel.closable,
+      active: panel.instanceId === snapshot.activePanelId,
+      deepest: panel.instanceId === snapshot.deepestPanelId,
+      visible: snapshot.visiblePanelIds.includes(panel.instanceId),
+    });
+  }
+
+  function usePanel(
+    target?: PanelInstanceRef,
+  ): ReadModelForDefinition<Root | Definitions[number]>;
+  function usePanel<Definition extends Root | Definitions[number]>(
+    definition: Definition,
+    target: PanelInstanceRef & Readonly<{ kind: Definition["kind"] }>,
+  ): ReadModelForDefinition<Definition> | null;
+  function usePanel(
+    definitionOrTarget?: Root | Definitions[number] | PanelInstanceRef,
+    explicitTarget?: PanelInstanceRef,
+  ): CanvasPanelReadModel | null {
+    const scoped = useContext(PanelScopeContext);
+    const definition =
+      definitionOrTarget && "role" in definitionOrTarget
+        ? definitionOrTarget
+        : null;
+    const target = definition
+      ? explicitTarget
+      : (definitionOrTarget as PanelInstanceRef | undefined);
+    const selected = bindings.useSelector(
+      (snapshot) => {
+        const instanceId =
+          target?.instanceId ??
+          scoped?.panel.instanceId ??
+          snapshot.activePanelId;
+        const panel = snapshot.panels.find(
+          (candidate) => candidate.instanceId === instanceId,
+        );
+        return panel && (!definition || panel.kind === definition.kind)
+          ? toPanelReadModel(panel, snapshot)
+          : null;
+      },
+      (left, right) =>
+        left === right ||
+        (left !== null &&
+          right !== null &&
+          left.panel === right.panel &&
+          left.descriptor === right.descriptor &&
+          left.title === right.title &&
+          left.closable === right.closable &&
+          left.active === right.active &&
+          left.deepest === right.deepest &&
+          left.visible === right.visible),
+    );
+    if (!selected && definition) return null;
+    if (!selected) throw new Error("Canvas usePanel target is not current");
+    return selected;
+  }
+
+  function useStack(): readonly CanvasPanelReadModel[] {
+    return bindings.useSelector(
+      (snapshot) =>
+        Object.freeze(
+          snapshot.panels.map((panel) => toPanelReadModel(panel, snapshot)),
         ),
-      [dirty, register],
+      (left, right) =>
+        left.length === right.length &&
+        left.every(
+          (panel, index) =>
+            panel.panel === right[index]?.panel &&
+            panel.descriptor === right[index]?.descriptor &&
+            panel.kind === right[index]?.kind &&
+            panel.title === right[index]?.title &&
+            panel.closable === right[index]?.closable &&
+            panel.active === right[index]?.active &&
+            panel.deepest === right[index]?.deepest &&
+            panel.visible === right[index]?.visible,
+        ),
+    );
+  }
+
+  function useTransitionStatus(): CanvasTransitionStatus {
+    return bindings.useSelector(
+      (snapshot) =>
+        Object.freeze({
+          pending: snapshot.transition !== null,
+          command: snapshot.transition?.command ?? null,
+          panelCount: snapshot.transition?.panels.length ?? 0,
+        }),
+      (left, right) =>
+        left.pending === right.pending &&
+        left.command === right.command &&
+        left.panelCount === right.panelCount,
+    );
+  }
+
+  function usePresentation(target?: PanelInstanceRef): CanvasPresentation {
+    const scoped = useContext(PanelScopeContext);
+    return bindings.useSelector(
+      (snapshot) => {
+        const instanceId =
+          target?.instanceId ??
+          scoped?.panel.instanceId ??
+          snapshot.activePanelId;
+        const panel = snapshot.panels.find(
+          (candidate) => candidate.instanceId === instanceId,
+        );
+        if (!panel)
+          throw new Error("Canvas usePresentation target is not current");
+        return Object.freeze({
+          active: panel.instanceId === snapshot.activePanelId,
+          deepest: panel.instanceId === snapshot.deepestPanelId,
+          visible: snapshot.visiblePanelIds.includes(panel.instanceId),
+          closable: panel.closable,
+          title: panel.title,
+        });
+      },
+      (left, right) =>
+        left.active === right.active &&
+        left.deepest === right.deepest &&
+        left.visible === right.visible &&
+        left.closable === right.closable &&
+        left.title === right.title,
     );
   }
 
   function ScopedRenderer({
     Renderer,
     panel,
-    open,
-    close,
     registerLifecycle,
+    registerAction,
+    registerHeader,
   }: Readonly<{
-    Renderer: ComponentType<CanvasPanelRenderProps<Reference>>;
+    Renderer: ComponentType<Record<string, unknown>>;
     panel: OpenPanel;
-    open: PanelEngine<Reference>["open"];
-    close: CanvasBinding<Reference>["close"];
     registerLifecycle: CanvasBinding<Reference>["registerLifecycle"];
+    registerAction: (
+      panel: PanelInstanceRef,
+      action: CanvasActionProps,
+    ) => () => void;
+    registerHeader: (
+      panel: PanelInstanceRef,
+      header: HeaderRegistration,
+    ) => () => void;
   }>) {
+    const lifecycleOwner = useRef(false);
     const register = useCallback(
-      (lifecycle: PanelLifecycle) =>
-        registerLifecycle({ target: panel.instanceRef, lifecycle }),
+      (lifecycle: PanelLifecycle) => {
+        if (lifecycleOwner.current) {
+          throw new Error("A Panel renderer may register only one lifecycle");
+        }
+        lifecycleOwner.current = true;
+        const unregister = registerLifecycle({
+          target: panel.instanceRef,
+          lifecycle,
+        });
+        return () => {
+          lifecycleOwner.current = false;
+          unregister();
+        };
+      },
       [panel.instanceRef, registerLifecycle],
     );
+    const scope = useMemo<PanelScope>(
+      () =>
+        Object.freeze({
+          panel,
+          registerAction: (action: CanvasActionProps) =>
+            registerAction(panel.instanceRef, action),
+          registerHeader: (header: HeaderRegistration) =>
+            registerHeader(panel.instanceRef, header),
+        }),
+      [panel, registerAction, registerHeader],
+    );
     return createElement(
-      LifecycleRegistrationContext.Provider,
-      { value: register },
-      createElement(Renderer, { panel, open, close }),
+      PanelScopeContext.Provider,
+      { value: scope },
+      createElement(
+        LifecycleRegistrationContext.Provider,
+        { value: register },
+        createElement(Renderer, {
+          descriptor: panel.reference.input,
+          panel: panel.instanceRef,
+        }),
+      ),
     );
   }
 
   function Provider({
     children,
     engine: suppliedEngine,
-  }: CanvasModuleProviderProps<Reference>) {
+  }: InternalCanvasModuleProviderProps<Reference>) {
     const [engine] = useState(() => suppliedEngine ?? createEngine());
-    return createElement(bindings.Provider, { children, engine });
+    const [signalStore] = useState<SignalStore>(() => {
+      const signals = new Map<
+        PanelInstanceId,
+        Readonly<{ owner: object; value: Signal }>
+      >();
+      const listeners = new Set<() => void>();
+      let version = 0;
+      let focused: PanelInstanceRef | null = null;
+      const publish = () => {
+        version += 1;
+        for (const listener of listeners) listener();
+      };
+      return Object.freeze({
+        subscribe: (listener: () => void) => {
+          listeners.add(listener);
+          return () => listeners.delete(listener);
+        },
+        getVersion: () => version,
+        publish: (panel: PanelInstanceRef, value: Signal) => {
+          const owner = Object.freeze({});
+          signals.set(panel.instanceId, Object.freeze({ owner, value }));
+          publish();
+          return () => {
+            if (signals.get(panel.instanceId)?.owner === owner) {
+              signals.delete(panel.instanceId);
+              publish();
+            }
+          };
+        },
+        read: (panel: PanelInstanceRef) => signals.get(panel.instanceId)?.value,
+        setFocused: (panel: PanelInstanceRef | null) => {
+          if (focused?.instanceId === panel?.instanceId) return;
+          focused = panel;
+          publish();
+        },
+        getFocused: () => focused,
+      });
+    });
+    return createElement(
+      bindings.Provider,
+      { engine },
+      createElement(
+        SignalStoreContext.Provider,
+        { value: signalStore },
+        children,
+      ),
+    );
   }
 
   function Workspace({ label }: CanvasWorkspaceProps) {
-    const { snapshot, open, close, registerLifecycle, resolveTransition } =
+    const { snapshot, close, registerLifecycle, resolveTransition } =
       bindings.useCanvas();
     const workspaceId = useId();
     const parentWorkspace = useContext(WorkspaceHierarchyContext);
+    const signalStore = useContext(SignalStoreContext);
+    if (!signalStore)
+      throw new Error("Canvas Workspace requires a Canvas Provider");
     const application = useRef<HTMLDivElement>(null);
     const returnFocus = useRef<HTMLElement | null>(null);
     const previousTransition = useRef(snapshot.transition);
-    const [dirtyPanelIds, setDirtyPanelIds] = useState<ReadonlySet<string>>(
-      () => new Set(),
-    );
+    const initiallyFocusedPanel = useRef<PanelInstanceId | null>(null);
+    const [dirtyPanelIds, setDirtyPanelIds] = useState<
+      ReadonlySet<PanelInstanceId>
+    >(() => new Set());
+    const [headerRegistrations, setHeaderRegistrations] = useState<
+      ReadonlyMap<PanelInstanceId, ReadonlyMap<object, HeaderRegistration>>
+    >(() => new Map());
+    const [actionRegistrations, setActionRegistrations] = useState<
+      ReadonlyMap<PanelInstanceId, ReadonlyMap<object, CanvasActionProps>>
+    >(() => new Map());
     const [pendingDescendantIds, setPendingDescendantIds] = useState<
       ReadonlySet<string>
     >(() => new Set());
     const renderers = config.renderers as Readonly<
-      Record<string, ComponentType<CanvasPanelRenderProps<Reference>>>
+      Record<string, ComponentType<Record<string, unknown>>>
     >;
+    const registerHeader = useCallback(
+      (panel: PanelInstanceRef, header: HeaderRegistration) => {
+        const owner = Object.freeze({});
+        setHeaderRegistrations((current) => {
+          const next = new Map(current);
+          const registrations = new Map(next.get(panel.instanceId));
+          registrations.set(owner, header);
+          next.set(panel.instanceId, registrations);
+          return next;
+        });
+        return () =>
+          setHeaderRegistrations((current) => {
+            const registrations = current.get(panel.instanceId);
+            if (!registrations?.has(owner)) return current;
+            const next = new Map(current);
+            const remaining = new Map(registrations);
+            remaining.delete(owner);
+            if (remaining.size === 0) next.delete(panel.instanceId);
+            else next.set(panel.instanceId, remaining);
+            return next;
+          });
+      },
+      [],
+    );
+    const registerAction = useCallback(
+      (panel: PanelInstanceRef, action: CanvasActionProps) => {
+        const owner = Object.freeze({});
+        setActionRegistrations((current) => {
+          const next = new Map(current);
+          const registrations = new Map(next.get(panel.instanceId));
+          if ([...registrations.values()].some(({ id }) => id === action.id)) {
+            throw new Error(`Duplicate Canvas Action ID: ${action.id}`);
+          }
+          registrations.set(owner, action);
+          next.set(panel.instanceId, registrations);
+          return next;
+        });
+        return () =>
+          setActionRegistrations((current) => {
+            const registrations = current.get(panel.instanceId);
+            if (!registrations?.has(owner)) return current;
+            const next = new Map(current);
+            const remaining = new Map(registrations);
+            remaining.delete(owner);
+            if (remaining.size === 0) next.delete(panel.instanceId);
+            else next.set(panel.instanceId, remaining);
+            return next;
+          });
+      },
+      [],
+    );
     const reportPending = useCallback(
       (descendantWorkspaceId: string, pending: boolean) => {
         setPendingDescendantIds((current) => {
@@ -385,15 +1019,49 @@ export function createCanvasModule<
     }, [hasPendingInSubtree, parentWorkspace, workspaceId]);
 
     useEffect(() => {
+      const focused = signalStore.getFocused();
+      if (
+        focused &&
+        !snapshot.panels.some(({ instanceRef }) => instanceRef === focused)
+      ) {
+        signalStore.setFocused(null);
+      }
+    }, [signalStore, snapshot.panels]);
+
+    useEffect(() => {
       if (previousTransition.current && !snapshot.transition) {
         const preferred = returnFocus.current;
+        const activeHeaders = headerRegistrations.get(snapshot.activePanelId);
+        const registeredFallback = activeHeaders
+          ? [...activeHeaders.values()].find(
+              ({ fallbackFocus }) => fallbackFocus?.current?.isConnected,
+            )?.fallbackFocus?.current
+          : null;
         const fallback =
           application.current?.querySelector<HTMLElement>("[data-active] h2");
-        (preferred?.isConnected ? preferred : fallback)?.focus();
+        (preferred?.isConnected
+          ? preferred
+          : (registeredFallback ?? fallback)
+        )?.focus();
         returnFocus.current = null;
       }
       previousTransition.current = snapshot.transition;
-    }, [snapshot.transition]);
+    }, [headerRegistrations, snapshot.activePanelId, snapshot.transition]);
+
+    useEffect(() => {
+      const registrations = headerRegistrations.get(snapshot.activePanelId);
+      const initialFocus = registrations
+        ? [...registrations.values()].find(({ initialFocus }) => initialFocus)
+            ?.initialFocus?.current
+        : null;
+      if (
+        initiallyFocusedPanel.current !== snapshot.activePanelId &&
+        initialFocus?.isConnected
+      ) {
+        initialFocus.focus({ preventScroll: true });
+        initiallyFocusedPanel.current = snapshot.activePanelId;
+      }
+    }, [headerRegistrations, snapshot.activePanelId]);
 
     const registerWorkspaceLifecycle = useCallback<
       CanvasBinding<Reference>["registerLifecycle"]
@@ -432,104 +1100,178 @@ export function createCanvasModule<
       return () => window.removeEventListener("beforeunload", preventUnload);
     }, [dirtyPanelIds]);
 
-    const rememberFocus = () => {
+    const rememberFocus = useCallback(() => {
       returnFocus.current =
         typeof document !== "undefined" &&
         document.activeElement instanceof HTMLElement
           ? document.activeElement
           : null;
-    };
-    const guardedOpen: typeof open = (command) => {
-      rememberFocus();
-      return open(command);
-    };
+    }, []);
 
     return createElement(
       WorkspaceHierarchyContext.Provider,
       { value: hierarchy },
       createElement(
-        "div",
-        {
-          "aria-label": label,
-          "data-canvas-workspace": "",
-          role: "region",
-        },
+        NavigationInitiatorContext.Provider,
+        { value: rememberFocus },
         createElement(
           "div",
           {
-            "data-testid": "canvas-panels-application",
-            "aria-hidden": deepestTransition ? true : undefined,
-            inert: deepestTransition ? true : undefined,
-            ref: application,
+            "aria-label": label,
+            "data-canvas-workspace": "",
+            role: "region",
           },
-          snapshot.panels.map((panel, panelIndex) => {
-            const headingId = `${workspaceId}-panel-${panelIndex}-heading`;
-            const Renderer = renderers[panel.kind];
-            if (!Renderer) {
-              throw new Error(
-                `No renderer registered for Panel Kind: ${panel.kind}`,
+          createElement(
+            "div",
+            {
+              "data-testid": "canvas-panels-application",
+              "aria-hidden": deepestTransition ? true : undefined,
+              inert: deepestTransition ? true : undefined,
+              ref: application,
+            },
+            snapshot.panels.map((panel, panelIndex) => {
+              const headingId = `${workspaceId}-panel-${panelIndex}-heading`;
+              const Renderer = renderers[panel.kind];
+              if (!Renderer) {
+                throw new Error(
+                  `No renderer registered for Panel Kind: ${panel.kind}`,
+                );
+              }
+              const headers = [
+                ...(headerRegistrations.get(panel.instanceId)?.values() ?? []),
+              ];
+              const visualTitle = [...headers]
+                .reverse()
+                .find(
+                  ({ visualTitle }) => visualTitle !== undefined,
+                )?.visualTitle;
+              const dirtyLabel = dirtyPanelIds.has(panel.instanceId)
+                ? [...headers]
+                    .reverse()
+                    .find(({ dirtyLabel }) => dirtyLabel !== undefined)
+                    ?.dirtyLabel
+                : undefined;
+              const actions = [
+                ...(actionRegistrations.get(panel.instanceId)?.values() ?? []),
+              ].sort(
+                (left, right) =>
+                  (right.priority ?? 0) - (left.priority ?? 0) ||
+                  left.id.localeCompare(right.id),
               );
-            }
 
-            return createElement(
-              "section",
-              {
-                "aria-labelledby": headingId,
-                "data-active":
-                  panel.instanceId === snapshot.activePanelId ? "" : undefined,
-                "data-canvas-panel": "",
-                "data-panel-kind": panel.kind,
-                key: panel.instanceId,
-                role: "region",
-              },
-              createElement(
-                "header",
-                { "data-canvas-panel-header": "" },
+              return createElement(
+                "section",
+                {
+                  "aria-labelledby": headingId,
+                  "data-active":
+                    panel.instanceId === snapshot.activePanelId
+                      ? ""
+                      : undefined,
+                  "data-canvas-panel": "",
+                  "data-panel-kind": panel.kind,
+                  key: panel.instanceId,
+                  onBlurCapture: (event) => {
+                    if (!event.currentTarget.contains(event.relatedTarget))
+                      signalStore.setFocused(null);
+                  },
+                  onFocusCapture: () =>
+                    signalStore.setFocused(panel.instanceRef),
+                  role: "region",
+                },
                 createElement(
-                  "h2",
-                  { id: headingId, tabIndex: -1 },
-                  panel.title,
-                ),
-                !panel.closable
-                  ? null
-                  : createElement(
+                  "header",
+                  { "data-canvas-panel-header": "" },
+                  createElement(
+                    "h2",
+                    { id: headingId, tabIndex: -1 },
+                    panel.title,
+                  ),
+                  visualTitle === undefined
+                    ? null
+                    : createElement(
+                        "span",
+                        { "aria-hidden": true, "data-canvas-visual-title": "" },
+                        visualTitle,
+                      ),
+                  dirtyLabel === undefined
+                    ? null
+                    : createElement(
+                        "span",
+                        { "data-canvas-dirty-label": "" },
+                        dirtyLabel,
+                      ),
+                  ...actions.map((action) =>
+                    createElement(
                       "button",
                       {
-                        "aria-label": `Close ${panel.title}`,
-                        onClick: () => {
-                          rememberFocus();
-                          close(panel.instanceRef);
-                        },
+                        "aria-label": action.label,
+                        "data-destructive": action.destructive ? "" : undefined,
+                        disabled: action.disabled,
+                        key: action.id,
+                        onClick: action.onSelect,
                         type: "button",
                       },
-                      "Close",
+                      action.label,
                     ),
-              ),
-              createElement(ScopedRenderer, {
-                Renderer,
-                panel,
-                open: guardedOpen,
-                close,
-                registerLifecycle: registerWorkspaceLifecycle,
-              }),
-            );
-          }),
+                  ),
+                  !panel.closable
+                    ? null
+                    : createElement(
+                        "button",
+                        {
+                          "aria-label": `Close ${panel.title}`,
+                          onClick: () => {
+                            rememberFocus();
+                            close(panel.instanceRef);
+                          },
+                          type: "button",
+                        },
+                        "Close",
+                      ),
+                ),
+                createElement(
+                  PanelRendererBoundary,
+                  {
+                    kind: panel.kind,
+                    panel: panel.instanceRef,
+                    ...(config.onRendererError
+                      ? { onError: config.onRendererError }
+                      : {}),
+                  },
+                  createElement(ScopedRenderer, {
+                    Renderer,
+                    panel,
+                    registerAction,
+                    registerHeader,
+                    registerLifecycle: registerWorkspaceLifecycle,
+                  }),
+                ),
+              );
+            }),
+          ),
+          deepestTransition
+            ? createElement(GuardedTransitionDialog, {
+                resolveTransition,
+                transition: deepestTransition,
+              })
+            : null,
         ),
-        deepestTransition
-          ? createElement(GuardedTransitionDialog, {
-              resolveTransition,
-              transition: deepestTransition,
-            })
-          : null,
       ),
     );
   }
 
   return Object.freeze({
+    Action,
     Provider,
     Workspace,
-    createEngine,
-    useCanvas: bindings.useCanvas,
+    useContextSignal,
+    useContextTarget,
+    useHeader,
     useLifecycle,
+    useNavigation,
+    usePanel,
+    usePresentation,
+    useStack,
+    useTransitionStatus,
   });
 }

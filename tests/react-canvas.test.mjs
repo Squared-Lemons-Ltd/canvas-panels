@@ -3,13 +3,17 @@ import test from "node:test";
 
 import { act, fireEvent, render, waitFor } from "@testing-library/react";
 import { JSDOM } from "jsdom";
-import { createElement, useState } from "react";
+import { createElement, Fragment, useRef, useState } from "react";
 
 import {
+  createPanelEngine,
   definePanel,
   defineRootPanel,
 } from "../packages/canvas-panels/dist/core/index.js";
-import { createCanvasModule } from "../packages/canvas-panels/dist/ui/index.js";
+import {
+  createCanvasModule,
+  defineCanvasContext,
+} from "../packages/canvas-panels/dist/ui/index.js";
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>", {
   url: "https://canvas-panels.test/",
@@ -38,12 +42,14 @@ test("a bound Canvas navigates Root to Class to Learner with semantic reuse and 
     deduplication: "allow-many",
     title: ({ name }) => name,
   });
-  const Canvas = createCanvasModule({
+  let Canvas;
+  Canvas = createCanvasModule({
     root,
     panels: [classPanel, learner],
     renderers: {
-      classes: ({ open, panel }) =>
-        createElement(
+      classes: () => {
+        const navigation = Canvas.useNavigation();
+        return createElement(
           "div",
           null,
           ...[
@@ -55,37 +61,33 @@ test("a bound Canvas navigates Root to Class to Learner with semantic reuse and 
               {
                 key: input.classId,
                 type: "button",
-                onClick: () =>
-                  open({
-                    originId: panel.instanceId,
-                    panel: classPanel.reference(input),
-                  }),
+                onClick: () => navigation.open(classPanel, input),
               },
               `Open ${input.name}`,
             ),
           ),
-        ),
-      class: ({ open, panel }) =>
-        createElement(
+        );
+      },
+      class: () => {
+        const navigation = Canvas.useNavigation();
+        return createElement(
           "button",
           {
             type: "button",
             onClick: () =>
-              open({
-                originId: panel.instanceId,
-                panel: learner.reference({
-                  learnerId: "learner-a",
-                  name: "Ada Lovelace",
-                }),
+              navigation.open(learner, {
+                learnerId: "learner-a",
+                name: "Ada Lovelace",
               }),
           },
           "Open Ada Lovelace",
-        ),
-      learner: ({ panel }) =>
-        createElement("p", null, `Learner record: ${panel.title}`),
+        );
+      },
+      learner: ({ descriptor }) =>
+        createElement("p", null, `Learner record: ${descriptor.name}`),
     },
   });
-  const engine = Canvas.createEngine();
+  const engine = createPanelEngine({ root, panels: [classPanel, learner] });
 
   const result = render(
     createElement(
@@ -192,24 +194,32 @@ test("nested Bound Canvas Modules isolate commands, identities, subscriptions, A
     kind: "report",
     title: ({ name }) => name,
   });
+  const classesRoot = defineRootPanel({ kind: "classes", title: "Classes" });
+  const reportsRoot = defineRootPanel({ kind: "reports", title: "Reports" });
   const ClassesCanvas = createCanvasModule({
-    root: defineRootPanel({ kind: "classes", title: "Classes" }),
+    root: classesRoot,
     panels: [classPanel],
     renderers: {
       classes: () => createElement("p", null, "Class list"),
-      class: ({ panel }) => createElement("p", null, panel.title),
+      class: ({ descriptor }) => createElement("p", null, descriptor.name),
     },
   });
   const ReportsCanvas = createCanvasModule({
-    root: defineRootPanel({ kind: "reports", title: "Reports" }),
+    root: reportsRoot,
     panels: [reportPanel],
     renderers: {
       reports: () => createElement("p", null, "Report list"),
-      report: ({ panel }) => createElement("p", null, panel.title),
+      report: ({ descriptor }) => createElement("p", null, descriptor.name),
     },
   });
-  const classesEngine = ClassesCanvas.createEngine();
-  const reportsEngine = ReportsCanvas.createEngine();
+  const classesEngine = createPanelEngine({
+    root: classesRoot,
+    panels: [classPanel],
+  });
+  const reportsEngine = createPanelEngine({
+    root: reportsRoot,
+    panels: [reportPanel],
+  });
   let classNotifications = 0;
   let reportNotifications = 0;
   classesEngine.subscribe(() => classNotifications++);
@@ -283,16 +293,17 @@ test("nested Providers from one Bound Canvas route commands to their owning Work
     kind: "class",
     title: ({ name }) => name,
   });
+  const root = defineRootPanel({ kind: "classes", title: "Classes" });
   const Canvas = createCanvasModule({
-    root: defineRootPanel({ kind: "classes", title: "Classes" }),
+    root,
     panels: [classPanel],
     renderers: {
       classes: () => createElement("p", null, "Class list"),
-      class: ({ panel }) => createElement("p", null, panel.title),
+      class: ({ descriptor }) => createElement("p", null, descriptor.name),
     },
   });
-  const parentEngine = Canvas.createEngine();
-  const nestedEngine = Canvas.createEngine();
+  const parentEngine = createPanelEngine({ root, panels: [classPanel] });
+  const nestedEngine = createPanelEngine({ root, panels: [classPanel] });
   let parentNotifications = 0;
   let nestedNotifications = 0;
   parentEngine.subscribe(() => parentNotifications++);
@@ -357,24 +368,50 @@ test("the guarded transition dialog keeps dirty work on Stay and saves before cl
   const root = defineRootPanel({ kind: "root", title: "Documents" });
   const editor = definePanel({ kind: "editor", title: ({ name }) => name });
   const saves = [];
-  const Canvas = createCanvasModule({
+  let Canvas;
+  Canvas = createCanvasModule({
     root,
     panels: [editor],
     renderers: {
-      root: ({ open, panel }) =>
-        createElement(
-          "button",
-          {
-            type: "button",
-            onClick: () =>
-              open({
-                originId: panel.instanceId,
-                panel: editor.reference({ name: "Dirty draft" }),
-              }),
-          },
-          "Open draft",
-        ),
+      root: () => {
+        const navigation = Canvas.useNavigation();
+        const [showTransientOpen, setShowTransientOpen] = useState(true);
+        return createElement(
+          Fragment,
+          null,
+          createElement(
+            "button",
+            {
+              type: "button",
+              onClick: () => navigation.open(editor, { name: "Dirty draft" }),
+            },
+            "Open draft",
+          ),
+          createElement(
+            "button",
+            {
+              type: "button",
+              onClick: () => navigation.open(editor, { name: "Other draft" }),
+            },
+            "Open other draft",
+          ),
+          showTransientOpen
+            ? createElement(
+                "button",
+                {
+                  type: "button",
+                  onClick: () => {
+                    setShowTransientOpen(false);
+                    navigation.open(editor, { name: "Transient draft" });
+                  },
+                },
+                "Open transient draft",
+              )
+            : null,
+        );
+      },
       editor: () => {
+        const fallbackFocus = useRef(null);
         Canvas.useLifecycle({
           guard: () => ({
             status: "confirm",
@@ -384,12 +421,22 @@ test("the guarded transition dialog keeps dirty work on Stay and saves before cl
             saves.push("saved");
           },
           discard: async () => {},
+          fallbackFocus,
         });
-        return createElement("label", null, "Draft", createElement("input"));
+        return createElement(
+          "div",
+          null,
+          "Draft",
+          createElement(
+            "button",
+            { ref: fallbackFocus, type: "button" },
+            "Fallback focus target",
+          ),
+        );
       },
     },
   });
-  const engine = Canvas.createEngine();
+  const engine = createPanelEngine({ root, panels: [editor] });
   const rendered = render(
     createElement(Canvas.Provider, { engine }, createElement(Canvas.Workspace)),
   );
@@ -424,9 +471,33 @@ test("the guarded transition dialog keeps dirty work on Stay and saves before cl
     fireEvent.keyDown(dialog, { key: "Escape" });
   });
   assert.equal(rendered.queryByRole("alertdialog"), null);
-  assert.equal(rendered.getByText("Draft").textContent, "Draft");
+  assert.ok(rendered.getByText("Draft"));
   assert.equal(document.activeElement, closeButton);
 
+  const openOtherButton = rendered.getByRole("button", {
+    name: "Open other draft",
+  });
+  openOtherButton.focus();
+  fireEvent.click(openOtherButton);
+  await rendered.findByRole("alertdialog");
+  fireEvent.click(rendered.getByRole("button", { name: "Stay" }));
+  await waitFor(() => assert.equal(rendered.queryByRole("alertdialog"), null));
+  assert.equal(document.activeElement, openOtherButton);
+
+  const transientOpenButton = rendered.getByRole("button", {
+    name: "Open transient draft",
+  });
+  transientOpenButton.focus();
+  fireEvent.click(transientOpenButton);
+  await rendered.findByRole("alertdialog");
+  fireEvent.click(rendered.getByRole("button", { name: "Stay" }));
+  await waitFor(() => assert.equal(rendered.queryByRole("alertdialog"), null));
+  assert.equal(
+    document.activeElement,
+    rendered.getByRole("button", { name: "Fallback focus target" }),
+  );
+
+  closeButton.focus();
   fireEvent.click(closeButton);
   await rendered.findByRole("alertdialog");
   await act(async () => {
@@ -446,14 +517,17 @@ test("one aggregate dialog saves multiple dirty Panels deepest-first", async () 
   const editor = definePanel({ kind: "editor", title: ({ name }) => name });
   const operations = [];
   let Canvas;
-  const Editor = ({ panel }) => {
+  const Editor = ({ descriptor }) => {
     Canvas.useLifecycle({
       dirty: true,
-      guard: () => ({ status: "confirm", message: `Save ${panel.title}?` }),
-      save: async () => operations.push(`save:${panel.title}`),
-      discard: async () => operations.push(`discard:${panel.title}`),
+      guard: () => ({
+        status: "confirm",
+        message: `Save ${descriptor.name}?`,
+      }),
+      save: async () => operations.push(`save:${descriptor.name}`),
+      discard: async () => operations.push(`discard:${descriptor.name}`),
     });
-    return createElement("p", null, `${panel.title} contents`);
+    return createElement("p", null, `${descriptor.name} contents`);
   };
   Canvas = createCanvasModule({
     root,
@@ -463,7 +537,7 @@ test("one aggregate dialog saves multiple dirty Panels deepest-first", async () 
       editor: Editor,
     },
   });
-  const engine = Canvas.createEngine();
+  const engine = createPanelEngine({ root, panels: [editor] });
   const parent = engine.open({ panel: editor.reference({ name: "Parent" }) });
   if (parent.status !== "opened") throw new Error("Expected parent");
   const child = engine.open({
@@ -494,7 +568,7 @@ test("a conflicting decision after a failed save keeps the dialog retryable", as
   const root = defineRootPanel({ kind: "root", title: "Documents" });
   const editor = definePanel({ kind: "editor", title: ({ name }) => name });
   let Canvas;
-  const Editor = ({ panel }) => {
+  const Editor = ({ descriptor }) => {
     Canvas.useLifecycle({
       dirty: true,
       guard: () => ({ status: "confirm", message: "Unsaved draft" }),
@@ -503,21 +577,23 @@ test("a conflicting decision after a failed save keeps the dialog retryable", as
       },
       discard: async () => {},
     });
-    return createElement("p", null, panel.title);
+    return createElement("p", null, descriptor.name);
   };
   Canvas = createCanvasModule({
     root,
     panels: [editor],
     renderers: {
-      root: ({ open }) =>
-        createElement(
+      root: () => {
+        const navigation = Canvas.useNavigation();
+        return createElement(
           "button",
           {
             type: "button",
-            onClick: () => open({ panel: editor.reference({ name: "Draft" }) }),
+            onClick: () => navigation.open(editor, { name: "Draft" }),
           },
           "Open Draft",
-        ),
+        );
+      },
       editor: Editor,
     },
   });
@@ -572,7 +648,7 @@ test("beforeunload is prevented only while a mounted Panel reports dirty work", 
       editor: Editor,
     },
   });
-  const engine = Canvas.createEngine();
+  const engine = createPanelEngine({ root, panels: [editor] });
   engine.open({ panel: editor.reference({ name: "Draft" }) });
   const rendered = render(
     createElement(Canvas.Provider, { engine }, createElement(Canvas.Workspace)),
@@ -612,16 +688,18 @@ test("Escape resolves only the innermost pending Workspace transition", async ()
     root: innerRoot,
     panels: [innerEditor],
     renderers: {
-      "inner-root": ({ open }) =>
-        createElement(
+      "inner-root": () => {
+        const navigation = InnerCanvas.useNavigation();
+        return createElement(
           "button",
           {
             onClick: () =>
-              open({ panel: innerEditor.reference({ name: "Inner draft" }) }),
+              navigation.open(innerEditor, { name: "Inner draft" }),
             type: "button",
           },
           "Open Inner Draft",
-        ),
+        );
+      },
       "inner-editor": InnerEditor,
     },
   });
@@ -631,7 +709,10 @@ test("Escape resolves only the innermost pending Workspace transition", async ()
     kind: "outer-editor",
     title: ({ name }) => name,
   });
-  const innerEngine = InnerCanvas.createEngine();
+  const innerEngine = createPanelEngine({
+    root: innerRoot,
+    panels: [innerEditor],
+  });
   let OuterCanvas;
   const OuterEditor = () => {
     OuterCanvas.useLifecycle({
@@ -651,7 +732,10 @@ test("Escape resolves only the innermost pending Workspace transition", async ()
     panels: [outerEditor],
     renderers: { "outer-root": () => null, "outer-editor": OuterEditor },
   });
-  const outerEngine = OuterCanvas.createEngine();
+  const outerEngine = createPanelEngine({
+    root: outerRoot,
+    panels: [outerEditor],
+  });
   const openedOuter = outerEngine.open({
     panel: outerEditor.reference({ name: "Outer draft" }),
   });
@@ -693,5 +777,467 @@ test("Escape resolves only the innermost pending Workspace transition", async ()
   );
   await waitFor(() => assert.equal(rendered.queryByRole("alertdialog"), null));
   assert.equal(outerEngine.getSnapshot().transition, null);
+  rendered.unmount();
+});
+
+test("bound hooks infer renderer scope and expose safe navigation read models", () => {
+  const root = defineRootPanel({ kind: "root", title: "Documents" });
+  const editor = definePanel({
+    kind: "editor",
+    title: ({ name }) => name,
+    update: {
+      validate: (value) =>
+        typeof value === "object" &&
+        value !== null &&
+        typeof value.name === "string",
+      validateResult: (value) =>
+        typeof value === "object" &&
+        value !== null &&
+        typeof value.name === "string",
+      apply: (current, update) => ({ ...current, name: update.name }),
+      navigation: "replace",
+    },
+  });
+  let Canvas;
+  let transitionRenders = 0;
+
+  function TransitionObserver() {
+    transitionRenders += 1;
+    const transition = Canvas.useTransitionStatus();
+    return createElement("output", null, String(transition.pending));
+  }
+
+  function RootRenderer({ descriptor, panel }) {
+    const navigation = Canvas.useNavigation();
+    assert.equal(descriptor, undefined);
+    assert.equal(panel.kind, "root");
+    return createElement(
+      "button",
+      {
+        onClick: () => navigation.open(editor, { name: "Draft" }),
+        type: "button",
+      },
+      "Open typed draft",
+    );
+  }
+
+  function EditorRenderer({ descriptor, panel }) {
+    const current = Canvas.usePanel();
+    const typedCurrent = Canvas.usePanel(editor, panel);
+    const wrongDefinition = Canvas.usePanel(root, panel);
+    const stack = Canvas.useStack();
+    const transition = Canvas.useTransitionStatus();
+    const presentation = Canvas.usePresentation();
+    const navigation = Canvas.useNavigation();
+    assert.equal(descriptor.name, current.descriptor.name);
+    assert.equal(typedCurrent.descriptor.name, descriptor.name);
+    assert.equal(wrongDefinition, null);
+    assert.equal(panel.instanceId, current.panel.instanceId);
+    return createElement(
+      "div",
+      null,
+      createElement(
+        "p",
+        null,
+        `${descriptor.name}:${stack.length}:${transition.pending}:${presentation.active}`,
+      ),
+      createElement(
+        "button",
+        {
+          onClick: () => navigation.update(editor, { name: "Renamed" }),
+          type: "button",
+        },
+        "Rename typed draft",
+      ),
+    );
+  }
+
+  Canvas = createCanvasModule({
+    root,
+    panels: [editor],
+    renderers: { root: RootRenderer, editor: EditorRenderer },
+  });
+  const rendered = render(
+    createElement(
+      Canvas.Provider,
+      null,
+      createElement(TransitionObserver),
+      createElement(Canvas.Workspace),
+    ),
+  );
+
+  fireEvent.click(rendered.getByRole("button", { name: "Open typed draft" }));
+  assert.equal(
+    rendered.getByText("Draft:2:false:true").textContent,
+    "Draft:2:false:true",
+  );
+  fireEvent.click(rendered.getByRole("button", { name: "Rename typed draft" }));
+  assert.equal(
+    rendered.getByText("Renamed:2:false:true").textContent,
+    "Renamed:2:false:true",
+  );
+  assert.equal(transitionRenders, 1);
+  rendered.unmount();
+});
+
+test("useStack publishes descriptor-only updates without subscribing to raw snapshots", () => {
+  const root = defineRootPanel({ kind: "root", title: "Documents" });
+  const editor = definePanel({
+    kind: "editor",
+    title: ({ name }) => name,
+    update: {
+      validate: (value) =>
+        typeof value === "object" &&
+        value !== null &&
+        typeof value.note === "string",
+      validateResult: (value) =>
+        typeof value === "object" &&
+        value !== null &&
+        typeof value.name === "string" &&
+        typeof value.note === "string",
+      apply: (current, update) => ({ ...current, note: update.note }),
+      navigation: "none",
+    },
+  });
+  let Canvas;
+  let presentationRenders = 0;
+  function RootRenderer() {
+    const navigation = Canvas.useNavigation();
+    return createElement(
+      "button",
+      {
+        onClick: () =>
+          navigation.open(editor, { name: "Draft", note: "first" }),
+        type: "button",
+      },
+      "Open noted draft",
+    );
+  }
+  function EditorRenderer() {
+    const navigation = Canvas.useNavigation();
+    return createElement(
+      "button",
+      {
+        onClick: () => navigation.update(editor, { note: "second" }),
+        type: "button",
+      },
+      "Update note",
+    );
+  }
+  function StackObserver() {
+    const stack = Canvas.useStack();
+    return createElement("output", null, stack[1]?.descriptor.note ?? "none");
+  }
+  function PresentationObserver() {
+    Canvas.usePresentation();
+    presentationRenders += 1;
+    return null;
+  }
+  Canvas = createCanvasModule({
+    root,
+    panels: [editor],
+    renderers: { root: RootRenderer, editor: EditorRenderer },
+  });
+  const rendered = render(
+    createElement(
+      Canvas.Provider,
+      null,
+      createElement(StackObserver),
+      createElement(PresentationObserver),
+      createElement(Canvas.Workspace),
+    ),
+  );
+  fireEvent.click(rendered.getByRole("button", { name: "Open noted draft" }));
+  assert.equal(rendered.getByRole("status").textContent, "first");
+  const rendersBeforeDescriptorUpdate = presentationRenders;
+  fireEvent.click(rendered.getByRole("button", { name: "Update note" }));
+  assert.equal(rendered.getByRole("status").textContent, "second");
+  assert.equal(presentationRenders, rendersBeforeDescriptorUpdate);
+  rendered.unmount();
+});
+
+test("selected reads recompute when a hook target changes without an engine publication", () => {
+  const root = defineRootPanel({ kind: "root", title: "Documents" });
+  const editor = definePanel({ kind: "editor", title: ({ name }) => name });
+  const engine = createPanelEngine({ root, panels: [editor] });
+  engine.open({ panel: editor.reference({ name: "Draft" }) });
+  const [rootPanel, editorPanel] = engine.getSnapshot().panels;
+  let Canvas;
+  function TargetObserver() {
+    const [target, setTarget] = useState(rootPanel.instanceRef);
+    const panel = Canvas.usePanel(target);
+    return createElement(
+      "div",
+      null,
+      createElement("output", null, panel.title),
+      createElement(
+        "button",
+        { onClick: () => setTarget(editorPanel.instanceRef), type: "button" },
+        "Observe editor",
+      ),
+    );
+  }
+  Canvas = createCanvasModule({
+    root,
+    panels: [editor],
+    renderers: {
+      root: () => createElement("p", null, "Document list"),
+      editor: () => createElement("p", null, "Editor body"),
+    },
+  });
+  const rendered = render(
+    createElement(
+      Canvas.Provider,
+      { engine },
+      createElement(TargetObserver),
+      createElement(Canvas.Workspace),
+    ),
+  );
+  assert.equal(rendered.getByRole("status").textContent, "Documents");
+  fireEvent.click(rendered.getByRole("button", { name: "Observe editor" }));
+  assert.equal(rendered.getByRole("status").textContent, "Draft");
+  rendered.unmount();
+});
+
+test("renderer failures preserve package chrome and retry only the Panel body", () => {
+  const broken = definePanel({ kind: "broken", title: ({ name }) => name });
+  const root = defineRootPanel({ kind: "root", title: "Home" });
+  const reports = [];
+  let recover = false;
+  let Canvas;
+  Canvas = createCanvasModule({
+    root,
+    panels: [broken],
+    onRendererError: (report) => reports.push(report),
+    renderers: {
+      root: () => {
+        const navigation = Canvas.useNavigation();
+        return createElement(
+          "button",
+          {
+            onClick: () => navigation.open(broken, { name: "Broken panel" }),
+            type: "button",
+          },
+          "Open broken panel",
+        );
+      },
+      broken: () => {
+        if (!recover) throw new Error("secret renderer details");
+        return createElement("p", null, "Recovered body");
+      },
+    },
+  });
+  const engine = createPanelEngine({ root, panels: [broken] });
+  const rendered = render(
+    createElement(
+      Canvas.Provider,
+      { engine },
+      createElement(Canvas.Workspace, { label: "Errors" }),
+    ),
+  );
+
+  const originalConsoleError = console.error;
+  const caughtRendererLogs = [];
+  console.error = (...arguments_) => caughtRendererLogs.push(arguments_);
+  try {
+    fireEvent.click(
+      rendered.getByRole("button", { name: "Open broken panel" }),
+    );
+  } finally {
+    console.error = originalConsoleError;
+  }
+  assert.ok(caughtRendererLogs.length > 0);
+  const failedPanel = engine.getSnapshot().panels[1];
+  const failedPanelId = failedPanel.instanceId;
+  assert.ok(rendered.getByRole("heading", { name: "Broken panel" }));
+  assert.ok(rendered.getByRole("button", { name: "Close Broken panel" }));
+  assert.match(
+    rendered.getByRole("alert").textContent ?? "",
+    /could not be displayed/i,
+  );
+  assert.doesNotMatch(
+    rendered.container.textContent ?? "",
+    /secret renderer details/,
+  );
+  assert.deepEqual(reports, [
+    { kind: "broken", panel: failedPanel.instanceRef },
+  ]);
+
+  recover = true;
+  fireEvent.click(rendered.getByRole("button", { name: "Retry panel" }));
+  assert.ok(rendered.getByText("Recovered body"));
+  assert.equal(engine.getSnapshot().panels[1].instanceId, failedPanelId);
+  rendered.unmount();
+});
+
+test("scoped composition registers actions, titles, focus targets, lifecycle labels, and context signals", async () => {
+  const editor = definePanel({ kind: "editor", title: ({ name }) => name });
+  const selections = [];
+  let Canvas;
+
+  function ContextConsumer() {
+    const target = Canvas.useContextTarget("active");
+    return createElement(
+      "output",
+      null,
+      target.signal?.resource ?? "No context",
+    );
+  }
+
+  function FocusedContextConsumer() {
+    const target = Canvas.useContextTarget("focused");
+    return createElement(
+      "div",
+      { "data-testid": "focused-context" },
+      target.signal?.resource ?? "No focused context",
+    );
+  }
+
+  function Editor({ descriptor }) {
+    const initialFocus = useRef(null);
+    const [dirty, setDirty] = useState(true);
+    Canvas.useLifecycle({
+      dirty,
+      dirtyLabel: "Unsaved",
+      initialFocus,
+      guard: () => ({ status: "allow" }),
+      save: async () => {},
+      discard: async () => {},
+    });
+    Canvas.useHeader({ visualTitle: `Editing ${descriptor.name}` });
+    Canvas.useContextSignal({ resource: descriptor.name });
+    return createElement(
+      "div",
+      null,
+      createElement(Canvas.Action, {
+        id: "save-draft",
+        label: "Save draft",
+        priority: 10,
+        onSelect: () => selections.push(descriptor.name),
+      }),
+      createElement(
+        "button",
+        { ref: initialFocus, type: "button" },
+        "Draft focus target",
+      ),
+      createElement(
+        "button",
+        { onClick: () => setDirty(false), type: "button" },
+        "Mark saved",
+      ),
+    );
+  }
+
+  Canvas = createCanvasModule({
+    context: defineCanvasContext(),
+    root: defineRootPanel({ kind: "root", title: "Home" }),
+    panels: [editor],
+    renderers: {
+      root: () => {
+        const navigation = Canvas.useNavigation();
+        return createElement(
+          "button",
+          {
+            onClick: () => navigation.open(editor, { name: "Draft" }),
+            type: "button",
+          },
+          "Open composed editor",
+        );
+      },
+      editor: Editor,
+    },
+  });
+  const rendered = render(
+    createElement(
+      Canvas.Provider,
+      null,
+      createElement(ContextConsumer),
+      createElement(FocusedContextConsumer),
+      createElement("button", { type: "button" }, "Outside workspace"),
+      createElement(Canvas.Workspace, { label: "Composition" }),
+    ),
+  );
+
+  fireEvent.click(
+    rendered.getByRole("button", { name: "Open composed editor" }),
+  );
+  await waitFor(() =>
+    assert.equal(
+      document.activeElement,
+      rendered.getByRole("button", { name: "Draft focus target" }),
+    ),
+  );
+  assert.ok(rendered.getByText("Editing Draft"));
+  assert.ok(rendered.getByText("Unsaved"));
+  assert.equal(rendered.getByRole("status").textContent, "Draft");
+  assert.equal(rendered.getByTestId("focused-context").textContent, "Draft");
+  act(() => {
+    rendered.getByRole("button", { name: "Outside workspace" }).focus();
+  });
+  assert.equal(
+    rendered.getByTestId("focused-context").textContent,
+    "No focused context",
+  );
+  act(() => {
+    rendered.getByRole("button", { name: "Draft focus target" }).focus();
+  });
+  assert.equal(rendered.getByTestId("focused-context").textContent, "Draft");
+  const markSaved = rendered.getByRole("button", { name: "Mark saved" });
+  act(() => markSaved.focus());
+  fireEvent.click(markSaved);
+  assert.equal(rendered.queryByText("Unsaved"), null);
+  assert.equal(document.activeElement, markSaved);
+  fireEvent.click(rendered.getByRole("button", { name: "Save draft" }));
+  assert.deepEqual(selections, ["Draft"]);
+  fireEvent.click(rendered.getByRole("button", { name: "Close Draft" }));
+  await waitFor(() =>
+    assert.equal(rendered.getByRole("status").textContent, "No context"),
+  );
+  assert.equal(
+    rendered.getByTestId("focused-context").textContent,
+    "No focused context",
+  );
+  assert.equal(rendered.queryByRole("button", { name: "Save draft" }), null);
+  rendered.unmount();
+});
+
+test("duplicate renderer lifecycle registration fails inside that Panel boundary", async () => {
+  let Canvas;
+  const reports = [];
+  function DuplicateLifecycleRenderer() {
+    const lifecycle = {
+      dirty: false,
+      guard: () => ({ status: "allow" }),
+    };
+    Canvas.useLifecycle(lifecycle);
+    Canvas.useLifecycle(lifecycle);
+    return createElement("p", null, "Invalid duplicate lifecycle");
+  }
+  Canvas = createCanvasModule({
+    root: defineRootPanel({ kind: "root", title: "Home" }),
+    panels: [],
+    onRendererError: (report) => reports.push(report),
+    renderers: { root: DuplicateLifecycleRenderer },
+  });
+  const originalConsoleError = console.error;
+  console.error = () => {};
+  const rendered = render(
+    createElement(
+      Canvas.Provider,
+      null,
+      createElement(Canvas.Workspace, { label: "Duplicates" }),
+    ),
+  );
+  try {
+    await rendered.findByRole("alert");
+  } finally {
+    console.error = originalConsoleError;
+  }
+  assert.match(
+    rendered.getByRole("alert").textContent,
+    /could not be displayed/i,
+  );
+  assert.equal(reports.length, 1);
+  assert.equal(reports[0].kind, "root");
   rendered.unmount();
 });
