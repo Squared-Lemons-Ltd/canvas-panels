@@ -1,9 +1,7 @@
 import {
   definePanel,
   defineRootPanel,
-  type OpenPanel,
   type PanelLifecycle,
-  type PanelReference,
 } from "@squaredlemons/canvas-panels/core";
 import "@squaredlemons/canvas-panels/styles.css";
 import {
@@ -42,30 +40,9 @@ type BriefInput = Readonly<{
   initial: string;
 }>;
 
-type ShowcaseReference =
-  | PanelReference<"project", ProjectInput>
-  | PanelReference<"brief", BriefInput>;
-type ShowcasePanel<Kind extends string, Input, IsRoot extends boolean> = Omit<
-  OpenPanel,
-  "isRoot" | "kind" | "reference"
-> &
-  Readonly<{
-    isRoot: IsRoot;
-    kind: Kind;
-    reference: PanelReference<Kind, Input>;
-  }>;
-type PortfolioRenderProps = CanvasPanelRenderProps<
-  ShowcaseReference,
-  ShowcasePanel<"portfolio", undefined, true>
->;
-type ProjectRenderProps = CanvasPanelRenderProps<
-  ShowcaseReference,
-  ShowcasePanel<"project", ProjectInput, false>
->;
-type BriefRenderProps = CanvasPanelRenderProps<
-  ShowcaseReference,
-  ShowcasePanel<"brief", BriefInput, false>
->;
+type PortfolioRenderProps = CanvasPanelRenderProps<undefined, "portfolio">;
+type ProjectRenderProps = CanvasPanelRenderProps<ProjectInput, "project">;
+type BriefRenderProps = CanvasPanelRenderProps<BriefInput, "brief">;
 
 const projects: readonly Project[] = [
   {
@@ -144,7 +121,8 @@ function Icon({
   );
 }
 
-function PortfolioPanel({ open, panel }: PortfolioRenderProps) {
+function PortfolioPanel(_: PortfolioRenderProps) {
+  const navigation = ShowcaseCanvas.useNavigation();
   return (
     <div className="portfolio-panel">
       <div className="panel-intro">
@@ -160,12 +138,9 @@ function PortfolioPanel({ open, panel }: PortfolioRenderProps) {
             className="project-row"
             key={project.id}
             onClick={() =>
-              open({
-                originId: panel.instanceId,
-                panel: projectPanel.reference({
-                  projectId: project.id,
-                  name: project.name,
-                }),
+              navigation.open(projectPanel, {
+                projectId: project.id,
+                name: project.name,
               })
             }
             style={{ "--project-accent": project.accent } as CSSProperties}
@@ -187,8 +162,8 @@ function PortfolioPanel({ open, panel }: PortfolioRenderProps) {
   );
 }
 
-function ProjectPanel({ open, panel }: ProjectRenderProps) {
-  const input = panel.reference.input;
+function ProjectPanel({ descriptor: input }: ProjectRenderProps) {
+  const navigation = ShowcaseCanvas.useNavigation();
   const project = projects.find(({ id }) => id === input.projectId);
   if (!project) throw new Error(`Unknown showcase project: ${input.projectId}`);
   return (
@@ -245,15 +220,12 @@ function ProjectPanel({ open, panel }: ProjectRenderProps) {
         <button
           className="primary-action"
           onClick={() =>
-            open({
-              originId: panel.instanceId,
-              panel: briefPanel.reference({
-                briefId: `${project.id}-direction`,
-                projectId: project.id,
-                projectName: project.name,
-                title: "Creative direction",
-                initial: `The ${project.name} experience should feel confident, useful, and distinctly human. Every interaction earns its place and leaves the next decision clearer.`,
-              }),
+            navigation.open(briefPanel, {
+              briefId: `${project.id}-direction`,
+              projectId: project.id,
+              projectName: project.name,
+              title: "Creative direction",
+              initial: `The ${project.name} experience should feel confident, useful, and distinctly human. Every interaction earns its place and leaves the next decision clearer.`,
             })
           }
           type="button"
@@ -269,8 +241,7 @@ function useShowcaseLifecycle(lifecycle: PanelLifecycle) {
   ShowcaseCanvas.useLifecycle(lifecycle);
 }
 
-function BriefPanel({ panel }: BriefRenderProps) {
-  const input = panel.reference.input;
+function BriefPanel({ descriptor: input }: BriefRenderProps) {
   const savedBriefs = useContext(BriefStoreContext);
   const editorId = useId();
   if (!savedBriefs) {
@@ -340,32 +311,23 @@ const ShowcaseCanvas = createCanvasModule({
   },
 });
 
-const primaryEngine = ShowcaseCanvas.createEngine();
-const isolatedEngine = ShowcaseCanvas.createEngine();
 const primaryBriefs = new Map<string, string>();
 const isolatedBriefs = new Map<string, string>();
 
 function StackTelemetry() {
-  const { snapshot } = ShowcaseCanvas.useCanvas();
+  const stack = ShowcaseCanvas.useStack();
+  const active = ShowcaseCanvas.usePanel();
   return (
     <div className="stack-telemetry" aria-live="polite">
       <span>
         <i className="live-dot" />
         Live workspace
       </span>
-      <span>Version {snapshot.version}</span>
+      <span>Bound read model</span>
       <span>
-        {snapshot.panels.length}{" "}
-        {snapshot.panels.length === 1 ? "panel" : "panels"}
+        {stack.length} {stack.length === 1 ? "panel" : "panels"}
       </span>
-      <span>
-        Active:{" "}
-        {
-          snapshot.panels.find(
-            (item) => item.instanceId === snapshot.activePanelId,
-          )?.title
-        }
-      </span>
+      <span>Active: {active.title}</span>
     </div>
   );
 }
@@ -488,7 +450,7 @@ function Showcase() {
               <span className="secure-label">Interactive demo</span>
             </div>
             <BriefStoreContext.Provider value={primaryBriefs}>
-              <ShowcaseCanvas.Provider engine={primaryEngine}>
+              <ShowcaseCanvas.Provider>
                 <StackTelemetry />
                 <ShowcaseCanvas.Workspace label="Studio portfolio workspace" />
                 <div className="isolation-lab" id="architecture">
@@ -504,7 +466,7 @@ function Showcase() {
                     </p>
                   </div>
                   <BriefStoreContext.Provider value={isolatedBriefs}>
-                    <ShowcaseCanvas.Provider engine={isolatedEngine}>
+                    <ShowcaseCanvas.Provider>
                       <ShowcaseCanvas.Workspace label="Isolated portfolio sandbox" />
                     </ShowcaseCanvas.Provider>
                   </BriefStoreContext.Provider>

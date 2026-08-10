@@ -116,8 +116,8 @@ try {
     `import { readFile } from "node:fs/promises";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { definePanel, defineRootPanel } from "@squaredlemons/canvas-panels/core";
-import { createCanvasModule } from "@squaredlemons/canvas-panels/ui";
+import { createPanelEngine, definePanel, defineRootPanel } from "@squaredlemons/canvas-panels/core";
+import { createCanvasModule, defineCanvasContext } from "@squaredlemons/canvas-panels/ui";
 
 await Promise.all([
   import("@squaredlemons/canvas-panels/react"),
@@ -158,16 +158,30 @@ const learner = definePanel({
   deduplication: "allow-many",
   title: ({ name }) => name,
 });
-const Canvas = createCanvasModule({
+let Canvas;
+function ClassRenderer({ descriptor, panel }) {
+  const current = Canvas.usePanel();
+  const stack = Canvas.useStack();
+  const transition = Canvas.useTransitionStatus();
+  const presentation = Canvas.usePresentation();
+  Canvas.useNavigation();
+  Canvas.useContextSignal({ selectedClassId: descriptor.classId });
+  if (current.panel.instanceId !== panel.instanceId || stack.length < 2 || transition.pending || !presentation.visible) {
+    throw new Error("packed bound read hooks returned an invalid Class model");
+  }
+  return createElement("p", null, "Class record: " + descriptor.name);
+}
+Canvas = createCanvasModule({
+  context: defineCanvasContext(),
   root,
   panels: [classPanel, learner],
   renderers: {
     classes: () => createElement("p", null, "Class list"),
-    class: ({ panel }) => createElement("p", null, "Class record: " + panel.title),
-    learner: ({ panel }) => createElement("p", null, "Learner record: " + panel.title),
+    class: ClassRenderer,
+    learner: ({ descriptor }) => createElement("p", null, "Learner record: " + descriptor.name),
   },
 });
-const engine = Canvas.createEngine();
+const engine = createPanelEngine({ root, panels: [classPanel, learner] });
 const rootId = engine.getSnapshot().panels[0].instanceId;
 const openedClass = engine.open({
   originId: rootId,
@@ -265,7 +279,7 @@ engine.registerLifecycle({
     },
   },
 });
-const nestedEngine = Canvas.createEngine();
+const nestedEngine = createPanelEngine({ root, panels: [classPanel, learner] });
 const foreignClose = nestedEngine.close({
   target: otherClassTarget,
 });

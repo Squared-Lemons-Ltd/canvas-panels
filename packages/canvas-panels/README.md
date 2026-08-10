@@ -9,9 +9,10 @@ The package is not yet published. Its first implemented vertical slice provides:
 - an immutable framework-neutral Panel Engine with subscriptions, typed outcomes, and deterministic Branch Replacement;
 - typed `update`, `activate`, `close`, and `collapse` commands with Workspace-scoped versions;
 - canonical, independently versioned Navigation Documents for persistent stacks;
-- React bindings based on `useSyncExternalStore`;
-- scoped `useLifecycle` registration for guarded dirty Panels; and
-- a Bound Canvas Module with labelled regions and an accessible Save/Discard/Stay dialog.
+- selector-backed React read models based on `useSyncExternalStore`;
+- scoped lifecycle, header, action, focus, and typed Context Signal registrations;
+- per-Panel renderer failure isolation with safe reporting and retry; and
+- a Bound Canvas Module with private engine internals, labelled regions, and an accessible Save/Discard/Stay dialog.
 
 ```tsx
 import {
@@ -19,7 +20,10 @@ import {
   defineRootPanel,
 } from "@squaredlemons/canvas-panels/core";
 import "@squaredlemons/canvas-panels/styles.css";
-import { createCanvasModule } from "@squaredlemons/canvas-panels/ui";
+import {
+  type CanvasPanelRenderProps,
+  createCanvasModule,
+} from "@squaredlemons/canvas-panels/ui";
 
 const root = defineRootPanel({ kind: "classes", title: "Classes" });
 const classPanel = definePanel({
@@ -54,45 +58,66 @@ const learner = definePanel({
   title: (input: { name: string }) => input.name,
 });
 
+type ClassProps = CanvasPanelRenderProps<
+  { classId: string; name: string },
+  "class"
+>;
+type LearnerProps = CanvasPanelRenderProps<{ name: string }, "learner">;
+
+function ClassesRenderer() {
+  const navigation = ClassesCanvas.useNavigation();
+  return (
+    <button
+      onClick={() =>
+        navigation.open(classPanel, {
+          classId: "class-a",
+          name: "Class A",
+        })
+      }
+      type="button"
+    >
+      Open Class A
+    </button>
+  );
+}
+
+function ClassRenderer({ descriptor }: ClassProps) {
+  const navigation = ClassesCanvas.useNavigation();
+  const current = ClassesCanvas.usePanel();
+  ClassesCanvas.useHeader({ visualTitle: <strong>{descriptor.name}</strong> });
+  return (
+    <>
+      <p>{current.title}</p>
+      <ClassesCanvas.Action
+        id="open-learner"
+        label="Open learner"
+        onSelect={() => navigation.open(learner, { name: "Ada Lovelace" })}
+      />
+    </>
+  );
+}
+
+function LearnerRenderer({ descriptor, panel }: LearnerProps) {
+  const stack = ClassesCanvas.useStack();
+  return <p>{descriptor.name} is Panel {stack.findIndex(({ panel: item }) => item.instanceId === panel.instanceId) + 1}</p>;
+}
+
 export const ClassesCanvas = createCanvasModule({
   root,
   panels: [classPanel, learner],
   renderers: {
-    classes: ({ open, panel }) => (
-      <button
-        onClick={() =>
-          open({
-            originId: panel.instanceId,
-            panel: classPanel.reference({
-              classId: "class-a",
-              name: "Class A",
-            }),
-          })
-        }
-        type="button"
-      >
-        Open Class A
-      </button>
-    ),
-    class: ({ open, panel }) => (
-      <button
-        onClick={() =>
-          open({
-            originId: panel.instanceId,
-            panel: learner.reference({ name: "Ada Lovelace" }),
-          })
-        }
-        type="button"
-      >
-        Open learner
-      </button>
-    ),
-    learner: ({ panel }) => <p>{panel.title}</p>,
+    classes: ClassesRenderer,
+    class: ClassRenderer,
+    learner: LearnerRenderer,
   },
 });
 ```
 
-Render `ClassesCanvas.Provider` above `ClassesCanvas.Workspace`. The Root Panel is permanent: closing a Child restores its retained predecessor, while opening from an earlier Panel replaces its existing descendant branch atomically. Each Panel Kind chooses `reuse`, `replace`, or `allow-many`; `reuse` and `replace` require a registered semantic key. `open` returns a discriminated `opened`, `reused`, `replaced`, `confirmation-required`, or `rejected` outcome. Omitting the Origin defaults to Active; stale or foreign Origins, foreign Panel references, and deduplication conflicts reject without changing the stack. Treat Panel Instance IDs and Panel Keys as distinct opaque values and create Panel references only through their registered definitions. Panel inputs are copied into deeply immutable read models and must contain only structured-cloneable plain objects, arrays, and primitive values.
+Render `ClassesCanvas.Provider` above `ClassesCanvas.Workspace`; each Provider owns an isolated Engine. Renderers receive only their deeply readonly descriptor and Panel Ref. Use `useNavigation()` for definition-bound `open` and `update` inference; renderer calls default Origin/target to their own Panel, while calls outside a renderer default to Active. `usePanel`, `useStack`, `useTransitionStatus`, and `usePresentation` subscribe only to their selected read model. The Bound module deliberately does not expose its Engine or raw snapshot.
+
+`Canvas.Action`, `useHeader`, and `useLifecycle` register semantic actions, visual titles, dirty labels, and focus targets against the current Panel instance and clean up automatically on unmount. Pass `context: defineCanvasContext<Signal>()` when creating a module to enable opaque typed `useContextSignal` and `useContextTarget` exchange. Renderer exceptions are isolated inside their Panel body; package chrome remains available, the host receives only `{ kind, panel }`, and Retry remounts that renderer without replacing its Panel instance.
+
+The Root Panel is permanent: closing a Child restores its retained predecessor, while opening from an earlier Panel replaces its existing descendant branch atomically. Each Panel Kind chooses `reuse`, `replace`, or `allow-many`; `reuse` and `replace` require a registered semantic key. `open` returns a discriminated `opened`, `reused`, `replaced`, `confirmation-required`, or `rejected` outcome. Stale or foreign Origins, foreign Panel references, and deduplication conflicts reject without changing the stack. Treat Panel Instance IDs and Panel Keys as distinct opaque values and create Panel references only through their registered definitions. Panel inputs are copied into deeply immutable read models and must contain only structured-cloneable plain objects, arrays, and primitive values.
 
 Every Engine snapshot has a branded Workspace identity and monotonically increasing version. Pass a Panel's `instanceRef` to `update`, `activate`, `close`, or `collapse`; stale references and references owned by another Workspace reject without publication. Successful mutations increment the owning Workspace once, while rejected and no-op commands retain snapshot identity and version. Updates use each Panel definition's typed update union and pure reducer, validate both the update payload and complete reducer result, and reject semantic Panel Key changes. They never shallow-merge arbitrary patches.
 

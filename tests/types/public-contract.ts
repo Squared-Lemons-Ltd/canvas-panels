@@ -1,7 +1,9 @@
 import {
+  createPanelEngine,
   definePanel,
   defineRootPanel,
   type PanelInstanceId,
+  type PanelInstanceRef,
   type PanelKey,
   type PanelLifecycle,
 } from "../../packages/canvas-panels/dist/core/index.js";
@@ -95,37 +97,77 @@ const Canvas = createCanvasModule({
   root,
   panels: [student, updatableStudent, pinnedStudent, persistentStudent],
   renderers: {
-    classes: ({ open, panel }) => {
-      const rootInput: undefined = panel.reference.input;
+    classes: ({ descriptor, panel }) => {
+      const rootInput: undefined = descriptor;
+      const rootKind: "classes" = panel.kind;
       void rootInput;
-      open({ originId: panel.instanceId, panel: studentReference });
-      open({
-        originId: panel.instanceId,
-        // @ts-expect-error A Bound Canvas rejects references outside its registry.
-        panel: teacher.reference({ name: "Katherine Johnson" }),
-      });
-      // @ts-expect-error Root references cannot be opened as Child Panels.
-      open({ originId: panel.instanceId, panel: root.reference });
+      void rootKind;
+      // @ts-expect-error Renderers receive no raw engine commands.
+      panel.open;
       return null;
     },
-    student: ({ panel }) => {
-      const studentName: string = panel.reference.input.name;
+    student: ({ descriptor, panel }) => {
+      const studentName: string = descriptor.name;
+      const studentKind: "student" = panel.kind;
       // @ts-expect-error A renderer receives only its registered Panel input.
-      panel.reference.input.identifier;
+      descriptor.identifier;
       void studentName;
+      void studentKind;
       return null;
     },
     "updatable-student": () => null,
     "pinned-student": () => null,
-    "persistent-student": ({ panel }) => {
-      const studentId: string = panel.reference.input.studentId;
+    "persistent-student": ({ descriptor }) => {
+      const studentId: string = descriptor.studentId;
       void studentId;
       return null;
     },
   },
 });
 
-const engine = Canvas.createEngine();
+function BoundConsumer() {
+  const navigation = Canvas.useNavigation();
+  navigation.open(student, { name: "Ada Lovelace" });
+  navigation.update(updatableStudent, { type: "rename", name: "Grace Hopper" });
+  // @ts-expect-error Bound navigation rejects foreign definitions.
+  navigation.open(teacher, { name: "Katherine Johnson" });
+  // @ts-expect-error Bound navigation infers the registered descriptor.
+  navigation.open(student, { identifier: "student-1" });
+  // @ts-expect-error Bound updates infer the definition's update union.
+  navigation.update(updatableStudent, { name: "arbitrary merge" });
+  // @ts-expect-error Non-updatable definitions accept no update value.
+  navigation.update(student, { type: "noop" });
+  const panel = Canvas.usePanel();
+  const studentPanel = null as unknown as PanelInstanceRef &
+    Readonly<{ kind: "student" }>;
+  const typedStudent = Canvas.usePanel(student, studentPanel);
+  if (typedStudent) {
+    const studentName: string = typedStudent.descriptor.name;
+    const studentKind: "student" = typedStudent.kind;
+    void studentName;
+    void studentKind;
+  }
+  // @ts-expect-error Definition and branded Panel Ref kinds must agree.
+  Canvas.usePanel(updatableStudent, studentPanel);
+  const stack = Canvas.useStack();
+  const transition = Canvas.useTransitionStatus();
+  const presentation = Canvas.usePresentation();
+  void panel;
+  void stack;
+  void transition;
+  void presentation;
+  return null;
+}
+void BoundConsumer;
+// @ts-expect-error Bound Canvas modules keep engine construction private.
+Canvas.createEngine();
+// @ts-expect-error Bound Canvas modules expose narrow hooks, not raw snapshots.
+Canvas.useCanvas();
+
+const engine = createPanelEngine({
+  root,
+  panels: [student, updatableStudent, pinnedStudent, persistentStudent],
+});
 const navigationDocument: string = engine.encodeNavigationDocument();
 const decodedNavigation = engine.decodeNavigationDocument(navigationDocument);
 if (decodedNavigation.status === "decoded") {
