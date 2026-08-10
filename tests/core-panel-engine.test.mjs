@@ -1964,11 +1964,11 @@ test("Navigation Documents reject malformed, duplicate, oversized, unsafe, and u
   }));
   const cases = [
     ["not json", "invalid-json", "$"],
-    ['{"version":1,"version":1,"panels":[]}', "duplicate-key", "$.version"],
+    ['{"version":1,"version":1,"panels":[]}', "duplicate-key", "$"],
     [
-      '{"panels":[{"descriptor":{"id":"first","id":"second"},"kind":"report","version":1}],"version":1}',
+      '{"panels":[{"descriptor":{"customer-secret-123":"first","customer-secret-123":"second","id":"report-a"},"kind":"report","version":1}],"version":1}',
       "duplicate-key",
-      "$.panels[0].descriptor.id",
+      "$",
     ],
     ['{"extra":true,"panels":[],"version":1}', "invalid-document", "$"],
     [
@@ -2123,5 +2123,75 @@ test("encoding rejects codec-invalid and structurally unsafe descriptors", () =>
   assert.throws(
     () => sparseEngine.encodeNavigationDocument(),
     /Navigation descriptor arrays must be dense JSON arrays/,
+  );
+});
+
+test("persistence configuration rejects unknown modes fail-closed", () => {
+  assert.throws(
+    () =>
+      definePanel({
+        kind: "unknown-persistence",
+        title: () => "Unknown",
+        persistence: {
+          mode: "typo",
+          version: 1,
+          codec: {
+            encode: () => ({}),
+            validate: () => true,
+            decode: () => ({}),
+            migrations: [],
+          },
+          restore: async () => ({ status: "available" }),
+        },
+      }),
+    /Unknown Panel persistence mode/,
+  );
+});
+
+test("canonical encoding preserves the documented descriptor depth and rejects accessors", () => {
+  const root = defineRootPanel({ kind: "root", title: "Root" });
+  let nested = "leaf";
+  for (let depth = 0; depth < 32; depth += 1) nested = { value: nested };
+  const deepPanel = definePanel({
+    kind: "deep",
+    title: () => "Deep",
+    persistence: {
+      mode: "navigation",
+      version: 1,
+      codec: {
+        encode: () => nested,
+        validate: () => true,
+        decode: () => ({}),
+        migrations: [],
+      },
+    },
+  });
+  const deepEngine = createPanelEngine({ root, panels: [deepPanel] });
+  deepEngine.open({ panel: deepPanel.reference({}) });
+  assert.doesNotThrow(() => deepEngine.encodeNavigationDocument());
+
+  const accessorPanel = definePanel({
+    kind: "accessor",
+    title: () => "Accessor",
+    persistence: {
+      mode: "navigation",
+      version: 1,
+      codec: {
+        encode: () =>
+          Object.defineProperty({}, "id", {
+            enumerable: true,
+            get: () => "secret",
+          }),
+        validate: () => true,
+        decode: () => ({}),
+        migrations: [],
+      },
+    },
+  });
+  const accessorEngine = createPanelEngine({ root, panels: [accessorPanel] });
+  accessorEngine.open({ panel: accessorPanel.reference({}) });
+  assert.throws(
+    () => accessorEngine.encodeNavigationDocument(),
+    /Navigation descriptors require data properties/,
   );
 });

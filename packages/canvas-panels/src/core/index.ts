@@ -526,10 +526,37 @@ const maximumNavigationDocumentBytes = 16_384;
 const maximumNavigationDocumentPanels = 32;
 const maximumNavigationDescriptorDepth = 32;
 
-function canonicalJson(value: unknown): string {
+function utf8ByteLength(value: string): number {
+  let bytes = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const codeUnit = value.charCodeAt(index);
+    if (codeUnit <= 0x7f) {
+      bytes += 1;
+    } else if (codeUnit <= 0x7ff) {
+      bytes += 2;
+    } else if (
+      codeUnit >= 0xd800 &&
+      codeUnit <= 0xdbff &&
+      index + 1 < value.length &&
+      value.charCodeAt(index + 1) >= 0xdc00 &&
+      value.charCodeAt(index + 1) <= 0xdfff
+    ) {
+      bytes += 4;
+      index += 1;
+    } else {
+      bytes += 3;
+    }
+  }
+  return bytes;
+}
+
+function canonicalJson(
+  value: unknown,
+  maximumDepth = maximumNavigationDescriptorDepth,
+): string {
   const ancestors = new WeakSet<object>();
   const visit = (candidate: unknown, depth: number): string => {
-    if (depth > maximumNavigationDescriptorDepth) {
+    if (depth > maximumDepth) {
       throw new TypeError("Navigation descriptor nesting is too deep");
     }
     if (candidate === null || typeof candidate === "boolean") {
@@ -552,20 +579,23 @@ function canonicalJson(value: unknown): string {
     try {
       if (Array.isArray(candidate)) {
         const expectedKeys = new Set<PropertyKey>(["length"]);
+        const values: string[] = [];
         for (let index = 0; index < candidate.length; index += 1) {
-          if (!Object.hasOwn(candidate, index)) {
+          const property = Object.getOwnPropertyDescriptor(candidate, index);
+          if (!property || !("value" in property) || !property.enumerable) {
             throw new TypeError(
               "Navigation descriptor arrays must be dense JSON arrays",
             );
           }
           expectedKeys.add(String(index));
+          values.push(visit(property.value, depth + 1));
         }
         if (Reflect.ownKeys(candidate).some((key) => !expectedKeys.has(key))) {
           throw new TypeError(
             "Navigation descriptor arrays must be dense JSON arrays",
           );
         }
-        return `[${candidate.map((item) => visit(item, depth + 1)).join(",")}]`;
+        return `[${values.join(",")}]`;
       }
       const prototype = Object.getPrototypeOf(candidate);
       if (prototype !== Object.prototype && prototype !== null) {
@@ -583,13 +613,15 @@ function canonicalJson(value: unknown): string {
         throw new TypeError("Navigation descriptors require string keys");
       }
       return `{${keys
-        .map(
-          (key) =>
-            `${JSON.stringify(key)}:${visit(
-              (candidate as Record<string, unknown>)[key],
-              depth + 1,
-            )}`,
-        )
+        .map((key) => {
+          const property = Object.getOwnPropertyDescriptor(candidate, key);
+          if (!property || !("value" in property) || !property.enumerable) {
+            throw new TypeError(
+              "Navigation descriptors require data properties",
+            );
+          }
+          return `${JSON.stringify(key)}:${visit(property.value, depth + 1)}`;
+        })
         .join(",")}}`;
     } finally {
       ancestors.delete(candidate);
@@ -792,6 +824,17 @@ export function definePanel<
           navigation: options.update.navigation,
         });
   const suppliedPersistence = options.persistence;
+  const suppliedMode = (
+    suppliedPersistence as Readonly<{ mode?: unknown }> | undefined
+  )?.mode;
+  if (
+    suppliedPersistence !== undefined &&
+    suppliedMode !== "transient" &&
+    suppliedMode !== "navigation" &&
+    suppliedMode !== "navigation-with-loader"
+  ) {
+    throw new TypeError("Unknown Panel persistence mode");
+  }
   let persistence: PanelPersistence<Input, Descriptor>;
   if (
     suppliedPersistence === undefined ||
@@ -1195,14 +1238,14 @@ export function createPanelEngine<
           version: definition.persistence.version,
         });
       }
-      const encoded = canonicalJson({
-        panels,
-        version: navigationDocumentSchemaVersion,
-      });
-      if (
-        new TextEncoder().encode(encoded).byteLength >
-        maximumNavigationDocumentBytes
-      ) {
+      const encoded = canonicalJson(
+        {
+          panels,
+          version: navigationDocumentSchemaVersion,
+        },
+        maximumNavigationDescriptorDepth + 3,
+      );
+      if (utf8ByteLength(encoded) > maximumNavigationDocumentBytes) {
         throw new RangeError("Navigation Document exceeds the byte limit");
       }
       return encoded;
@@ -1218,13 +1261,12 @@ export function createPanelEngine<
         });
       if (
         typeof encoded !== "string" ||
-        new TextEncoder().encode(encoded).byteLength >
-          maximumNavigationDocumentBytes
+        utf8ByteLength(encoded) > maximumNavigationDocumentBytes
       ) {
         return reject("document-too-large", "$");
       }
       const duplicateKey = findDuplicateJsonKey(encoded);
-      if (duplicateKey) return reject("duplicate-key", duplicateKey);
+      if (duplicateKey) return reject("duplicate-key", "$");
       let document: unknown;
       try {
         document = JSON.parse(encoded);
