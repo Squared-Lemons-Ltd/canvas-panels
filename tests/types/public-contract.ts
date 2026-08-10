@@ -142,6 +142,30 @@ if (decodedNavigation.status === "decoded") {
   const path: string = decodedNavigation.diagnostic.path;
   void path;
 }
+const restoredNavigation = engine.restoreNavigationDocument(
+  navigationDocument,
+  {
+    signal: new AbortController().signal,
+  },
+);
+restoredNavigation.then((outcome) => {
+  const navigationIntent: "none" | "replace" = outcome.navigationIntent;
+  if (outcome.status === "recovered") {
+    const reason:
+      | "invalid-document"
+      | "unavailable"
+      | "denied"
+      | "loader-failed"
+      | "aborted" = outcome.recovery.reason;
+    const failedPanelIndex: number | null = outcome.recovery.failedPanelIndex;
+    void reason;
+    void failedPanelIndex;
+  } else {
+    const recovery: null = outcome.recovery;
+    void recovery;
+  }
+  void navigationIntent;
+});
 const [rootPanel] = engine.getSnapshot().panels;
 if (!rootPanel) throw new Error("Canvas Engine did not create its Root Panel");
 const rootId: PanelInstanceId = rootPanel.instanceId;

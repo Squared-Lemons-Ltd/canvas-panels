@@ -2195,3 +2195,308 @@ test("canonical encoding preserves the documented descriptor depth and rejects a
     /Navigation descriptors require data properties/,
   );
 });
+
+test("restoration validates every descriptor before loading available Panels in stack order", async () => {
+  const events = [];
+  const root = defineRootPanel({ kind: "root", title: "Root" });
+  const codec = (kind) => ({
+    encode: ({ id }) => ({ id }),
+    validate: (value) => {
+      events.push(`validate:${kind}`);
+      return (
+        typeof value === "object" &&
+        value !== null &&
+        "id" in value &&
+        typeof value.id === "string"
+      );
+    },
+    decode: (value) => ({ id: value.id }),
+    migrations: [],
+  });
+  const section = definePanel({
+    kind: "section",
+    title: ({ id }) => id,
+    persistence: { mode: "navigation", version: 1, codec: codec("section") },
+  });
+  const record = definePanel({
+    kind: "record",
+    title: ({ id }) => id,
+    persistence: {
+      mode: "navigation-with-loader",
+      version: 1,
+      codec: codec("record"),
+      restore: async ({ id }, { signal }) => {
+        assert.equal(signal.aborted, false);
+        events.push(`load:record:${id}`);
+        return { status: "available" };
+      },
+    },
+  });
+  const detail = definePanel({
+    kind: "detail",
+    title: ({ id }) => id,
+    persistence: {
+      mode: "navigation-with-loader",
+      version: 1,
+      codec: codec("detail"),
+      restore: async ({ id }) => {
+        events.push(`load:detail:${id}`);
+        return { status: "available" };
+      },
+    },
+  });
+  const engine = createPanelEngine({ root, panels: [section, record, detail] });
+  const before = engine.getSnapshot();
+  const signal = new AbortController().signal;
+  const outcome = await engine.restoreNavigationDocument(
+    '{"panels":[{"descriptor":{"id":"section-a"},"kind":"section","version":1},{"descriptor":{"id":"record-a"},"kind":"record","version":1},{"descriptor":{"id":"detail-a"},"kind":"detail","version":1}],"version":1}',
+    { signal },
+  );
+
+  assert.deepEqual(events, [
+    "validate:section",
+    "validate:record",
+    "validate:detail",
+    "load:record:record-a",
+    "load:detail:detail-a",
+  ]);
+  assert.equal(outcome.status, "restored");
+  assert.equal(outcome.navigationIntent, "none");
+  assert.equal(outcome.recovery, null);
+  assert.deepEqual(
+    outcome.references.map(({ kind, input }) => ({ kind, input })),
+    [
+      { kind: "section", input: { id: "section-a" } },
+      { kind: "record", input: { id: "record-a" } },
+      { kind: "detail", input: { id: "detail-a" } },
+    ],
+  );
+  assert.equal(engine.getSnapshot(), before);
+});
+
+test("an unavailable Panel recovers the deepest available prefix without loading descendants", async () => {
+  const loaded = [];
+  const root = defineRootPanel({ kind: "root", title: "Root" });
+  const codec = {
+    encode: ({ id }) => ({ id }),
+    validate: (value) =>
+      typeof value === "object" &&
+      value !== null &&
+      "id" in value &&
+      typeof value.id === "string",
+    decode: (value) => ({ id: value.id }),
+    migrations: [],
+  };
+  const panel = (kind, status) =>
+    definePanel({
+      kind,
+      title: ({ id }) => id,
+      persistence: {
+        mode: "navigation-with-loader",
+        version: 1,
+        codec,
+        restore: async ({ id }) => {
+          loaded.push(id);
+          return { status };
+        },
+      },
+    });
+  const available = panel("available", "available");
+  const unavailable = panel("unavailable", "unavailable");
+  const descendant = panel("descendant", "available");
+  const engine = createPanelEngine({
+    root,
+    panels: [available, unavailable, descendant],
+  });
+
+  const outcome = await engine.restoreNavigationDocument(
+    '{"panels":[{"descriptor":{"id":"available-a"},"kind":"available","version":1},{"descriptor":{"id":"unavailable-a"},"kind":"unavailable","version":1},{"descriptor":{"id":"descendant-a"},"kind":"descendant","version":1}],"version":1}',
+    { signal: new AbortController().signal },
+  );
+
+  assert.deepEqual(loaded, ["available-a", "unavailable-a"]);
+  assert.equal(outcome.status, "recovered");
+  assert.deepEqual(
+    outcome.references.map(({ kind, input }) => ({ kind, input })),
+    [{ kind: "available", input: { id: "available-a" } }],
+  );
+  assert.deepEqual(outcome.recovery, {
+    kind: "recovery-panel",
+    reason: "unavailable",
+    failedPanelIndex: 1,
+  });
+  assert.equal(outcome.navigationIntent, "replace");
+});
+
+test("restoration normalizes denied, throwing, and aborted loaders without leaking errors", async () => {
+  const root = defineRootPanel({ kind: "root", title: "Root" });
+  const codec = {
+    encode: ({ id }) => ({ id }),
+    validate: (value) =>
+      typeof value === "object" &&
+      value !== null &&
+      "id" in value &&
+      typeof value.id === "string",
+    decode: (value) => ({ id: value.id }),
+    migrations: [],
+  };
+  const controller = new AbortController();
+  const outcomes = {
+    denied: async () => ({ status: "denied" }),
+    throwing: async () => {
+      throw new Error("secret-record-id");
+    },
+    aborted: async () => {
+      controller.abort();
+      throw new Error("secret-abort-detail");
+    },
+    malformed: async () => {
+      return Object.defineProperty({}, "status", {
+        get: () => {
+          throw new Error("secret-status-detail");
+        },
+      });
+    },
+  };
+
+  for (const [kind, restore] of Object.entries(outcomes)) {
+    const definition = definePanel({
+      kind,
+      title: ({ id }) => id,
+      persistence: {
+        mode: "navigation-with-loader",
+        version: 1,
+        codec,
+        restore,
+      },
+    });
+    const engine = createPanelEngine({ root, panels: [definition] });
+    const outcome = await engine.restoreNavigationDocument(
+      `{"panels":[{"descriptor":{"id":"sensitive"},"kind":"${kind}","version":1}],"version":1}`,
+      {
+        signal:
+          kind === "aborted" ? controller.signal : new AbortController().signal,
+      },
+    );
+    assert.equal(outcome.status, "recovered");
+    assert.deepEqual(outcome.references, []);
+    assert.equal(
+      outcome.recovery.reason,
+      kind === "throwing" || kind === "malformed" ? "loader-failed" : kind,
+    );
+    assert.equal(outcome.recovery.failedPanelIndex, 0);
+    assert.doesNotMatch(JSON.stringify(outcome), /secret|sensitive/);
+  }
+});
+
+test("restoration retains a valid prefix for malformed descendants and normalizes migrations", async () => {
+  const root = defineRootPanel({ kind: "root", title: "Root" });
+  let loads = 0;
+  const panel = definePanel({
+    kind: "record",
+    title: ({ id }) => id,
+    persistence: {
+      mode: "navigation-with-loader",
+      version: 2,
+      codec: {
+        encode: ({ id }) => ({ id }),
+        validate: (value) =>
+          typeof value === "object" &&
+          value !== null &&
+          "id" in value &&
+          typeof value.id === "string",
+        decode: (value) => ({ id: value.id }),
+        migrations: [
+          {
+            from: 1,
+            migrate: (value) => ({ id: value.legacyId }),
+          },
+        ],
+      },
+      restore: async () => {
+        loads += 1;
+        return { status: "available" };
+      },
+    },
+  });
+  const engine = createPanelEngine({ root, panels: [panel] });
+
+  const migrated = await engine.restoreNavigationDocument(
+    '{"panels":[{"descriptor":{"legacyId":"record-a"},"kind":"record","version":1}],"version":1}',
+    { signal: new AbortController().signal },
+  );
+  assert.equal(migrated.status, "restored");
+  assert.equal(migrated.navigationIntent, "replace");
+  assert.deepEqual(migrated.references[0].input, { id: "record-a" });
+  assert.equal(loads, 1);
+
+  const partial = await engine.restoreNavigationDocument(
+    '{"panels":[{"descriptor":{"id":"record-a"},"kind":"record","version":2},{"descriptor":{"private":"secret"},"kind":"record","version":2}],"version":1}',
+    { signal: new AbortController().signal },
+  );
+  assert.equal(partial.status, "recovered");
+  assert.equal(partial.recovery.reason, "invalid-document");
+  assert.equal(partial.recovery.failedPanelIndex, 1);
+  assert.deepEqual(partial.references[0].input, { id: "record-a" });
+  assert.equal(loads, 1);
+  assert.doesNotMatch(JSON.stringify(partial), /private|secret/);
+
+  const malformed = await engine.restoreNavigationDocument("not-json", {
+    signal: new AbortController().signal,
+  });
+  assert.equal(malformed.status, "recovered");
+  assert.deepEqual(malformed.references, []);
+  assert.deepEqual(malformed.recovery, {
+    kind: "recovery-panel",
+    reason: "invalid-document",
+    failedPanelIndex: null,
+  });
+});
+
+test("an aborted restoration retains navigation-only Panels before the next loader", async () => {
+  const root = defineRootPanel({ kind: "root", title: "Root" });
+  const codec = {
+    encode: ({ id }) => ({ id }),
+    validate: (value) =>
+      typeof value === "object" &&
+      value !== null &&
+      "id" in value &&
+      typeof value.id === "string",
+    decode: (value) => ({ id: value.id }),
+    migrations: [],
+  };
+  const section = definePanel({
+    kind: "section",
+    title: ({ id }) => id,
+    persistence: { mode: "navigation", version: 1, codec },
+  });
+  const record = definePanel({
+    kind: "record",
+    title: ({ id }) => id,
+    persistence: {
+      mode: "navigation-with-loader",
+      version: 1,
+      codec,
+      restore: async () => ({ status: "available" }),
+    },
+  });
+  const engine = createPanelEngine({ root, panels: [section, record] });
+  const controller = new AbortController();
+  controller.abort();
+
+  const outcome = await engine.restoreNavigationDocument(
+    '{"panels":[{"descriptor":{"id":"section-a"},"kind":"section","version":1},{"descriptor":{"id":"record-a"},"kind":"record","version":1}],"version":1}',
+    { signal: controller.signal },
+  );
+
+  assert.equal(outcome.status, "recovered");
+  assert.deepEqual(
+    outcome.references.map(({ kind }) => kind),
+    ["section"],
+  );
+  assert.deepEqual(outcome.recovery, {
+    kind: "recovery-panel",
+    reason: "aborted",
+    failedPanelIndex: 1,
+  });
+});
