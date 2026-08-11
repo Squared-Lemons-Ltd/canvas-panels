@@ -1,0 +1,701 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+
+import { act, fireEvent, render } from "@testing-library/react";
+import { JSDOM } from "jsdom";
+import { createElement } from "react";
+
+import {
+  createPanelEngine,
+  definePanel,
+  defineRootPanel,
+} from "../packages/canvas-panels/dist/core/index.js";
+import {
+  canvasAnnouncementTemplates,
+  canvasBreakpointQueries,
+  createCanvasModule,
+} from "../packages/canvas-panels/dist/ui/index.js";
+
+const dom = new JSDOM("<!doctype html><html><body></body></html>", {
+  url: "https://canvas-panels.test/",
+});
+globalThis.window = dom.window;
+globalThis.document = dom.window.document;
+Object.defineProperty(globalThis, "navigator", {
+  configurable: true,
+  value: dom.window.navigator,
+});
+globalThis.HTMLElement = dom.window.HTMLElement;
+globalThis.Node = dom.window.Node;
+globalThis.getComputedStyle = dom.window.getComputedStyle;
+globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+
+const queryFor = Object.fromEntries(canvasBreakpointQueries);
+
+function installViewport(initial) {
+  let current = initial;
+  const listeners = new Map();
+  dom.window.matchMedia = (query) => ({
+    media: query,
+    get matches() {
+      return queryFor[current] === query;
+    },
+    addEventListener: (_event, listener) => listeners.set(listener, query),
+    removeEventListener: (listener) => listeners.delete(listener),
+  });
+  return {
+    resizeTo(breakpoint) {
+      current = breakpoint;
+      for (const [listener] of listeners) {
+        listener({ matches: queryFor[breakpoint] === listeners.get(listener) });
+      }
+    },
+  };
+}
+
+function buildCanvas() {
+  const root = defineRootPanel({ kind: "classes", title: "Classes" });
+  const classPanel = definePanel({
+    kind: "class",
+    deduplication: "reuse",
+    key: ({ classId }) => classId,
+    title: ({ name }) => name,
+  });
+  const learner = definePanel({
+    kind: "learner",
+    deduplication: "allow-many",
+    title: ({ name }) => name,
+  });
+  const Canvas = createCanvasModule({
+    root,
+    panels: [classPanel, learner],
+    renderers: {
+      classes: () => createElement("p", null, "Class list"),
+      class: () => createElement("button", { type: "button" }, "Class action"),
+      learner: () =>
+        createElement("button", { type: "button" }, "Learner action"),
+    },
+  });
+  const engine = createPanelEngine({ root, panels: [classPanel, learner] });
+  return { Canvas, classPanel, engine, learner };
+}
+
+const bounds = Object.freeze({
+  min: 240,
+  max: 960,
+  step: 16,
+  coarseStep: 64,
+});
+
+function renderCanvas({ breakpoint = "desktop", announcements, sizing } = {}) {
+  const viewport = installViewport(breakpoint);
+  const built = buildCanvas();
+  let result;
+  act(() => {
+    result = render(
+      createElement(
+        built.Canvas.Provider,
+        { engine: built.engine },
+        createElement(built.Canvas.Workspace, {
+          label: "Classes Canvas",
+          announcements,
+          sizing,
+        }),
+      ),
+    );
+  });
+  return { ...result, ...built, viewport };
+}
+
+function openClassAndLearner({ engine, classPanel, learner }) {
+  act(() => {
+    engine.open({
+      originId: engine.getSnapshot().activePanelId,
+      panel: classPanel.reference({ classId: "a", name: "Class A" }),
+    });
+  });
+  act(() => {
+    engine.open({
+      originId: engine.getSnapshot().activePanelId,
+      panel: learner.reference({ learnerId: "ada", name: "Ada Lovelace" }),
+    });
+  });
+}
+
+function headings(container) {
+  return [...container.querySelectorAll("[data-canvas-panel] h2")];
+}
+
+function focusedHeading(container) {
+  return headings(container).find(
+    (heading) => heading === dom.window.document.activeElement,
+  );
+}
+
+function announcer(container) {
+  return container.querySelector("[data-canvas-announcer]");
+}
+
+function pressF6(container, { shiftKey = false } = {}) {
+  act(() => {
+    fireEvent.keyDown(container.querySelector("[data-canvas-workspace]"), {
+      key: "F6",
+      shiftKey,
+    });
+  });
+}
+
+test("the Canvas exposes exactly one polite live region", () => {
+  const { container } = renderCanvas();
+
+  const regions = container.querySelectorAll("[aria-live]");
+  assert.equal(regions.length, 1);
+  assert.equal(regions[0].getAttribute("aria-live"), "polite");
+  assert.equal(regions[0].getAttribute("aria-atomic"), "true");
+});
+
+test("the live region does not claim a role applications query for", () => {
+  const { container } = renderCanvas();
+
+  // `role="status"` would mean every application's own `getByRole("status")`
+  // suddenly matched two elements.
+  assert.equal(announcer(container).hasAttribute("role"), false);
+});
+
+test("the live region is empty until something structural happens", () => {
+  const { container } = renderCanvas();
+
+  assert.equal(announcer(container).textContent, "");
+});
+
+test("opening and closing Panels is announced", () => {
+  const canvas = renderCanvas();
+  openClassAndLearner(canvas);
+
+  assert.equal(
+    announcer(canvas.container).textContent,
+    "Ada Lovelace opened. Panel 3 of 3.",
+  );
+
+  act(() => {
+    canvas.engine.close({
+      target: canvas.engine.getSnapshot().panels.at(-1).instanceRef,
+    });
+  });
+
+  assert.equal(
+    announcer(canvas.container).textContent,
+    "Ada Lovelace closed. Showing Class A. Panel 2 of 2.",
+  );
+});
+
+test("activating a Panel announces nothing new", () => {
+  const canvas = renderCanvas();
+  openClassAndLearner(canvas);
+  const afterOpening = announcer(canvas.container).textContent;
+
+  act(() => {
+    canvas.engine.activate({
+      target: canvas.engine.getSnapshot().panels[1].instanceRef,
+    });
+  });
+
+  assert.equal(announcer(canvas.container).textContent, afterOpening);
+});
+
+test("a breakpoint change announces the new presentation", () => {
+  const canvas = renderCanvas();
+  openClassAndLearner(canvas);
+
+  act(() => {
+    canvas.viewport.resizeTo("mobile");
+  });
+
+  assert.equal(
+    announcer(canvas.container).textContent,
+    "Mobile layout. Showing 1 of 3 panels.",
+  );
+});
+
+test("announcement templates can be replaced for localization", () => {
+  const canvas = renderCanvas({
+    announcements: {
+      ...canvasAnnouncementTemplates,
+      opened: ({ title, position, total }) =>
+        `${title} ouvert. Panneau ${position} sur ${total}.`,
+    },
+  });
+  openClassAndLearner(canvas);
+
+  assert.equal(
+    announcer(canvas.container).textContent,
+    "Ada Lovelace ouvert. Panneau 3 sur 3.",
+  );
+});
+
+test("F6 cycles forward through the visible Panel regions", () => {
+  const canvas = renderCanvas();
+  openClassAndLearner(canvas);
+  const [classes, classA, ada] = headings(canvas.container);
+
+  act(() => {
+    classes.focus();
+  });
+  pressF6(canvas.container);
+  assert.equal(focusedHeading(canvas.container), classA);
+
+  pressF6(canvas.container);
+  assert.equal(focusedHeading(canvas.container), ada);
+
+  // And wraps.
+  pressF6(canvas.container);
+  assert.equal(focusedHeading(canvas.container), classes);
+});
+
+test("Shift+F6 cycles backward through the visible Panel regions", () => {
+  const canvas = renderCanvas();
+  openClassAndLearner(canvas);
+  const [classes, , ada] = headings(canvas.container);
+
+  act(() => {
+    classes.focus();
+  });
+  pressF6(canvas.container, { shiftKey: true });
+
+  assert.equal(focusedHeading(canvas.container), ada);
+});
+
+test("F6 from outside the Canvas enters at the first region", () => {
+  const canvas = renderCanvas();
+  openClassAndLearner(canvas);
+  const [classes] = headings(canvas.container);
+
+  act(() => {
+    dom.window.document.body.focus();
+  });
+  pressF6(canvas.container);
+
+  assert.equal(focusedHeading(canvas.container), classes);
+});
+
+test("F6 never lands on a Panel the presentation is hiding", () => {
+  const canvas = renderCanvas();
+  openClassAndLearner(canvas);
+  act(() => {
+    canvas.viewport.resizeTo("mobile");
+  });
+
+  const visible = headings(canvas.container).filter(
+    (heading) => !heading.closest("[data-canvas-panel]").hasAttribute("hidden"),
+  );
+  assert.equal(visible.length, 1);
+
+  pressF6(canvas.container);
+  pressF6(canvas.container);
+
+  assert.equal(focusedHeading(canvas.container), visible[0]);
+});
+
+test("the Canvas claims no key other than F6", () => {
+  const canvas = renderCanvas();
+  openClassAndLearner(canvas);
+  const [classes] = headings(canvas.container);
+  act(() => {
+    classes.focus();
+  });
+
+  for (const key of ["ArrowRight", "ArrowLeft", "Tab", "a", "j", "Escape"]) {
+    const workspace = canvas.container.querySelector("[data-canvas-workspace]");
+    let defaultPrevented;
+    act(() => {
+      defaultPrevented = !fireEvent.keyDown(workspace, { key });
+    });
+    assert.equal(defaultPrevented, false, `${key} must be left alone`);
+    assert.equal(focusedHeading(canvas.container), classes);
+  }
+});
+
+for (const breakpoint of ["desktop", "tablet", "mobile"]) {
+  test(`the ${breakpoint} presentation passes automated accessibility checks`, async () => {
+    const canvas = renderCanvas({ breakpoint });
+    openClassAndLearner(canvas);
+
+    const axe = (await import("axe-core")).default;
+    // Contrast is a theming concern the application owns through the documented
+    // `--canvas-*` tokens, and jsdom applies no stylesheet to measure anyway.
+    const { violations } = await axe.run(canvas.container, {
+      rules: { "color-contrast": { enabled: false } },
+    });
+
+    assert.deepEqual(
+      violations.map(({ id }) => id),
+      [],
+    );
+  });
+}
+
+test("a Panel title long enough to wrap stays intact and labelled", () => {
+  const canvas = renderCanvas();
+  const title = `${"Extremely long class name ".repeat(40)}end`;
+  act(() => {
+    canvas.engine.open({
+      originId: canvas.engine.getSnapshot().activePanelId,
+      panel: canvas.classPanel.reference({ classId: "a", name: title }),
+    });
+  });
+
+  const heading = headings(canvas.container).at(-1);
+  assert.equal(heading.textContent, title);
+  const region = heading.closest("[data-canvas-panel]");
+  assert.equal(region.getAttribute("aria-labelledby"), heading.id);
+});
+
+test("more actions than a header can show remain individually reachable", () => {
+  const canvas = renderCanvas();
+  openClassAndLearner(canvas);
+  const header = canvas.container
+    .querySelector("[data-canvas-panel][data-active]")
+    .querySelector("[data-canvas-panel-header]");
+
+  const labels = [...header.querySelectorAll("button")].map((button) =>
+    button.getAttribute("aria-label"),
+  );
+
+  // Every rendered action is a real button with its own accessible name, so
+  // overflow is a presentation problem and never a reachability one.
+  assert.equal(new Set(labels).size, labels.length);
+  for (const button of header.querySelectorAll("button")) {
+    assert.equal(button.hasAttribute("aria-hidden"), false);
+    assert.ok(button.getAttribute("aria-label") || button.textContent);
+  }
+});
+
+test("mounting inside a hidden subtree does not throw or steal focus", () => {
+  const host = dom.window.document.createElement("div");
+  host.hidden = true;
+  dom.window.document.body.append(host);
+  const previouslyFocused = dom.window.document.activeElement;
+  installViewport("desktop");
+  const { Canvas, engine } = buildCanvas();
+
+  assert.doesNotThrow(() => {
+    act(() => {
+      render(
+        createElement(
+          Canvas.Provider,
+          { engine },
+          createElement(Canvas.Workspace, { label: "Hidden Canvas" }),
+        ),
+        { container: host },
+      );
+    });
+  });
+
+  assert.equal(dom.window.document.activeElement, previouslyFocused);
+  host.remove();
+});
+
+test("every breakpoint keeps the same logical stack", () => {
+  const canvas = renderCanvas({ breakpoint: "desktop" });
+  openClassAndLearner(canvas);
+  const logical = canvas.engine
+    .getSnapshot()
+    .panels.map(({ instanceId }) => instanceId);
+
+  for (const breakpoint of ["tablet", "mobile", "desktop"]) {
+    act(() => {
+      canvas.viewport.resizeTo(breakpoint);
+    });
+    assert.deepEqual(
+      canvas.engine.getSnapshot().panels.map(({ instanceId }) => instanceId),
+      logical,
+      `${breakpoint} must not mutate the stack`,
+    );
+  }
+});
+
+function separators(container) {
+  return [...container.querySelectorAll("[data-canvas-panel-separator]")];
+}
+
+function pressOn(element, key, { shiftKey = false } = {}) {
+  act(() => {
+    fireEvent.keyDown(element, { key, shiftKey });
+  });
+}
+
+test("each resizable Panel exposes a labelled ARIA separator", () => {
+  const canvas = renderCanvas();
+  openClassAndLearner(canvas);
+
+  const handles = separators(canvas.container);
+  // Three visible Panels, and the last has nothing to its right to resize.
+  assert.equal(handles.length, 2);
+  for (const handle of handles) {
+    assert.equal(handle.getAttribute("role"), "separator");
+    assert.equal(handle.getAttribute("aria-orientation"), "vertical");
+    assert.equal(handle.getAttribute("tabindex"), "0");
+    assert.match(handle.getAttribute("aria-label"), /^Resize /);
+    assert.ok(handle.hasAttribute("aria-valuenow"));
+    assert.ok(handle.hasAttribute("aria-valuemin"));
+    assert.ok(handle.hasAttribute("aria-valuemax"));
+  }
+});
+
+test("the resize handle is a large enough pointer target", () => {
+  const rule = stylesheet.match(
+    /\[data-canvas-panel-separator\] \{([\s\S]*?)\}/,
+  );
+  assert.ok(rule);
+
+  // WCAG 2.5.8 wants 24px; jsdom lays nothing out, so the declared size is
+  // what can be checked here. A hairline handle is the classic failure.
+  const size = rule[1].match(/inline-size:\s*([\d.]+)rem/);
+  assert.ok(size, "the handle must declare an explicit inline size");
+  assert.ok(
+    Number(size[1]) * 16 >= 24,
+    `handle is ${Number(size[1]) * 16}px, below the 24px target minimum`,
+  );
+});
+
+test("F6 reads focus from the document, not from a Panel's focus handler", () => {
+  const canvas = renderCanvas();
+  openClassAndLearner(canvas);
+  const [, classA, ada] = headings(canvas.container);
+
+  // Focus moved by something other than a Panel's own focus handler — the
+  // Canvas repositioning it, or the browser restoring it. F6 must still cycle
+  // from where focus actually is, not from the first region.
+  act(() => {
+    ada.focus();
+  });
+  pressF6(canvas.container, { shiftKey: true });
+
+  assert.equal(focusedHeading(canvas.container), classA);
+});
+
+test("a separator reports the width its Panel actually has", () => {
+  const canvas = renderCanvas({ sizing: bounds });
+  openClassAndLearner(canvas);
+  const [handle] = separators(canvas.container);
+  const panel = handle.closest("[data-canvas-panel]");
+
+  // jsdom lays nothing out, so the measured width is 0 and the reported value
+  // falls back to the minimum. What must hold either way is that the value
+  // tracks the Panel rather than being pinned to a constant.
+  Object.defineProperty(panel, "offsetWidth", {
+    configurable: true,
+    value: 512,
+  });
+  // Re-measurement happens when the visible set changes, so move the
+  // presentation away and back rather than asking for the one it already has.
+  act(() => {
+    canvas.viewport.resizeTo("mobile");
+  });
+  act(() => {
+    canvas.viewport.resizeTo("desktop");
+  });
+
+  assert.equal(
+    Number(separators(canvas.container)[0].getAttribute("aria-valuenow")),
+    512,
+  );
+});
+
+test("a presentation showing one Panel offers nothing to resize", () => {
+  const canvas = renderCanvas();
+  openClassAndLearner(canvas);
+  act(() => {
+    canvas.viewport.resizeTo("mobile");
+  });
+
+  assert.deepEqual(separators(canvas.container), []);
+});
+
+test("Arrow keys resize and announce the settled size", () => {
+  const canvas = renderCanvas({ sizing: bounds });
+  openClassAndLearner(canvas);
+  const [handle] = separators(canvas.container);
+
+  pressOn(handle, "ArrowRight");
+  const afterFirst = Number(handle.getAttribute("aria-valuenow"));
+  assert.equal(afterFirst, bounds.min);
+  assert.match(
+    announcer(canvas.container).textContent,
+    /^Classes resized to \d+ pixels\.$/,
+  );
+
+  pressOn(handle, "ArrowRight");
+  assert.equal(
+    Number(handle.getAttribute("aria-valuenow")),
+    afterFirst + bounds.step,
+  );
+
+  pressOn(handle, "ArrowRight", { shiftKey: true });
+  assert.equal(
+    Number(handle.getAttribute("aria-valuenow")),
+    afterFirst + bounds.step + bounds.coarseStep,
+  );
+});
+
+test("Home and End move to the declared bounds", () => {
+  const canvas = renderCanvas({ sizing: bounds });
+  openClassAndLearner(canvas);
+  const [handle] = separators(canvas.container);
+
+  pressOn(handle, "End");
+  assert.equal(Number(handle.getAttribute("aria-valuenow")), bounds.max);
+
+  pressOn(handle, "Home");
+  assert.equal(Number(handle.getAttribute("aria-valuenow")), bounds.min);
+});
+
+test("a separator at its bound announces nothing further", () => {
+  const canvas = renderCanvas({ sizing: bounds });
+  openClassAndLearner(canvas);
+  const [handle] = separators(canvas.container);
+  pressOn(handle, "End");
+  const settled = announcer(canvas.container).textContent;
+
+  act(() => {
+    announcer(canvas.container).textContent = "";
+  });
+  pressOn(handle, "ArrowRight");
+
+  assert.match(settled, /resized to/);
+  assert.equal(announcer(canvas.container).textContent, "");
+});
+
+test("the resized Panel actually takes the chosen width", () => {
+  const canvas = renderCanvas({ sizing: bounds });
+  openClassAndLearner(canvas);
+  const [handle] = separators(canvas.container);
+
+  pressOn(handle, "End");
+
+  const panel = handle.closest("[data-canvas-panel]");
+  assert.equal(panel.style.flexBasis, `${bounds.max}px`);
+});
+
+test("the separator leaves keys it does not own to the application", () => {
+  const canvas = renderCanvas({ sizing: bounds });
+  openClassAndLearner(canvas);
+  const [handle] = separators(canvas.container);
+  pressOn(handle, "End");
+  const before = handle.getAttribute("aria-valuenow");
+
+  for (const key of ["ArrowUp", "ArrowDown", "a", "Escape"]) {
+    pressOn(handle, key);
+    assert.equal(handle.getAttribute("aria-valuenow"), before);
+  }
+});
+
+const stylesheet = await readFile(
+  new URL("../packages/canvas-panels/dist/styles.css", import.meta.url),
+  "utf8",
+);
+
+test("a reduced-motion preference cannot be overridden by the application", () => {
+  const block = stylesheet.match(
+    /@media \(prefers-reduced-motion: reduce\) \{[^}]*\{([^}]*)\}/,
+  );
+  assert.ok(block, "the stylesheet must honour prefers-reduced-motion");
+
+  // Important declarations invert layer order, so an important rule inside the
+  // Canvas layer outranks anything the application writes. Without `!important`
+  // any unlayered application rule would reinstate the motion.
+  for (const property of [
+    "animation-duration",
+    "transition-duration",
+    "scroll-behavior",
+  ]) {
+    assert.match(block[1], new RegExp(`${property}:[^;]*!important`));
+  }
+});
+
+test("no animation can delay Canvas state, guards, focus, or history", async () => {
+  const sources = await Promise.all(
+    [
+      "core/index.js",
+      "react/index.js",
+      "ui/index.js",
+      "ui/interaction.js",
+      "next/index.js",
+    ].map((file) =>
+      readFile(
+        new URL(`../packages/canvas-panels/dist/${file}`, import.meta.url),
+        "utf8",
+      ),
+    ),
+  );
+
+  // Nothing in the package waits on a timer or an animation before committing:
+  // presentation can lag, but state, guards, focus, and history never do.
+  for (const source of sources) {
+    for (const gate of [
+      "setTimeout",
+      "requestAnimationFrame",
+      "transitionend",
+      "animationend",
+    ]) {
+      assert.equal(source.includes(gate), false, `${gate} must not gate state`);
+    }
+  }
+});
+
+test("colours come from system keywords so forced-colours modes survive", () => {
+  const tokens = stylesheet.match(/--canvas-[a-z-]+:[^;]+;/g) ?? [];
+  const surfaces = tokens.filter((token) =>
+    /--canvas-(surface|border|text)/.test(token),
+  );
+
+  assert.ok(surfaces.length > 0);
+  for (const token of surfaces) {
+    // `Canvas`, `CanvasText`, and friends are remapped by the OS in forced
+    // colours; a literal hex or rgb() would survive it and break contrast. The
+    // modal scrim is the documented exception — a translucent shade cannot be a
+    // system colour — and is replaced in the forced-colours block instead.
+    if (token.startsWith("--canvas-surface-overlay")) continue;
+    assert.match(
+      token,
+      // A token may also defer to another Canvas token, which resolves to a
+      // system colour by the same rule.
+      /Canvas|CanvasText|Highlight|HighlightText|LinkText|ButtonFace|ButtonText|transparent|currentColor|var\(--canvas-/,
+      `${token} must derive from a system colour`,
+    );
+  }
+});
+
+test("forced colours restore the separation that shadows provided", () => {
+  const block = stylesheet.match(
+    /@media \(forced-colors: active\) \{([\s\S]*?)\n {2}\}/,
+  );
+  assert.ok(block, "the stylesheet must handle forced-colours modes");
+
+  // Shadows are dropped outright in forced colours, so Panel edges have to be
+  // real borders, and the scrim must not be forced into an opaque block.
+  assert.match(block[1], /\[data-canvas-panel\][\s\S]*border:[^;]*CanvasText/);
+  assert.match(
+    block[1],
+    /\[data-canvas-transition-backdrop\][\s\S]*background:\s*Canvas/,
+  );
+});
+
+test("F6 with a modifier is left to the browser", () => {
+  const canvas = renderCanvas();
+  openClassAndLearner(canvas);
+  const [classes] = headings(canvas.container);
+  act(() => {
+    classes.focus();
+  });
+
+  act(() => {
+    fireEvent.keyDown(
+      canvas.container.querySelector("[data-canvas-workspace]"),
+      { ctrlKey: true, key: "F6" },
+    );
+  });
+
+  assert.equal(focusedHeading(canvas.container), classes);
+});

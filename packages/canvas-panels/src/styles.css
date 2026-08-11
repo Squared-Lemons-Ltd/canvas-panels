@@ -59,6 +59,22 @@
     position: relative;
   }
 
+  /*
+   * The Canvas live region. Removed from view without being removed from the
+   * accessibility tree, so `display: none`, `visibility: hidden`, and zero size
+   * are all unavailable — each of those would stop it announcing.
+   */
+  [data-canvas-announcer] {
+    border: 0;
+    clip-path: inset(50%);
+    height: 1px;
+    overflow: hidden;
+    padding: 0;
+    position: absolute;
+    white-space: nowrap;
+    width: 1px;
+  }
+
   /* The Canvas scrolls horizontally within itself; the document never does. */
   [data-canvas-application] {
     background: var(--canvas-surface);
@@ -77,6 +93,8 @@
     flex: 0 0 var(--canvas-panel-width);
     flex-direction: column;
     min-width: 0;
+    /* The positioning context the resize handle on the trailing edge needs. */
+    position: relative;
     transition: flex-basis var(--canvas-transition-duration)
       var(--canvas-transition-easing);
   }
@@ -84,6 +102,38 @@
   [data-canvas-panel][data-active] {
     background: var(--canvas-surface-active);
     flex-basis: var(--canvas-panel-active-width);
+  }
+
+  /*
+   * The resize handle sits on the Panel's trailing edge rather than between two
+   * Panels, so it needs no change to the flex layout and cannot claim space
+   * that would shift the Canvas as Panels come and go.
+   */
+  [data-canvas-panel-separator] {
+    bottom: 0;
+    cursor: col-resize;
+    /*
+     * 1.5rem, not the width of the visible seam: WCAG 2.5.8 wants a 24px
+     * pointer target, and a hairline handle is exactly the control that fails
+     * it. The handle straddles the Panel edge so the extra width costs no
+     * layout space.
+     */
+    inline-size: 1.5rem;
+    inset-inline-end: -0.75rem;
+    position: absolute;
+    top: 0;
+    touch-action: none;
+    z-index: 1;
+  }
+
+  [data-canvas-panel-separator]:focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+
+  /* A drag must track the pointer exactly, not ease toward it. */
+  [data-canvas-resizing] [data-canvas-panel] {
+    transition: none;
   }
 
   /*
@@ -156,13 +206,6 @@
     color: var(--canvas-action-text-destructive);
   }
 
-  @media (prefers-reduced-motion: reduce) {
-    [data-canvas-panel-header] button,
-    [data-canvas-mobile-navigation] button {
-      transition: none;
-    }
-  }
-
   /* Each Panel body scrolls on its own so headers stay visible. */
   [data-canvas-panel-body] {
     flex: 1 1 auto;
@@ -225,9 +268,42 @@
     }
   }
 
-  @media (prefers-reduced-motion: reduce) {
+  /*
+   * Forced-colours modes replace every author colour and ignore box-shadow
+   * outright, so anything that separated Panels by shade alone disappears and
+   * has to become a real border. The modal scrim is the one token that cannot
+   * be a system colour — a translucent shade is the whole point — so it is
+   * replaced here rather than left to be forced into an opaque block.
+   */
+  @media (forced-colors: active) {
     [data-canvas-panel] {
-      transition: none;
+      border: 1px solid CanvasText;
+    }
+
+    [data-canvas-transition-backdrop] {
+      background: Canvas;
+    }
+  }
+
+  /*
+   * A reduced-motion preference is not a default the application may reverse.
+   *
+   * `!important` is deliberate, and it is what makes that true: for important
+   * declarations the cascade inverts layer order, so an important rule inside
+   * this layer outranks anything the application writes — layered or not. The
+   * ordinary rules above stay overridable exactly as documented; only this one
+   * is absolute.
+   */
+  @media (prefers-reduced-motion: reduce) {
+    [data-canvas-workspace],
+    [data-canvas-workspace] * {
+      /* biome-ignore-start lint/complexity/noImportantStyles: the guarantee is that an application cannot reinstate motion, and only an important declaration outranks unlayered application CSS. Removing these silently weakens an accessibility contract. */
+      animation-delay: 0ms !important;
+      animation-duration: 0ms !important;
+      scroll-behavior: auto !important;
+      transition-delay: 0ms !important;
+      transition-duration: 0ms !important;
+      /* biome-ignore-end lint/complexity/noImportantStyles: see above */
     }
   }
 

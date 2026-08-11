@@ -1,7 +1,14 @@
 "use client";
 
 import { Component } from "react";
-import type { ComponentType, ReactNode, RefObject, UIEvent } from "react";
+import type {
+  ComponentType,
+  KeyboardEvent as ReactKeyboardEvent,
+  PointerEvent as ReactPointerEvent,
+  ReactNode,
+  RefObject,
+  UIEvent,
+} from "react";
 import {
   createContext,
   createElement,
@@ -33,6 +40,40 @@ import {
   type RootPanelDefinition,
 } from "../core/index.js";
 import { type CanvasBinding, createCanvasBindings } from "../react/index.js";
+import {
+  type CanvasAnnouncementState,
+  type CanvasAnnouncementTemplates,
+  canvasAnnouncementTemplates,
+  canvasPanelSizingBounds,
+  cyclePanelRegion,
+  describeStructuralChange,
+  type PanelSizingBounds,
+  resizePanel,
+  type SizingCommand,
+  sizingCommandForKey,
+} from "./interaction.js";
+
+// The interaction grammar is part of the Canvas's public surface: announcement
+// templates have to be replaceable to localize, and the sizing engine is what
+// an application reuses if it renders its own separator.
+export {
+  canvasAnnouncementTemplates,
+  canvasPanelSizingBounds,
+  cyclePanelRegion,
+  describeStructuralChange,
+  resizePanel,
+  sizingCommandForKey,
+} from "./interaction.js";
+export type {
+  CanvasAnnouncementPanel,
+  CanvasAnnouncementState,
+  CanvasAnnouncementTemplates,
+  PanelRegionDirection,
+  PanelSizing,
+  PanelSizingBounds,
+  PanelSizingOutcome,
+  SizingCommand,
+} from "./interaction.js";
 
 /**
  * The media queries that select each declared breakpoint, ordered from the
@@ -250,6 +291,16 @@ type CanvasRendererMap<
 
 export type CanvasWorkspaceProps = Readonly<{
   label: string;
+  /**
+   * Replaces the English sentences the Canvas live region announces. Spread
+   * {@link canvasAnnouncementTemplates} and override only what you need.
+   */
+  announcements?: CanvasAnnouncementTemplates;
+  /**
+   * The sizes a Panel may be resized between. Defaults to
+   * {@link canvasPanelSizingBounds}.
+   */
+  sizing?: PanelSizingBounds;
 }>;
 
 export type CanvasModuleProviderProps<
@@ -967,7 +1018,7 @@ export function createCanvasModule<
     );
   }
 
-  function Workspace({ label }: CanvasWorkspaceProps) {
+  function Workspace({ label, announcements, sizing }: CanvasWorkspaceProps) {
     const { snapshot, activate, close, registerLifecycle, resolveTransition } =
       bindings.useCanvas();
     useBreakpointPresentation(bindings.useEngine());
@@ -1226,6 +1277,164 @@ export function createCanvasModule<
           : null;
     }, []);
 
+    const headingIdFor = useCallback(
+      (panelId: string) => {
+        const index = snapshot.panels.findIndex(
+          ({ instanceId }) => instanceId === panelId,
+        );
+        return index < 0 ? null : `${workspaceId}-panel-${index}-heading`;
+      },
+      [snapshot.panels, workspaceId],
+    );
+
+    // F6 is the only key the Canvas claims. Tab order is left exactly as the
+    // DOM defines it, and no arrow or letter shortcut is registered globally,
+    // so an application's own controls keep every key they expect.
+    const cycleRegions = useCallback(
+      (event: ReactKeyboardEvent<HTMLDivElement>) => {
+        if (
+          event.key !== "F6" ||
+          event.altKey ||
+          event.ctrlKey ||
+          event.metaKey
+        )
+          return;
+        // Where focus actually is, read from the document rather than from the
+        // Panel's own focus handler: focus also arrives by routes that handler
+        // never observes — the Canvas moving it itself when a Panel opens, or
+        // the browser restoring it — and a stale answer silently sends every
+        // F6 back to the first region.
+        const active = document.activeElement;
+        const focusedRegion =
+          active instanceof HTMLElement
+            ? (active
+                .closest("[data-canvas-panel]")
+                ?.getAttribute("data-canvas-panel-id") ?? null)
+            : null;
+        const target = cyclePanelRegion(
+          visiblePanelIds,
+          focusedRegion,
+          event.shiftKey ? "backward" : "forward",
+        );
+        if (target === null) return;
+        const headingId = headingIdFor(target);
+        const heading = headingId ? document.getElementById(headingId) : null;
+        if (!heading) return;
+        event.preventDefault();
+        heading.focus();
+      },
+      [headingIdFor, visiblePanelIds],
+    );
+
+    const announcementTemplates = announcements ?? canvasAnnouncementTemplates;
+    const announcementState = useMemo<CanvasAnnouncementState>(
+      () =>
+        Object.freeze({
+          panels: snapshot.panels.map(({ instanceId, title }) =>
+            Object.freeze({ instanceId, title }),
+          ),
+          activePanelId: snapshot.activePanelId,
+          breakpoint: snapshot.breakpoint,
+          visiblePanelIds,
+        }),
+      [
+        snapshot.panels,
+        snapshot.activePanelId,
+        snapshot.breakpoint,
+        visiblePanelIds,
+      ],
+    );
+    const [announcement, setAnnouncement] = useState("");
+    const announcedState = useRef<CanvasAnnouncementState | null>(null);
+
+    const bounds = sizing ?? canvasPanelSizingBounds;
+    const [panelWidths, setPanelWidths] = useState<ReadonlyMap<string, number>>(
+      () => new Map(),
+    );
+    // The width a Panel had before anyone resized it, which is what a reset
+    // returns to. Measured rather than assumed, because the natural width comes
+    // from the stylesheet and the application may have retokened it.
+    const naturalWidths = useRef(new Map<string, number>());
+    const drag = useRef<Readonly<{
+      panelId: string;
+      startX: number;
+      startWidth: number;
+    }> | null>(null);
+    const [resizing, setResizing] = useState(false);
+
+    const panelElement = useCallback(
+      (panelId: string) =>
+        application.current?.querySelector<HTMLElement>(
+          `[data-canvas-panel-id="${panelId}"]`,
+        ) ?? null,
+      [],
+    );
+
+    // A separator has to report the width the Panel really has, from the first
+    // render. Until a Panel is measured its natural width comes from the
+    // stylesheet, which only the browser can resolve, so it is read back after
+    // layout rather than assumed to be the minimum.
+    const [measuredWidths, setMeasuredWidths] = useState<
+      ReadonlyMap<string, number>
+    >(() => new Map());
+    useLayoutEffect(() => {
+      const measured = new Map<string, number>();
+      for (const panelId of visiblePanelIds) {
+        if (panelWidths.has(panelId) || measuredWidths.has(panelId)) continue;
+        const width = application.current?.querySelector<HTMLElement>(
+          `[data-canvas-panel-id="${panelId}"]`,
+        )?.offsetWidth;
+        if (width) measured.set(panelId, width);
+      }
+      if (measured.size === 0) return;
+      for (const [panelId, width] of measured) {
+        naturalWidths.current.set(panelId, width);
+      }
+      setMeasuredWidths((current) => new Map([...current, ...measured]));
+    }, [visiblePanelIds, panelWidths, measuredWidths]);
+
+    const widthOf = useCallback(
+      (panelId: string) =>
+        panelWidths.get(panelId) ?? measuredWidths.get(panelId) ?? bounds.min,
+      [bounds.min, measuredWidths, panelWidths],
+    );
+
+    const applySizing = useCallback(
+      (panelId: string, command: SizingCommand) => {
+        const element = panelElement(panelId);
+        const measured = element?.offsetWidth ?? bounds.min;
+        if (!naturalWidths.current.has(panelId)) {
+          naturalWidths.current.set(panelId, measured);
+        }
+        const outcome = resizePanel({
+          ...bounds,
+          size: panelWidths.get(panelId) ?? measured,
+          initial: naturalWidths.current.get(panelId) ?? measured,
+          command,
+        });
+        if (outcome.changed) {
+          setPanelWidths((current) =>
+            new Map(current).set(panelId, outcome.size),
+          );
+        }
+        return outcome;
+      },
+      [bounds, panelElement, panelWidths],
+    );
+
+    // One region, and it only ever carries a message the move actually earned:
+    // comparing against the last announced state is what stops a re-render, or
+    // a change that was not structural, from repeating itself.
+    useEffect(() => {
+      const message = describeStructuralChange(
+        announcedState.current,
+        announcementState,
+        announcementTemplates,
+      );
+      announcedState.current = announcementState;
+      if (message !== null) setAnnouncement(message);
+    }, [announcementState, announcementTemplates]);
+
     return createElement(
       WorkspaceHierarchyContext.Provider,
       { value: hierarchy },
@@ -1238,8 +1447,21 @@ export function createCanvasModule<
             "aria-label": label,
             "data-canvas-breakpoint": snapshot.breakpoint,
             "data-canvas-workspace": "",
+            onKeyDown: cycleRegions,
             role: "region",
           },
+          // A bare live region, deliberately without `role="status"`: that role
+          // implies exactly this politeness, and claiming it would put a second
+          // status element into every application's `getByRole` queries.
+          createElement(
+            "div",
+            {
+              "aria-atomic": true,
+              "aria-live": "polite",
+              "data-canvas-announcer": "",
+            },
+            announcement,
+          ),
           snapshot.breakpoint !== "mobile"
             ? null
             : createElement(
@@ -1296,6 +1518,7 @@ export function createCanvasModule<
             "div",
             {
               "data-canvas-application": "",
+              "data-canvas-resizing": resizing ? "" : undefined,
               "data-testid": "canvas-panels-application",
               "aria-hidden": deepestTransition ? true : undefined,
               inert: deepestTransition ? true : undefined,
@@ -1349,6 +1572,12 @@ export function createCanvasModule<
                   hidden: !visible,
                   inert: !visible,
                   key: panel.instanceId,
+                  // An explicitly chosen width is applied inline so it outranks
+                  // both the Panel and Active Panel rules without either needing
+                  // to become more specific.
+                  style: panelWidths.has(panel.instanceId)
+                    ? { flexBasis: `${panelWidths.get(panel.instanceId)}px` }
+                    : undefined,
                   onBlurCapture: (event) => {
                     if (!event.currentTarget.contains(event.relatedTarget))
                       signalStore.setFocused(null);
@@ -1439,6 +1668,87 @@ export function createCanvasModule<
                     }),
                   ),
                 ),
+                // The last visible Panel has nothing to its right to resize
+                // against, and a presentation showing one Panel has nothing to
+                // divide at all.
+                !visible ||
+                  visiblePanelIds.at(-1) === panel.instanceId ||
+                  visiblePanelIds.length < 2
+                  ? null
+                  : createElement("div", {
+                      "aria-label": `Resize ${panel.title}`,
+                      "aria-orientation": "vertical",
+                      "aria-valuemax": bounds.max,
+                      "aria-valuemin": bounds.min,
+                      "aria-valuenow": Math.round(widthOf(panel.instanceId)),
+                      "data-canvas-panel-separator": "",
+                      onKeyDown: (
+                        event: ReactKeyboardEvent<HTMLDivElement>,
+                      ) => {
+                        const command = sizingCommandForKey(event);
+                        if (command === null) return;
+                        event.preventDefault();
+                        // Only a size that actually moved is worth saying; at a
+                        // bound, a held key would otherwise flood the region.
+                        const outcome = applySizing(panel.instanceId, command);
+                        if (outcome.changed) {
+                          setAnnouncement(
+                            announcementTemplates.resized({
+                              title: panel.title,
+                              size: Math.round(outcome.size),
+                            }),
+                          );
+                        }
+                      },
+                      onPointerDown: (
+                        event: ReactPointerEvent<HTMLDivElement>,
+                      ) => {
+                        const element = panelElement(panel.instanceId);
+                        if (!element) return;
+                        event.preventDefault();
+                        event.currentTarget.setPointerCapture(event.pointerId);
+                        drag.current = Object.freeze({
+                          panelId: panel.instanceId,
+                          startX: event.clientX,
+                          startWidth:
+                            panelWidths.get(panel.instanceId) ??
+                            element.offsetWidth,
+                        });
+                        setResizing(true);
+                      },
+                      onPointerMove: (
+                        event: ReactPointerEvent<HTMLDivElement>,
+                      ) => {
+                        const active = drag.current;
+                        if (active?.panelId !== panel.instanceId) return;
+                        applySizing(panel.instanceId, {
+                          to:
+                            active.startWidth + (event.clientX - active.startX),
+                        });
+                      },
+                      onPointerUp: (
+                        event: ReactPointerEvent<HTMLDivElement>,
+                      ) => {
+                        if (drag.current?.panelId !== panel.instanceId) return;
+                        drag.current = null;
+                        setResizing(false);
+                        event.currentTarget.releasePointerCapture(
+                          event.pointerId,
+                        );
+                        // A drag announces once it settles, never per pointer
+                        // move, which would be unusable.
+                        setAnnouncement(
+                          announcementTemplates.resized({
+                            title: panel.title,
+                            size: Math.round(
+                              panelWidths.get(panel.instanceId) ?? bounds.min,
+                            ),
+                          }),
+                        );
+                      },
+                      role: "separator",
+                      tabIndex: 0,
+                    }),
               );
             }),
           ),
