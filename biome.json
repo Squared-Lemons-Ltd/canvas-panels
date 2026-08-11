@@ -4,6 +4,7 @@
     "includes": [
       "**",
       "!**/dist",
+      "!**/.claude/worktrees",
       "!**/.firecrawl",
       "!**/.next",
       "!**/node_modules"
