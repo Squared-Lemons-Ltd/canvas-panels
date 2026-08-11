@@ -23,15 +23,23 @@ export function importSpecifiers(source) {
   return specifiers;
 }
 
-/** The built entry points a consumer gets without importing an extension. */
+/** The built entry points a consumer gets without importing an optional subpath. */
 export const baseEntryPoints = Object.freeze([
   "core/index.js",
   "react/index.js",
   "ui/index.js",
   "next/index.js",
   "next/server.js",
-  "overlay/index.js",
   "testing/index.js",
+]);
+
+/**
+ * The subpaths a consumer only pays for by naming them: the optional
+ * extensions, and the overlay composition path.
+ */
+export const optionalSubpathPrefixes = Object.freeze([
+  "extensions/",
+  "overlay/",
 ]);
 
 /**
@@ -78,12 +86,12 @@ export function distributionSubpaths(modules, distribution) {
 }
 
 /**
- * The extension subpaths each base entry point drags in. An empty result for
+ * The optional subpaths each base entry point drags in. An empty result for
  * every entry is the isolation guarantee.
  *
  * @returns {Promise<Map<string, readonly string[]>>} keyed by base entry point
  */
-export async function extensionsReachedFromBaseEntryPoints(distribution) {
+export async function optionalSubpathsReachedFromBaseEntryPoints(distribution) {
   const reached = new Map();
 
   for (const entry of baseEntryPoints) {
@@ -91,7 +99,7 @@ export async function extensionsReachedFromBaseEntryPoints(distribution) {
     reached.set(
       entry,
       distributionSubpaths(modules, distribution).filter((subpath) =>
-        subpath.startsWith("extensions/"),
+        optionalSubpathPrefixes.some((prefix) => subpath.startsWith(prefix)),
       ),
     );
   }

@@ -1,4 +1,5 @@
 import {
+  createPanelEngine,
   definePanel,
   defineRootPanel,
 } from "@squaredlemons/canvas-panels/core";
@@ -6,6 +7,10 @@ import {
   type EditorStatus,
   usePanelEditor,
 } from "@squaredlemons/canvas-panels/extensions/editor";
+import {
+  createOverlayWorkspace,
+  defineOverlayWorkspace,
+} from "@squaredlemons/canvas-panels/overlay";
 import "@squaredlemons/canvas-panels/styles.css";
 import {
   type CanvasPanelLifecycle,
@@ -20,6 +25,7 @@ import {
   useEffect,
   useId,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { createRoot } from "react-dom/client";
@@ -434,6 +440,104 @@ const ShowcaseCanvas = createCanvasModule({
 const primaryBriefs = new Map<string, string>();
 const isolatedBriefs = new Map<string, string>();
 
+/*
+ * The optional overlay composition path. Its Workspace is a Canvas like any
+ * other — the shortcuts Panel below opens a second Panel through ordinary
+ * navigation — but it is presented as a modal layer, and it is reached only
+ * through the `helpOverlay` handle. Nothing in the portfolio Canvas can route
+ * a Panel into it by accident.
+ */
+type ShortcutsInput = Readonly<{ topic: string }>;
+
+const helpRoot = defineRootPanel({ kind: "help-root", title: "Help" });
+const shortcutsPanel = definePanel({
+  kind: "shortcuts",
+  title: (input: ShortcutsInput) => input.topic,
+});
+
+function ShortcutsPanel({
+  descriptor,
+}: CanvasPanelRenderProps<ShortcutsInput, "shortcuts">) {
+  const initialFocus = useRef<HTMLButtonElement>(null);
+  HelpCanvas.useLifecycle({
+    dirty: false,
+    initialFocus,
+    guard: () => ({ status: "allow" }) as const,
+    save: async () => {},
+    discard: async () => {},
+  });
+  return (
+    <div className="help-overlay-body">
+      <p>
+        Escape closes the innermost thing that is open, then this overlay, then
+        leaves the key to the Canvas behind it.
+      </p>
+      <ul>
+        <li>
+          <kbd>F6</kbd> cycles the visible Panel Regions.
+        </li>
+        <li>
+          <kbd>Tab</kbd> stays inside this overlay while it is modal.
+        </li>
+        <li>
+          <kbd>Escape</kbd> dismisses it and returns focus where it came from.
+        </li>
+      </ul>
+      <div className="help-overlay-actions">
+        <button
+          onClick={() =>
+            helpOverlay.open(shortcutsPanel.reference({ topic: "Guards" }))
+          }
+          ref={initialFocus}
+          type="button"
+        >
+          Open “{descriptor.topic}” detail
+        </button>
+        <button onClick={() => helpOverlay.dismiss()} type="button">
+          Close help
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const HelpCanvas = createCanvasModule({
+  root: helpRoot,
+  panels: [shortcutsPanel],
+  renderers: {
+    "help-root": () => (
+      <p className="help-overlay-body">
+        A global, modal Canvas Workspace of its own.
+      </p>
+    ),
+    shortcuts: ShortcutsPanel,
+  },
+});
+
+const helpOverlay = createOverlayWorkspace({
+  canvas: HelpCanvas,
+  definition: defineOverlayWorkspace({ label: "Help", name: "help" }),
+  engine: createPanelEngine({ root: helpRoot, panels: [shortcutsPanel] }),
+});
+
+function HelpOverlayTrigger() {
+  // The overlay is read here and routed to explicitly; there is no context that
+  // would let this button reach a global layer without naming one.
+  const { presented } = helpOverlay.usePresentation();
+  return (
+    <button
+      aria-expanded={presented}
+      className="version-chip"
+      onClick={() =>
+        helpOverlay.open(shortcutsPanel.reference({ topic: "Shortcuts" }))
+      }
+      type="button"
+    >
+      Keyboard help
+    </button>
+  );
+}
+
 function StackTelemetry() {
   const stack = ShowcaseCanvas.useStack();
   const active = ShowcaseCanvas.usePanel();
@@ -453,6 +557,14 @@ function StackTelemetry() {
 }
 
 function Showcase() {
+  return (
+    <helpOverlay.Host>
+      <ShowcaseShell />
+    </helpOverlay.Host>
+  );
+}
+
+function ShowcaseShell() {
   return (
     <div className="showcase-shell">
       <a className="skip-link" href="#workspace">
@@ -478,6 +590,7 @@ function Showcase() {
             GitHub
           </a>
         </nav>
+        <HelpOverlayTrigger />
         <span className="version-chip">Private preview · 0.x</span>
       </header>
 

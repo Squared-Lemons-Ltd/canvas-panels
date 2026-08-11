@@ -120,14 +120,39 @@ svg {
   color: var(--ink);
 }
 .version-chip {
+  background: none;
   border: 1px solid var(--line);
   border-radius: 99px;
+  color: inherit;
   font-family: var(--mono);
   font-size: 10px;
   justify-self: end;
   letter-spacing: 0.04em;
   padding: 8px 12px;
   text-transform: uppercase;
+}
+
+button.version-chip {
+  cursor: pointer;
+}
+
+.help-overlay-body {
+  display: grid;
+  gap: 12px;
+  padding: 20px;
+}
+
+.help-overlay-body ul {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-inline-start: 20px;
+}
+
+.help-overlay-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .hero {
