@@ -327,6 +327,12 @@ test("an inaccessible restored Panel is recovered and the URL is normalized", as
     engine.getSnapshot().panels.map(({ kind }) => kind),
     ["classes", "section"],
   );
+  // Trimming an unreachable Panel is normalization, so it must not leave a
+  // history entry the user could press Back into.
+  assert.deepEqual(
+    calls.map(({ method }) => method),
+    ["replace"],
+  );
   const url = new URL(calls.at(-1).url, "https://canvas-panels.test");
   assert.equal(
     readCanvasNavigationState(url.searchParams).document,

@@ -100,6 +100,10 @@ An adapter that synchronizes a Navigation Document with an external navigation m
 
 The one primary Canvas Workspace explicitly authorised to synchronize its Navigation Document with an application URL namespace.
 
+## Stack Restoration
+
+Moving a Panel Stack to a named set of Panels in one operation, resolving every affected Transition Guard as a single Guarded Transition and committing atomically. Panels the target stack shares with the current one keep their identity and are never guarded, so restoration disturbs only what actually changes. It is how a Navigation Adapter applies a traversal the browser has already made, and is distinct from Branch Replacement, which is driven by opening from an Origin.
+
 ## History Namespace
 
 The URL namespace a single URL-Owning Canvas Workspace claims, named by its Navigation Parameter. The first Workspace to claim a History Namespace owns it; any later Workspace claiming the same one—a secondary Workspace on the page, or one nested inside a Panel—is refused and navigates in memory instead. A refused claim is reported, never thrown.

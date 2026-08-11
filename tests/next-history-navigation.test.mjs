@@ -580,6 +580,143 @@ test("a second Workspace on the same namespace navigates in memory", () => {
   assert.deepEqual(kinds(secondary.engine), ["classes", "section"]);
 });
 
+test("a Workspace declaring memory leaves the namespace for its host", () => {
+  const nested = createWorkspace();
+  const host = createWorkspace();
+  const nestedSession = createSessionHistory();
+  const hostSession = createSessionHistory();
+  const ownership = [];
+
+  // React commits effects child-first, so the nested Workspace mounts first.
+  // Declaring memory is what stops it taking the namespace from its host.
+  mount({
+    engine: nested.engine,
+    history: nestedSession.history,
+    location,
+    ownership: "memory",
+    initialState: { status: "absent" },
+    onOwnership: (value) => ownership.push(value),
+  });
+  mount({
+    engine: host.engine,
+    history: hostSession.history,
+    location,
+    initialState: { status: "absent" },
+    onOwnership: (value) => ownership.push(value),
+  });
+
+  openSection(nested.engine, nested.section, "section-a");
+  openSection(host.engine, host.section, "section-b");
+
+  assert.deepEqual(ownership, ["memory", "url"]);
+  assert.deepEqual(nestedSession.writes(), []);
+  assert.deepEqual(hostSession.writes(), ["replace", "push"]);
+});
+
+test("rapid traversal past an open dialog settles where the browser finished", async () => {
+  const { engine, section, restores } = createWorkspace();
+  const session = createSessionHistory();
+  mount({
+    engine,
+    history: session.history,
+    location,
+    initialState: { status: "absent" },
+  });
+  openSection(engine, section, "section-a");
+  openSection(engine, section, "section-b");
+  const guards = guardPanel(engine, engine.getSnapshot().activePanelId);
+
+  act(() => {
+    session.back();
+  });
+  // A second Back while the dialog is still open. The engine has already staged
+  // the first target, so this must not stage another.
+  act(() => {
+    session.back();
+  });
+  assert.equal(guards.length, 1, "the second traversal raises no new dialog");
+  assert.equal(restores.length, 1);
+
+  await act(async () => {
+    await engine.resolveTransition({ decision: "discard" });
+  });
+
+  // The engine commits the stack it staged, so the browser is brought back to
+  // the entry that stack belongs to rather than left two entries away.
+  assert.deepEqual(kinds(engine), ["classes", "section"]);
+  assert.equal(session.at(), 1);
+  assert.deepEqual(session.repairs(), [{ method: "go", delta: 1 }]);
+});
+
+test("rapid traversal past a cancelled dialog returns to where the Canvas is", async () => {
+  const { engine, section } = createWorkspace();
+  const session = createSessionHistory();
+  mount({
+    engine,
+    history: session.history,
+    location,
+    initialState: { status: "absent" },
+  });
+  openSection(engine, section, "section-a");
+  openSection(engine, section, "section-b");
+  const guards = guardPanel(engine, engine.getSnapshot().activePanelId);
+
+  act(() => {
+    session.back();
+  });
+  act(() => {
+    session.back();
+  });
+  await act(async () => {
+    await engine.resolveTransition({ decision: "stay" });
+  });
+
+  assert.deepEqual(kinds(engine), ["classes", "section", "section"]);
+  assert.equal(session.at(), 2, "the browser returns the whole distance");
+  assert.equal(guards.length, 1);
+  assert.deepEqual(session.repairs(), [{ method: "go", delta: 2 }]);
+});
+
+test("a repair that never lands does not deafen the Workspace", async () => {
+  const { engine, section } = createWorkspace();
+  const session = createSessionHistory();
+  mount({
+    engine,
+    history: session.history,
+    location,
+    initialState: { status: "absent" },
+  });
+  openSection(engine, section, "section-a");
+  const guards = guardPanel(engine, engine.getSnapshot().activePanelId);
+
+  act(() => {
+    // A stamped entry claiming a position beyond anything the session holds, so
+    // the repair traversal runs off the end and no `popstate` ever answers it.
+    session.emit({
+      state: {
+        __canvasPanels: {
+          canvas: { namespace: "canvas", key: "ghost", index: 0 },
+        },
+      },
+      url: "/classes",
+    });
+  });
+  await act(async () => {
+    await engine.resolveTransition({ decision: "stay" });
+  });
+  assert.deepEqual(session.repairs(), [{ method: "go", delta: 1 }]);
+  assert.equal(engine.getSnapshot().transition, null);
+
+  // Back must still work: a repair left in flight cannot be allowed to swallow
+  // every later traversal for the rest of the session.
+  act(() => {
+    session.back();
+  });
+
+  assert.notEqual(engine.getSnapshot().transition, null);
+  assert.equal(guards.length, 2);
+});
+
 test("Workspaces on different namespaces each own their own parameter", () => {
   const first = createWorkspace();
   const second = createWorkspace();

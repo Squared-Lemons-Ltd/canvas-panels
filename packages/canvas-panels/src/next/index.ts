@@ -148,6 +148,14 @@ export type CanvasNavigationSyncOptions<
    */
   onHistoryFailure?: (failure: CanvasHistoryFailure) => void;
   /**
+   * Whether this Workspace should try to own the URL at all. Defaults to `url`.
+   *
+   * A Workspace nested inside a Panel must declare `memory`: React commits
+   * effects child-first, so a nested Workspace left to claim the History
+   * Namespace would take it before its host and demote the host to memory.
+   */
+  ownership?: CanvasHistoryOwnership;
+  /**
    * Called once the Workspace knows whether it owns the URL. A secondary or
    * nested Workspace is told `memory` and writes no history at all.
    */
@@ -253,10 +261,18 @@ export function useCanvasNavigationSync<Reference extends PanelReference>(
 
   useEffect(() => {
     const port = latest.current.history ?? createWindowHistoryPort();
+    // A Workspace that declares itself secondary never even attempts the claim.
+    // React commits effects child-first, so a Workspace nested inside a Panel
+    // would otherwise claim the namespace ahead of its host and demote it; the
+    // nesting is not something the adapter can detect on its own.
+    if (latest.current.ownership === "memory") {
+      latest.current.onOwnership?.("memory");
+      return;
+    }
     const claim = claimHistoryNamespace(parameterName);
     latest.current.onOwnership?.(claim.status === "primary" ? "url" : "memory");
-    // A secondary or nested Workspace keeps working; it simply navigates in
-    // memory and never touches an address another Workspace owns.
+    // A secondary Workspace keeps working; it simply navigates in memory and
+    // never touches an address another Workspace owns.
     if (claim.status !== "primary") return;
     if (!port) return claim.release;
 
@@ -266,31 +282,35 @@ export function useCanvasNavigationSync<Reference extends PanelReference>(
     // recognised as this Workspace's own and proposes nothing.
     let repairing: CanvasHistoryEntry | null = null;
     // Set while a traversal waits on a Guarded Transition the user has not
-    // resolved. A further traversal updates it rather than raising a second
-    // dialog for the same question.
+    // resolved.
+    //
+    // `staged` is the stack the engine was actually asked to restore, which is
+    // what it will commit; `latest` is wherever the browser has since reached.
+    // A further traversal moves `latest` only, so rapid Back/Forward raises one
+    // dialog and settles against the position the browser really finished at.
     let pending: Readonly<{
-      to: CanvasHistoryEntry;
-      targetDocument: string | null;
+      staged: CanvasHistoryEntry;
+      stagedDocument: string | null;
+      latest: CanvasHistoryEntry;
     }> | null = null;
     // Set while restoring, so the engine's own publish does not write the URL
     // back for a move the browser has already made.
     let traversing = false;
 
-    const addressFor = (parameter: string | null) => {
+    /**
+     * The current address, with the Navigation Parameter set to `parameter` —
+     * or left exactly as the host wrote it when `parameter` is omitted.
+     */
+    const addressFor = (parameter?: string | null) => {
       const { location: currentLocation } = latest.current;
-      const search = applyCanvasNavigationParameter(
-        new URLSearchParams(currentLocation.search),
-        parameter,
-        { parameterName },
-      ).toString();
-      return `${currentLocation.pathname}${search ? `?${search}` : ""}${
-        currentLocation.hash ?? ""
-      }`;
-    };
-
-    const currentAddress = () => {
-      const { location: currentLocation } = latest.current;
-      const search = currentLocation.search.replace(/^\?/, "");
+      const search =
+        parameter === undefined
+          ? currentLocation.search.replace(/^\?/, "")
+          : applyCanvasNavigationParameter(
+              new URLSearchParams(currentLocation.search),
+              parameter,
+              { parameterName },
+            ).toString();
       return `${currentLocation.pathname}${search ? `?${search}` : ""}${
         currentLocation.hash ?? ""
       }`;
@@ -316,7 +336,7 @@ export function useCanvasNavigationSync<Reference extends PanelReference>(
           key: nextHistoryKey(parameterName),
           index: 0,
         }),
-        currentAddress(),
+        addressFor(),
         false,
       );
     };
@@ -358,20 +378,27 @@ export function useCanvasNavigationSync<Reference extends PanelReference>(
       written.current = document;
     };
 
-    const repair = (target: CanvasHistoryEntry) => {
-      const plan = planCanvasHistoryRepair(current, target);
+    /**
+     * Moves the browser from `to` back to `from` — the entry the Canvas is
+     * actually showing — so the address and the Panel Stack agree again.
+     */
+    const repair = (
+      from: CanvasHistoryEntry | null,
+      to: CanvasHistoryEntry,
+    ) => {
+      const plan = planCanvasHistoryRepair(from, to);
       if (plan.status === "settled") return;
       if (plan.status === "unrepairable") {
         latest.current.onHistoryFailure?.(
           Object.freeze({
             reason: "unrepairable-position",
-            expected: current,
-            actual: target,
+            expected: from,
+            actual: to,
           } as const),
         );
         return;
       }
-      repairing = current;
+      repairing = from;
       port.go(plan.delta);
     };
 
@@ -390,19 +417,22 @@ export function useCanvasNavigationSync<Reference extends PanelReference>(
       if (pending) {
         // The dialog is still open; nothing is decided yet.
         if (snapshot.transition !== null) return;
-        const settled =
-          pending.targetDocument === null
+        const committed =
+          pending.stagedDocument === null
             ? snapshot.panels.length === 1
-            : document === pending.targetDocument;
-        const { to } = pending;
+            : document === pending.stagedDocument;
+        const { staged, latest: reached } = pending;
         pending = null;
-        if (settled) {
-          current = to;
+        if (committed) {
+          // The traversal went through, so the Canvas is now at `staged`. That
+          // is only where the browser is too if nothing moved it since.
           written.current = document;
+          current = staged;
+          repair(staged, reached);
           return;
         }
         // The user kept their work, so the browser is the thing out of step.
-        repair(to);
+        repair(current, reached);
         return;
       }
 
@@ -436,13 +466,18 @@ export function useCanvasNavigationSync<Reference extends PanelReference>(
       const target = readCanvasHistoryEntry(state, parameterName);
 
       if (repairing) {
-        // Only the repair's own landing clears the flag. Anything else means
-        // the browser moved again mid-repair, and that `popstate` will follow.
-        if (target && target.key === repairing.key) {
-          current = repairing;
-          repairing = null;
+        const landed = repairing;
+        // The latch is released on the first `popstate` either way. Holding it
+        // until a matching key arrives would deafen the Workspace for the rest
+        // of the session whenever the repair failed to land — for instance
+        // because an intervening push truncated the entry it aimed at.
+        repairing = null;
+        if (target && target.key === landed.key) {
+          current = landed;
+          return;
         }
-        return;
+        // The repair went somewhere unexpected, so this is a position the
+        // Workspace has to interpret from scratch rather than trust.
       }
 
       // An entry this Workspace never stamped belongs to the application's own
@@ -450,10 +485,11 @@ export function useCanvasNavigationSync<Reference extends PanelReference>(
       if (!target) return;
 
       const targetDocument = documentFor(url);
-      // A traversal is already awaiting an answer. Recording the newer position
-      // keeps rapid Back/Forward to a single dialog and a single decision.
+      // A traversal is already awaiting an answer. Only the browser's position
+      // moves on: the engine has already staged the first target and will
+      // commit that, so rapid Back/Forward raises one dialog, not two.
       if (pending) {
-        pending = Object.freeze({ to: target, targetDocument });
+        pending = Object.freeze({ ...pending, latest: target });
         return;
       }
 
@@ -475,11 +511,15 @@ export function useCanvasNavigationSync<Reference extends PanelReference>(
       }
 
       if (outcome.status === "confirmation-required") {
-        pending = Object.freeze({ to: target, targetDocument });
+        pending = Object.freeze({
+          staged: target,
+          stagedDocument: targetDocument,
+          latest: target,
+        });
         return;
       }
       if (outcome.status === "rejected") {
-        repair(target);
+        repair(current, target);
         return;
       }
 

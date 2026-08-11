@@ -54,6 +54,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 /**
  * Returns a new history state carrying `entry`, leaving every other key — most
  * importantly Next.js's own — untouched, and never mutating the input.
+ *
+ * The result is deliberately left unfrozen, unlike every other value this
+ * package returns. Next.js's patched `pushState` assigns its own `__NA` and
+ * internals tree directly onto the object it is handed, so a frozen one would
+ * throw under the strict mode ES modules always run in.
  */
 export function writeCanvasHistoryEntry(
   state: unknown,
@@ -95,15 +100,6 @@ export function readCanvasHistoryEntry(
   return createCanvasHistoryEntry({ namespace, key, index });
 }
 
-/**
- * Plans the traversal that returns the browser from `to` — where a `popstate`
- * has already taken it — back to `from`, the entry the Workspace is still
- * showing.
- *
- * A missing entry on either side is reported as unrepairable rather than
- * resolved by guessing a direction: moving the wrong way would compound the
- * problem, and the browser offers no way to ask where an entry sits.
- */
 export type CanvasHistoryClaim =
   | Readonly<{ status: "primary"; release: () => void }>
   | Readonly<{ status: "secondary"; reason: "namespace-claimed" }>;
@@ -145,6 +141,15 @@ export function claimHistoryNamespace(namespace: string): CanvasHistoryClaim {
   } as const);
 }
 
+/**
+ * Plans the traversal that returns the browser from `to` — where a `popstate`
+ * has already taken it — back to `from`, the entry the Workspace is still
+ * showing.
+ *
+ * A missing entry on either side is reported as unrepairable rather than
+ * resolved by guessing a direction: moving the wrong way would compound the
+ * problem, and the browser offers no way to ask where an entry sits.
+ */
 export function planCanvasHistoryRepair(
   from: CanvasHistoryEntry | null,
   to: CanvasHistoryEntry | null,
