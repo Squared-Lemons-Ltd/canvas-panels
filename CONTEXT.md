@@ -84,6 +84,14 @@ A versioned, validated description of the persistent Panels needed to reconstruc
 
 The framework-neutral module that owns Canvas Workspace state, commands, transitions, guards, and Navigation Documents without depending on React or browser APIs.
 
+## Declared Breakpoint
+
+One of the package-owned responsive presentations—desktop, tablet, or mobile—that selects which retained Panels a Canvas Workspace currently presents. A Declared Breakpoint changes presentation only: it never alters Panel instances, logical order, the Active Panel, the Stack Version, or transition history.
+
+## Navigation Parameter
+
+The versioned, namespaced query-string encoding of a Navigation Document, written as `v<n>.<base64url-canonical-json>`. It is the transport form only; validating and restoring the document it carries remains the Panel Engine's responsibility.
+
 ## Navigation Adapter
 
 An adapter that synchronizes a Navigation Document with an external navigation mechanism such as browser history or an application router.

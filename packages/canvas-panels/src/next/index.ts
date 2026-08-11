@@ -61,20 +61,6 @@ export type CanvasNavigationSyncOptions<
   onRecovery?: (recovery: NavigationRecoveryIntent) => void;
 }>;
 
-function isRootOnly(document: string): boolean {
-  try {
-    const parsed: unknown = JSON.parse(document);
-    return (
-      typeof parsed === "object" &&
-      parsed !== null &&
-      Array.isArray((parsed as { panels?: unknown }).panels) &&
-      (parsed as { panels: readonly unknown[] }).panels.length === 0
-    );
-  } catch {
-    return false;
-  }
-}
-
 function openReferences<Reference extends PanelReference>(
   engine: PanelEngine<Reference>,
   references: readonly Reference[],
@@ -158,6 +144,9 @@ export function useCanvasNavigationSync<Reference extends PanelReference>(
   latest.current = options;
 
   const written = useRef<string | null>(null);
+  // A rejected parameter must not survive in the address, so a Canvas that
+  // started from one claims the URL immediately in order to normalize it away.
+  const rejectedInitialParameter = initialState?.status === "rejected";
   if (written.current === null) {
     const current = readCanvasNavigationState(
       new URLSearchParams(location.search),
@@ -167,12 +156,12 @@ export function useCanvasNavigationSync<Reference extends PanelReference>(
   }
 
   useEffect(() => {
-    const write = (document: string) => {
+    const write = (parameter: string | null, document: string) => {
       const { location: currentLocation, router: currentRouter } =
         latest.current;
       const search = applyCanvasNavigationParameter(
         new URLSearchParams(currentLocation.search),
-        isRootOnly(document) ? null : document,
+        parameter,
         { parameterName },
       ).toString();
       currentRouter.replace(
@@ -180,21 +169,33 @@ export function useCanvasNavigationSync<Reference extends PanelReference>(
           currentLocation.hash ?? ""
         }`,
       );
+      // Record the Navigation Document behind the write, not the parameter, so
+      // a Canvas resting at its Root Panel does not rewrite the URL repeatedly.
       written.current = document;
     };
 
     const synchronize = () => {
-      const document = engine.encodeNavigationDocument();
+      // A Panel Stack too large to encode keeps working; it simply stops being
+      // deep-linkable, and the address is left exactly as the host set it.
+      let document: string;
+      try {
+        document = engine.encodeNavigationDocument();
+      } catch {
+        return;
+      }
       if (document === written.current) return;
+      const rootOnly = engine.getSnapshot().panels.length === 1;
       // A Canvas that has never claimed the URL and still has no contextual
       // Panels leaves the address entirely to the application's own routing.
-      if (written.current === "" && isRootOnly(document)) return;
-      write(document);
+      if (written.current === "" && rootOnly && !rejectedInitialParameter) {
+        return;
+      }
+      write(rootOnly ? null : document, document);
     };
 
     synchronize();
     return engine.subscribe(synchronize);
-  }, [engine, parameterName]);
+  }, [engine, parameterName, rejectedInitialParameter]);
 
   const initialDocument =
     initialState?.status === "decoded" ? initialState.document : null;

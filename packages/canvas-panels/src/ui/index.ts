@@ -1,7 +1,7 @@
 "use client";
 
 import { Component } from "react";
-import type { ComponentType, ReactNode, RefObject } from "react";
+import type { ComponentType, ReactNode, RefObject, UIEvent } from "react";
 import {
   createContext,
   createElement,
@@ -978,6 +978,9 @@ export function createCanvasModule<
       throw new Error("Canvas Workspace requires a Canvas Provider");
     const application = useRef<HTMLDivElement>(null);
     const returnFocus = useRef<HTMLElement | null>(null);
+    const focusedPanelId = useRef<PanelInstanceId | null>(null);
+    const panelScrollOffsets = useRef(new Map<PanelInstanceId, number>());
+    const previouslyVisiblePanelIds = useRef<readonly PanelInstanceId[]>([]);
     const previousTransition = useRef(snapshot.transition);
     const initiallyFocusedPanel = useRef<PanelInstanceId | null>(null);
     const [dirtyPanelIds, setDirtyPanelIds] = useState<
@@ -1154,18 +1157,17 @@ export function createCanvasModule<
       return () => window.removeEventListener("beforeunload", preventUnload);
     }, [dirtyPanelIds]);
 
-    // A retained Panel that leaves the current presentation must not keep the
-    // browser's focus, or keyboard users would be stranded on inert content.
     const activeIndex = snapshot.panels.findIndex(
       ({ instanceId }) => instanceId === snapshot.activePanelId,
     );
+    const visiblePanelIds = snapshot.visiblePanelIds;
 
     // Where focus belongs once the presentation changes: the Active Panel when
     // it is still shown, otherwise the deepest Panel the presentation kept.
     const focusRefugeHeadingId = (() => {
-      const refugeId = snapshot.visiblePanelIds.includes(snapshot.activePanelId)
+      const refugeId = visiblePanelIds.includes(snapshot.activePanelId)
         ? snapshot.activePanelId
-        : snapshot.visiblePanelIds.at(-1);
+        : visiblePanelIds.at(-1);
       const index = snapshot.panels.findIndex(
         ({ instanceId }) => instanceId === refugeId,
       );
@@ -1174,19 +1176,47 @@ export function createCanvasModule<
 
     // A retained Panel that leaves the current presentation must not keep the
     // browser's focus, or keyboard users would be stranded on inert content.
-    const visiblePanelIds = snapshot.visiblePanelIds;
+    // The Panel that owned focus is recorded as it happens, because by the time
+    // this effect runs the browser has already blurred the hidden element and
+    // `document.activeElement` no longer names the Panel that lost it.
     useEffect(() => {
+      const strandedPanelId = focusedPanelId.current;
+      if (!strandedPanelId || visiblePanelIds.includes(strandedPanelId)) return;
+      focusedPanelId.current = null;
       const focused = document.activeElement;
-      if (!(focused instanceof HTMLElement)) return;
-      const owner = focused
-        .closest("[data-canvas-panel]")
-        ?.getAttribute("data-canvas-panel-id");
-      if (!owner || visiblePanelIds.includes(owner as PanelInstanceId)) return;
+      const stillInsideStranded =
+        focused instanceof HTMLElement &&
+        focused
+          .closest("[data-canvas-panel]")
+          ?.getAttribute("data-canvas-panel-id") === strandedPanelId;
+      // Only reclaim focus the Canvas itself just lost: a browser drops it to
+      // the body, while an environment without `inert` leaves it in place.
+      const stranded =
+        focused === null || focused === document.body || stillInsideStranded;
+      if (!stranded) return;
       const heading = focusRefugeHeadingId
         ? document.getElementById(focusRefugeHeadingId)
         : null;
       (heading ?? application.current)?.focus();
     }, [visiblePanelIds, focusRefugeHeadingId]);
+
+    // Retained Panels are hidden with `display: none`, which resets their
+    // scroll offset, so each body's offset is recorded as it scrolls and
+    // restored when the presentation shows that Panel again.
+    useLayoutEffect(() => {
+      const revealed = visiblePanelIds.filter(
+        (panelId) => !previouslyVisiblePanelIds.current.includes(panelId),
+      );
+      previouslyVisiblePanelIds.current = visiblePanelIds;
+      for (const panelId of revealed) {
+        const offset = panelScrollOffsets.current.get(panelId);
+        if (offset === undefined) continue;
+        const body = application.current?.querySelector<HTMLElement>(
+          `[data-canvas-panel-id="${panelId}"] > [data-canvas-panel-body]`,
+        );
+        if (body && body.scrollTop !== offset) body.scrollTop = offset;
+      }
+    }, [visiblePanelIds]);
 
     const rememberFocus = useCallback(() => {
       returnFocus.current =
@@ -1323,8 +1353,10 @@ export function createCanvasModule<
                     if (!event.currentTarget.contains(event.relatedTarget))
                       signalStore.setFocused(null);
                   },
-                  onFocusCapture: () =>
-                    signalStore.setFocused(panel.instanceRef),
+                  onFocusCapture: () => {
+                    focusedPanelId.current = panel.instanceId;
+                    signalStore.setFocused(panel.instanceRef);
+                  },
                   role: "region",
                 },
                 createElement(
@@ -1380,7 +1412,15 @@ export function createCanvasModule<
                 ),
                 createElement(
                   "div",
-                  { "data-canvas-panel-body": "" },
+                  {
+                    "data-canvas-panel-body": "",
+                    onScroll: (event: UIEvent<HTMLDivElement>) => {
+                      panelScrollOffsets.current.set(
+                        panel.instanceId,
+                        event.currentTarget.scrollTop,
+                      );
+                    },
+                  },
                   createElement(
                     PanelRendererBoundary,
                     {

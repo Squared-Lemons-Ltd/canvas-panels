@@ -80,7 +80,14 @@ export function ClassesCanvas({
   useCanvasNavigationSync({
     engine,
     router,
-    location: { pathname, search: searchParams.toString() },
+    location: {
+      pathname,
+      search: searchParams.toString(),
+      // The App Router never sees the fragment, so it is read from the browser
+      // directly. It is only ever used inside effects, so it cannot desync
+      // server and client rendering.
+      hash: typeof window === "undefined" ? "" : window.location.hash,
+    },
     initialState,
   });
 

@@ -291,3 +291,42 @@ test("a Canvas without matchMedia presents the desktop Canvas", () => {
   );
   dom.window.matchMedia = originalMatchMedia;
 });
+
+test("a retained Panel keeps its vertical scroll across presentations", () => {
+  const { container, viewport } = renderCanvas("desktop");
+  const classBody = panels(container)[1].querySelector(
+    "[data-canvas-panel-body]",
+  );
+
+  act(() => {
+    classBody.scrollTop = 240;
+    classBody.dispatchEvent(new dom.window.Event("scroll", { bubbles: true }));
+  });
+  act(() => viewport.resizeTo("mobile"));
+  // Hiding the Panel with `display: none` resets the offset in a real browser.
+  classBody.scrollTop = 0;
+  act(() => viewport.resizeTo("desktop"));
+
+  assert.equal(
+    panels(container)[1].querySelector("[data-canvas-panel-body]").scrollTop,
+    240,
+  );
+});
+
+test("focus dropped to the body by a hidden Panel is reclaimed by the Canvas", () => {
+  const { container, viewport } = renderCanvas("desktop");
+  const classAction = panels(container)[1].querySelector("button");
+
+  act(() => classAction.focus());
+  act(() => {
+    // A browser blurs a Panel it hides; jsdom implements neither `inert` nor
+    // `display: none`, so the blur is simulated here.
+    classAction.blur();
+    viewport.resizeTo("mobile");
+  });
+
+  assert.equal(
+    dom.window.document.activeElement.closest("[data-canvas-panel]"),
+    panels(container)[2],
+  );
+});

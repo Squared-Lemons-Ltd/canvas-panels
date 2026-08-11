@@ -333,3 +333,104 @@ test("a fully available restored stack is left untouched", async () => {
   assert.deepEqual(calls, []);
   assert.equal(engine.getSnapshot().panels.length, 3);
 });
+
+test("a malformed navigation parameter is normalized out of the address", () => {
+  const { engine } = createWorkspace();
+  const { router, calls } = createRouter();
+
+  act(() => {
+    render(
+      createElement(Harness, {
+        engine,
+        router,
+        location: {
+          pathname: "/classes",
+          search: "?tab=overview&canvas=not-a-canvas-value",
+          hash: "",
+        },
+        initialState: {
+          status: "rejected",
+          diagnostic: { code: "missing-prefix", path: "$" },
+        },
+      }),
+    );
+  });
+
+  assert.equal(calls.length, 1);
+  const url = new URL(calls[0].url, "https://canvas-panels.test");
+  assert.equal(url.searchParams.has("canvas"), false);
+  assert.equal(url.searchParams.get("tab"), "overview");
+});
+
+test("a Canvas resting at its Root Panel does not rewrite the URL repeatedly", () => {
+  const { engine, section } = createWorkspace();
+  const { router, calls } = createRouter();
+
+  act(() => {
+    render(
+      createElement(Harness, {
+        engine,
+        router,
+        location: {
+          pathname: "/classes",
+          search: "?canvas=not-a-canvas-value",
+          hash: "",
+        },
+        initialState: {
+          status: "rejected",
+          diagnostic: { code: "missing-prefix", path: "$" },
+        },
+      }),
+    );
+  });
+  const afterNormalization = calls.length;
+
+  act(() => {
+    const opened = engine.open({
+      originId: engine.getSnapshot().activePanelId,
+      panel: section.reference({ id: "section-a" }),
+    });
+    engine.close({
+      target: engine
+        .getSnapshot()
+        .panels.find(({ instanceId }) => instanceId === opened.instanceId)
+        .instanceRef,
+    });
+  });
+  const afterRoundTrip = calls.length;
+
+  act(() => {
+    engine.setPresentation({ breakpoint: "mobile" });
+    engine.setPresentation({ breakpoint: "desktop" });
+  });
+
+  assert.equal(afterNormalization, 1);
+  assert.equal(afterRoundTrip, 3);
+  assert.equal(calls.length, afterRoundTrip, "resting at Root must be quiet");
+});
+
+test("a Panel Stack too large to encode leaves the address untouched", () => {
+  const { engine } = createWorkspace();
+  const { router, calls } = createRouter();
+  const oversizedEngine = {
+    ...engine,
+    encodeNavigationDocument: () => {
+      throw new RangeError("Navigation Document exceeds the byte limit");
+    },
+  };
+
+  assert.doesNotThrow(() => {
+    act(() => {
+      render(
+        createElement(Harness, {
+          engine: oversizedEngine,
+          router,
+          location: { pathname: "/classes", search: "", hash: "" },
+          initialState: { status: "absent" },
+        }),
+      );
+    });
+  });
+
+  assert.deepEqual(calls, []);
+});
