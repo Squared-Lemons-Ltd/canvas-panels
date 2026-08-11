@@ -2702,3 +2702,276 @@ test("subscribers observe a breakpoint change exactly once", () => {
 
   assert.equal(notifications, 1);
 });
+
+test("each snapshot reports the navigation intent that produced it", () => {
+  const { engine } = openThreePanelStack();
+
+  assert.equal(engine.getSnapshot().navigationIntent, "push");
+
+  const rootRef = engine.getSnapshot().panels[0].instanceRef;
+  engine.activate({ target: rootRef });
+  assert.equal(engine.getSnapshot().navigationIntent, "replace");
+
+  engine.setPresentation({ breakpoint: "mobile" });
+  assert.equal(
+    engine.getSnapshot().navigationIntent,
+    "none",
+    "sizing is not meaningful navigation",
+  );
+});
+
+test("a new Canvas starts with no navigation intent to replay", () => {
+  const root = defineRootPanel({ kind: "classes", title: "Classes" });
+  const engine = createPanelEngine({ root, panels: [] });
+
+  assert.equal(engine.getSnapshot().navigationIntent, "none");
+});
+
+test("closing and collapsing a branch are meaningful persistent navigation", () => {
+  const { engine } = openThreePanelStack();
+  const middle = engine.getSnapshot().panels[1].instanceRef;
+
+  engine.collapse({ target: middle });
+  assert.equal(engine.getSnapshot().navigationIntent, "push");
+
+  engine.close({ target: engine.getSnapshot().panels[1].instanceRef });
+  assert.equal(engine.getSnapshot().navigationIntent, "push");
+});
+
+test("an update carries the navigation intent its Panel Kind declares", () => {
+  const root = defineRootPanel({ kind: "classes", title: "Classes" });
+  const quiet = definePanel({
+    kind: "quiet",
+    title: ({ name }) => name,
+    update: {
+      validate: (update) => typeof update === "string",
+      validateResult: (value) => typeof value?.name === "string",
+      apply: (current, update) => ({ ...current, name: update }),
+      navigation: "none",
+    },
+  });
+  const engine = createPanelEngine({ root, panels: [quiet] });
+  const opened = engine.open({
+    originId: engine.getSnapshot().activePanelId,
+    panel: quiet.reference({ name: "Before" }),
+  });
+
+  engine.update({
+    definition: quiet,
+    target: engine
+      .getSnapshot()
+      .panels.find(({ instanceId }) => instanceId === opened.instanceId)
+      .instanceRef,
+    update: "After",
+  });
+
+  assert.equal(engine.getSnapshot().navigationIntent, "none");
+});
+
+function dirtyLifecycle(
+  engine,
+  panelRef,
+  outcome = { status: "confirm", message: "Unsaved work" },
+) {
+  return engine.registerLifecycle({
+    target: panelRef,
+    lifecycle: {
+      dirty: true,
+      guard: () => outcome,
+      save: async () => ({ status: "saved" }),
+      discard: async () => ({ status: "discarded" }),
+    },
+  });
+}
+
+test("restoring the current Panel Stack changes nothing", () => {
+  const { engine, classPanel, learner } = openThreePanelStack();
+  const before = engine.getSnapshot();
+
+  const outcome = engine.restoreStack({
+    references: [
+      classPanel.reference({ classId: "a", name: "A" }),
+      learner.reference({ learnerId: "ada", name: "Ada" }),
+    ],
+  });
+
+  assert.deepEqual(outcome, {
+    status: "unchanged",
+    command: "restore",
+    navigationIntent: "none",
+  });
+  assert.equal(engine.getSnapshot(), before);
+});
+
+test("restoring a shorter stack removes the divergent tail in one transition", () => {
+  const { engine, classPanel } = openThreePanelStack();
+  const removedId = engine.getSnapshot().panels[2].instanceId;
+  const retainedId = engine.getSnapshot().panels[1].instanceId;
+
+  const outcome = engine.restoreStack({
+    references: [classPanel.reference({ classId: "a", name: "A" })],
+  });
+
+  assert.equal(outcome.status, "restored");
+  assert.deepEqual(outcome.removedPanelIds, [removedId]);
+  assert.deepEqual(outcome.openedPanelIds, []);
+  assert.equal(outcome.activePanelId, retainedId);
+  assert.deepEqual(
+    engine.getSnapshot().panels.map(({ instanceId }) => instanceId),
+    [engine.getSnapshot().panels[0].instanceId, retainedId],
+  );
+});
+
+test("restoring preserves the identity of every retained prefix Panel", () => {
+  const { engine, classPanel, learner } = openThreePanelStack();
+  const prefixIds = engine
+    .getSnapshot()
+    .panels.slice(0, 2)
+    .map(({ instanceId }) => instanceId);
+
+  engine.restoreStack({
+    references: [
+      classPanel.reference({ classId: "a", name: "A" }),
+      learner.reference({ learnerId: "grace", name: "Grace" }),
+    ],
+  });
+
+  assert.deepEqual(
+    engine
+      .getSnapshot()
+      .panels.slice(0, 2)
+      .map(({ instanceId }) => instanceId),
+    prefixIds,
+  );
+  assert.equal(engine.getSnapshot().panels.length, 3);
+  assert.equal(engine.getSnapshot().panels[2].title, "Grace");
+});
+
+test("restoring a divergent branch removes the old tail and opens the new one", () => {
+  const { engine, classPanel } = openThreePanelStack();
+
+  const outcome = engine.restoreStack({
+    references: [classPanel.reference({ classId: "b", name: "B" })],
+  });
+
+  assert.equal(outcome.status, "restored");
+  assert.equal(outcome.removedPanelIds.length, 2);
+  assert.equal(outcome.openedPanelIds.length, 1);
+  assert.deepEqual(
+    engine.getSnapshot().panels.map(({ title }) => title),
+    ["Classes", "B"],
+  );
+});
+
+test("restoring past dirty Panels proposes exactly one Guarded Transition", () => {
+  const { engine, classPanel } = openThreePanelStack();
+  dirtyLifecycle(engine, engine.getSnapshot().panels[1].instanceRef);
+  dirtyLifecycle(engine, engine.getSnapshot().panels[2].instanceRef);
+
+  const outcome = engine.restoreStack({
+    references: [classPanel.reference({ classId: "b", name: "B" })],
+  });
+
+  assert.equal(outcome.status, "confirmation-required");
+  assert.equal(outcome.command, "restore");
+  assert.equal(outcome.panelIds.length, 2);
+  assert.equal(engine.getSnapshot().transition.panels.length, 2);
+  assert.equal(engine.getSnapshot().panels.length, 3, "nothing commits yet");
+});
+
+test("discarding a restoration transition completes the target stack", async () => {
+  const { engine, classPanel } = openThreePanelStack();
+  dirtyLifecycle(engine, engine.getSnapshot().panels[2].instanceRef);
+  engine.restoreStack({
+    references: [classPanel.reference({ classId: "b", name: "B" })],
+  });
+
+  const resolution = await engine.resolveTransition({ decision: "discard" });
+
+  assert.equal(resolution.status, "committed");
+  assert.equal(resolution.command, "restore");
+  assert.equal(resolution.outcome.status, "restored");
+  assert.deepEqual(
+    engine.getSnapshot().panels.map(({ title }) => title),
+    ["Classes", "B"],
+  );
+  assert.equal(engine.getSnapshot().transition, null);
+});
+
+test("staying on a restoration transition leaves the Panel Stack untouched", async () => {
+  const { engine, classPanel } = openThreePanelStack();
+  dirtyLifecycle(engine, engine.getSnapshot().panels[2].instanceRef);
+  const before = engine.getSnapshot().panels;
+  engine.restoreStack({
+    references: [classPanel.reference({ classId: "b", name: "B" })],
+  });
+
+  await engine.resolveTransition({ decision: "stay" });
+
+  assert.equal(engine.getSnapshot().panels, before);
+  assert.equal(engine.getSnapshot().transition, null);
+});
+
+test("a blocking guard rejects restoration without proposing a dialog", () => {
+  const { engine, classPanel } = openThreePanelStack();
+  const blockedId = engine.getSnapshot().panels[2].instanceId;
+  dirtyLifecycle(engine, engine.getSnapshot().panels[2].instanceRef, {
+    status: "block",
+    reason: "Upload in progress",
+  });
+
+  const outcome = engine.restoreStack({
+    references: [classPanel.reference({ classId: "b", name: "B" })],
+  });
+
+  assert.deepEqual(outcome, {
+    status: "rejected",
+    command: "restore",
+    reason: "transition-blocked",
+    panelId: blockedId,
+  });
+  assert.equal(engine.getSnapshot().transition, null);
+});
+
+test("restoration is refused while another transition is pending", () => {
+  const { engine, classPanel } = openThreePanelStack();
+  dirtyLifecycle(engine, engine.getSnapshot().panels[2].instanceRef);
+  engine.close({ target: engine.getSnapshot().panels[2].instanceRef });
+
+  const outcome = engine.restoreStack({
+    references: [classPanel.reference({ classId: "b", name: "B" })],
+  });
+
+  assert.deepEqual(outcome, {
+    status: "rejected",
+    command: "restore",
+    reason: "transition-in-progress",
+  });
+});
+
+test("restoration records the navigation intent its caller asked for", () => {
+  const { engine, classPanel } = openThreePanelStack();
+
+  engine.restoreStack({
+    references: [classPanel.reference({ classId: "a", name: "A" })],
+    navigationIntent: "replace",
+  });
+
+  assert.equal(engine.getSnapshot().navigationIntent, "replace");
+});
+
+test("restoration refuses a Panel Kind the registry does not know", () => {
+  const { engine } = openThreePanelStack();
+  const foreign = definePanel({ kind: "foreign", title: () => "Foreign" });
+
+  const outcome = engine.restoreStack({
+    references: [foreign.reference({})],
+  });
+
+  assert.deepEqual(outcome, {
+    status: "rejected",
+    command: "restore",
+    reason: "invalid-panel-reference",
+    panelKind: "foreign",
+  });
+});

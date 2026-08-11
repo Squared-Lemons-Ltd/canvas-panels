@@ -194,8 +194,17 @@ export type PanelEngineSnapshot = Readonly<{
   deepestPanelId: PanelInstanceId;
   visiblePanelIds: readonly PanelInstanceId[];
   breakpoint: CanvasBreakpoint;
+  /**
+   * How the transition that produced this snapshot should be recorded by a
+   * Navigation Adapter. Meaningful persistent navigation reports `push`;
+   * normalization reports `replace`; activation-only, presentation, and
+   * transient changes report `none`.
+   */
+  navigationIntent: NavigationIntent;
   transition: PendingGuardedTransition | null;
 }>;
+
+export type NavigationIntent = "push" | "replace" | "none";
 
 export type OpenPanelCommand<
   Reference extends PanelReference = PanelReference,
@@ -360,6 +369,42 @@ export type ClosePanelOutcome =
       panelId: PanelInstanceId;
     }>;
 
+export type RestoreStackOutcome =
+  | Readonly<{
+      status: "restored";
+      removedPanelIds: readonly PanelInstanceId[];
+      openedPanelIds: readonly PanelInstanceId[];
+      activePanelId: PanelInstanceId;
+      navigationIntent: NavigationIntent;
+    }>
+  | Readonly<{
+      status: "unchanged";
+      command: "restore";
+      navigationIntent: "none";
+    }>
+  | Readonly<{
+      status: "confirmation-required";
+      command: "restore";
+      panelIds: readonly PanelInstanceId[];
+    }>
+  | Readonly<{
+      status: "rejected";
+      command: "restore";
+      reason: "transition-blocked" | "not-closable";
+      panelId: PanelInstanceId;
+    }>
+  | Readonly<{
+      status: "rejected";
+      command: "restore";
+      reason: "invalid-panel-reference";
+      panelKind: string;
+    }>
+  | Readonly<{
+      status: "rejected";
+      command: "restore";
+      reason: "transition-in-progress";
+    }>;
+
 export type TransitionResolutionOutcome =
   | Readonly<{
       status: "committed";
@@ -377,6 +422,13 @@ export type TransitionResolutionOutcome =
       command: "close";
       panelIds: readonly PanelInstanceId[];
       outcome: Extract<ClosePanelOutcome, { status: "closed" }>;
+    }>
+  | Readonly<{
+      status: "committed";
+      decision: "save" | "discard";
+      command: "restore";
+      panelIds: readonly PanelInstanceId[];
+      outcome: Extract<RestoreStackOutcome, { status: "restored" }>;
     }>
   | Readonly<{
       status: "stayed";
@@ -481,6 +533,16 @@ export type PanelEngine<Reference extends PanelReference = PanelReference> =
     setPresentation: (command: {
       breakpoint: CanvasBreakpoint;
     }) => PresentationOutcome;
+    /**
+     * Moves the Panel Stack to the Panels `references` describes, resolving
+     * every affected Transition Guard as one Guarded Transition and committing
+     * atomically. Panels shared with the current stack keep their identity and
+     * their guards are never consulted.
+     */
+    restoreStack: (command: {
+      references: readonly Reference[];
+      navigationIntent?: NavigationIntent;
+    }) => RestoreStackOutcome;
     registerLifecycle: (command: {
       target: PanelInstanceRef;
       lifecycle: PanelLifecycle;
@@ -1175,6 +1237,7 @@ export function createPanelEngine<
     deepestPanelId: instanceId,
     visiblePanelIds: Object.freeze([instanceId]),
     breakpoint: "desktop" as CanvasBreakpoint,
+    navigationIntent: "none" as NavigationIntent,
     transition: null,
   }) as PanelEngineSnapshot;
   const listeners = new Set<() => void>();
@@ -1185,7 +1248,11 @@ export function createPanelEngine<
         originId: PanelInstanceId;
         panel: PanelReference;
       }>
-    | Readonly<{ command: "close"; panelId: PanelInstanceId }>;
+    | Readonly<{ command: "close"; panelId: PanelInstanceId }>
+    | Readonly<{
+        command: "restore";
+        references: readonly PanelReference[];
+      }>;
   const lifecycles = new Map<PanelInstanceId, RegisteredLifecycle>();
   let pendingTransition:
     | Readonly<{
@@ -1200,7 +1267,10 @@ export function createPanelEngine<
         };
         request: GuardedRequest;
         expectedVersion: StackVersion;
-        commit: () => OpenPanelOutcome | ClosePanelOutcome;
+        commit: () =>
+          | OpenPanelOutcome
+          | ClosePanelOutcome
+          | RestoreStackOutcome;
       }>
     | undefined;
   const registeredKinds = new Set([options.root.kind]);
@@ -1232,6 +1302,42 @@ export function createPanelEngine<
     ]),
   );
 
+  type RegisteredDefinition = NonNullable<
+    ReturnType<(typeof definitions)["get"]>
+  >;
+
+  /**
+   * Builds a Panel instance for a reference. The title is computed by the
+   * caller before any Guarded Transition is staged, so a Panel Kind whose
+   * title function throws is rejected before dirty work is put at risk.
+   */
+  const createPanel = (
+    reference: PanelReference,
+    definition: RegisteredDefinition,
+    title: string,
+  ): OpenPanel => {
+    const panelId = nextInstanceId();
+    issuedPanelIds.add(panelId);
+    const panel = Object.freeze({
+      instanceId: panelId,
+      instanceRef: Object.freeze({
+        workspaceId,
+        instanceId: panelId,
+        kind: reference.kind,
+      }),
+      kind: reference.kind,
+      title,
+      isRoot: false,
+      closable: definition.closable,
+      ...(reference.panelKey === undefined
+        ? {}
+        : { panelKey: reference.panelKey }),
+      reference,
+    });
+    issuedInstanceRefs.add(panel.instanceRef);
+    return panel;
+  };
+
   const notifySubscribers = () => {
     const subscriberErrors: unknown[] = [];
     for (const listener of [...listeners]) {
@@ -1256,7 +1362,8 @@ export function createPanelEngine<
 
   const publish = (
     panels: readonly OpenPanel[],
-    activePanelId = panels.at(-1)?.instanceId,
+    activePanelId: PanelInstanceId | undefined,
+    navigationIntent: NavigationIntent,
   ) => {
     const deepestPanel = panels.at(-1);
     if (!deepestPanel || activePanelId === undefined) {
@@ -1280,6 +1387,7 @@ export function createPanelEngine<
         snapshot.breakpoint,
       ),
       breakpoint: snapshot.breakpoint,
+      navigationIntent,
       transition: snapshot.transition,
     });
     notifySubscribers();
@@ -1333,7 +1441,7 @@ export function createPanelEngine<
   const stageGuardedTransition = (
     command: GuardedTransitionCommand,
     removedPanels: readonly OpenPanel[],
-    commit: () => OpenPanelOutcome | ClosePanelOutcome,
+    commit: () => OpenPanelOutcome | ClosePanelOutcome | RestoreStackOutcome,
     request: GuardedRequest,
   ):
     | Readonly<{ status: "allow" }>
@@ -1707,6 +1815,7 @@ export function createPanelEngine<
           breakpoint,
         ),
         breakpoint,
+        navigationIntent: "none",
       });
       notifySubscribers();
       return Object.freeze({ status: "updated", breakpoint } as const);
@@ -1804,7 +1913,7 @@ export function createPanelEngine<
       if (snapshot.version !== pending.expectedVersion) {
         return cancelStaleTransition();
       }
-      let outcome: OpenPanelOutcome | ClosePanelOutcome;
+      let outcome: OpenPanelOutcome | ClosePanelOutcome | RestoreStackOutcome;
       try {
         pending.resolution.resolving = true;
         pending.resolution.decision ??= decision;
@@ -1850,6 +1959,20 @@ export function createPanelEngine<
           status: "committed",
           decision,
           command: "open",
+          panelIds,
+          outcome,
+        });
+      }
+      if (pending.request.command === "restore") {
+        if (outcome.status !== "restored") {
+          throw new Error(
+            "A guarded restoration did not produce a committed outcome",
+          );
+        }
+        return Object.freeze({
+          status: "committed",
+          decision,
+          command: "restore",
           panelIds,
           outcome,
         });
@@ -1948,7 +2071,7 @@ export function createPanelEngine<
             removedPanelIds.length > 0 ||
             snapshot.activePanelId !== matchedPanel.instanceId
           ) {
-            publish(reusedPanels, matchedPanel.instanceId);
+            publish(reusedPanels, matchedPanel.instanceId, "push");
           }
           return Object.freeze({
             status: "reused",
@@ -2021,24 +2144,9 @@ export function createPanelEngine<
       const retainedPanels = snapshot.panels.slice(0, originIndex + 1);
       const childTitle = definition.title(panel.input);
       const commitOpen = (): OpenPanelOutcome => {
-        const childId = nextInstanceId();
-        issuedPanelIds.add(childId);
-        const child = Object.freeze({
-          instanceId: childId,
-          instanceRef: Object.freeze({
-            workspaceId,
-            instanceId: childId,
-            kind: panel.kind,
-          }),
-          kind: panel.kind,
-          title: childTitle,
-          isRoot: false,
-          closable: definition.closable,
-          ...(panel.panelKey === undefined ? {} : { panelKey: panel.panelKey }),
-          reference: panel,
-        });
-        issuedInstanceRefs.add(child.instanceRef);
-        publish([...retainedPanels, child]);
+        const child = createPanel(panel, definition, childTitle);
+        const childId = child.instanceId;
+        publish([...retainedPanels, child], child.instanceId, "push");
         return replacedPanel
           ? Object.freeze({
               status: "replaced",
@@ -2122,7 +2230,7 @@ export function createPanelEngine<
         });
       }
 
-      publish(snapshot.panels, panelId);
+      publish(snapshot.panels, panelId, "replace");
       return Object.freeze({
         status: "activated",
         panelId,
@@ -2268,6 +2376,7 @@ export function createPanelEngine<
           ...snapshot.panels.slice(index + 1),
         ],
         snapshot.activePanelId,
+        definition.update.navigation,
       );
       return Object.freeze({
         status: "updated",
@@ -2345,7 +2454,7 @@ export function createPanelEngine<
       const removedPanelIds = Object.freeze(
         removedPanels.map(({ instanceId: removedPanelId }) => removedPanelId),
       );
-      publish(snapshot.panels.slice(0, index + 1), panelId);
+      publish(snapshot.panels.slice(0, index + 1), panelId, "push");
       return Object.freeze({
         status: "collapsed",
         panelId,
@@ -2447,7 +2556,7 @@ export function createPanelEngine<
         removedPanels.map(({ instanceId: removedPanelId }) => removedPanelId),
       );
       const commitClose = (): ClosePanelOutcome => {
-        publish(retainedPanels, activePanel.instanceId);
+        publish(retainedPanels, activePanel.instanceId, "push");
         return Object.freeze({
           status: "closed",
           panelId,
@@ -2478,6 +2587,128 @@ export function createPanelEngine<
         });
       }
       return commitClose();
+    },
+    restoreStack: ({ references, navigationIntent = "push" }) => {
+      if (pendingTransition) {
+        return Object.freeze({
+          status: "rejected",
+          command: "restore",
+          reason: "transition-in-progress",
+        });
+      }
+
+      const targets: Array<
+        Readonly<{
+          reference: PanelReference;
+          definition: RegisteredDefinition;
+        }>
+      > = [];
+      for (const reference of references) {
+        const definition = definitions.get(reference.kind);
+        if (
+          !definition ||
+          referenceDefinitions.get(reference) !== definition.identity
+        ) {
+          return Object.freeze({
+            status: "rejected",
+            command: "restore",
+            reason: "invalid-panel-reference",
+            panelKind: reference.kind,
+          });
+        }
+        targets.push(Object.freeze({ reference, definition }));
+      }
+
+      // Panels the target stack shares with the current one keep their identity
+      // and are never guarded: restoration only disturbs what actually changes.
+      const contextualPanels = snapshot.panels.slice(1);
+      let sharedCount = 0;
+      while (
+        sharedCount < contextualPanels.length &&
+        sharedCount < targets.length &&
+        panelReferencesEqual(
+          (contextualPanels[sharedCount] as OpenPanel).reference,
+          (targets[sharedCount] as { reference: PanelReference }).reference,
+        )
+      ) {
+        sharedCount += 1;
+      }
+
+      const removedPanels = snapshot.panels.slice(sharedCount + 1);
+      const openedTargets = targets.slice(sharedCount);
+      if (removedPanels.length === 0 && openedTargets.length === 0) {
+        return Object.freeze({
+          status: "unchanged",
+          command: "restore",
+          navigationIntent: "none",
+        });
+      }
+
+      const blockingPanel = removedPanels.find(
+        (candidate) => !candidate.closable,
+      );
+      if (blockingPanel) {
+        return Object.freeze({
+          status: "rejected",
+          command: "restore",
+          reason: "not-closable",
+          panelId: blockingPanel.instanceId,
+        });
+      }
+
+      const retainedPanels = snapshot.panels.slice(0, sharedCount + 1);
+      const removedPanelIds = Object.freeze(
+        removedPanels.map(({ instanceId: removedPanelId }) => removedPanelId),
+      );
+      // Titles are resolved before staging so a throwing title function cannot
+      // strand a Guarded Transition it can never commit.
+      const openedTitles = openedTargets.map(({ reference, definition }) =>
+        definition.title(reference.input),
+      );
+      const commitRestore = (): RestoreStackOutcome => {
+        const openedPanels = openedTargets.map(
+          ({ reference, definition }, index) =>
+            createPanel(reference, definition, openedTitles[index] as string),
+        );
+        const panels = [...retainedPanels, ...openedPanels];
+        const activePanel = panels.at(-1);
+        if (!activePanel) throw new Error("Restoration must retain Root");
+        publish(panels, activePanel.instanceId, navigationIntent);
+        return Object.freeze({
+          status: "restored",
+          removedPanelIds,
+          openedPanelIds: Object.freeze(
+            openedPanels.map(({ instanceId }) => instanceId),
+          ),
+          activePanelId: activePanel.instanceId,
+          navigationIntent,
+        });
+      };
+
+      if (removedPanels.length === 0) return commitRestore();
+
+      const guarded = stageGuardedTransition(
+        "close",
+        removedPanels,
+        commitRestore,
+        Object.freeze({ command: "restore", references: [...references] }),
+      );
+      if (guarded.status === "block") {
+        return Object.freeze({
+          status: "rejected",
+          command: "restore",
+          reason: "transition-blocked",
+          panelId: guarded.panelId,
+        });
+      }
+      if (guarded.status === "confirm") {
+        return Object.freeze({
+          status: "confirmation-required",
+          command: "restore",
+          panelIds: guarded.panelIds,
+        });
+      }
+      return commitRestore();
     },
   });
   return engineApi;
