@@ -181,6 +181,25 @@ export const canvasBreakpoints = Object.freeze([
 
 export type CanvasBreakpoint = (typeof canvasBreakpoints)[number];
 
+/**
+ * The media queries that select each declared breakpoint, ordered from the
+ * narrowest presentation to the widest. They are part of the Public Contract so
+ * applications can align their own layout with the Canvas, and they live beside
+ * the breakpoints themselves so the server-safe entry points — and the testing
+ * tools — can read them without reaching into the React layer.
+ */
+export const canvasBreakpointQueries: readonly (readonly [
+  CanvasBreakpoint,
+  string,
+])[] = Object.freeze([
+  Object.freeze(["mobile", "(max-width: 47.999rem)"] as const),
+  Object.freeze([
+    "tablet",
+    "(min-width: 48rem) and (max-width: 79.999rem)",
+  ] as const),
+  Object.freeze(["desktop", "(min-width: 80rem)"] as const),
+]);
+
 export type PresentationOutcome =
   | Readonly<{ status: "updated"; breakpoint: CanvasBreakpoint }>
   | Readonly<{ status: "unchanged"; breakpoint: CanvasBreakpoint }>

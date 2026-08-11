@@ -1,10 +1,21 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import {
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { optionalSubpathsReachedFromBaseEntryPoints } from "./module-graph.mjs";
+import {
+  collectFiles,
+  optionalSubpathsReachedFromBaseEntryPoints,
+} from "./module-graph.mjs";
 
 const execFileAsync = promisify(execFile);
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -54,6 +65,250 @@ async function assertInstalledSubpathsStayOptional(consumerDirectory) {
       );
     }
   }
+}
+
+/**
+ * Nothing that looks like credential material may reach a registry. The scan is
+ * over the installed tarball rather than the repository, because what ships is
+ * the only thing that matters here.
+ */
+const secretPatterns = Object.freeze([
+  [/-----BEGIN [A-Z ]*PRIVATE KEY-----/, "a private key"],
+  [/\bnpm_[A-Za-z0-9]{36}\b/, "an npm token"],
+  [/\bgh[pousr]_[A-Za-z0-9]{36}\b/, "a GitHub token"],
+  [/\bAKIA[0-9A-Z]{16}\b/, "an AWS access key id"],
+  [/\bsk-[A-Za-z0-9]{32,}\b/, "an API secret key"],
+  [/\bxox[abposr]-[A-Za-z0-9-]{10,}\b/, "a Slack token"],
+  [
+    /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/,
+    "a JWT",
+  ],
+  [
+    /["'](?:authorization|password|passwd|secret)["']\s*:\s*["'][^"']{8,}/i,
+    "an inline credential",
+  ],
+]);
+
+async function assertNoSecretMaterial(installedDirectory) {
+  const files = await collectFiles(installedDirectory);
+
+  if (files.length === 0) {
+    throw new Error("the installed package is empty");
+  }
+  for (const file of files) {
+    const contents = await readFile(file, "utf8").catch(() => "");
+    for (const [pattern, description] of secretPatterns) {
+      if (pattern.test(contents)) {
+        throw new Error(
+          `packed ${relative(installedDirectory, file)} contains ${description}`,
+        );
+      }
+    }
+  }
+  return files.length;
+}
+
+/**
+ * The directive, barrel and module-format rules, checked against what a
+ * consumer actually installed. The same rules are asserted over the built
+ * source in the contract suite; repeating them here is the difference between
+ * trusting the build and inspecting the artifact.
+ */
+async function assertInstalledArtifactShape(installedDirectory) {
+  const clientEntries = [
+    "dist/react/index.js",
+    "dist/ui/index.js",
+    "dist/next/index.js",
+    "dist/extensions/editor.js",
+    "dist/extensions/resources.js",
+    "dist/overlay/index.js",
+  ];
+  const serverEntries = [
+    "dist/core/index.js",
+    "dist/next/server.js",
+    "dist/testing/index.js",
+  ];
+  const directive = /^(?:"use client"|'use client');/;
+
+  for (const entry of clientEntries) {
+    const source = await readFile(join(installedDirectory, entry), "utf8");
+    if (!directive.test(source)) {
+      throw new Error(`packed ${entry} lost its "use client" directive`);
+    }
+  }
+  for (const entry of serverEntries) {
+    const source = await readFile(join(installedDirectory, entry), "utf8");
+    if (directive.test(source)) {
+      throw new Error(`packed ${entry} is no longer server-safe`);
+    }
+  }
+
+  // No entry point may re-export another wholesale: that is a broad barrel by
+  // another name, and it would make every internal module public.
+  for (const entry of [...clientEntries, ...serverEntries]) {
+    const source = await readFile(join(installedDirectory, entry), "utf8");
+    if (/export\s+\*\s+from/.test(source)) {
+      throw new Error(`packed ${entry} re-exports a whole module`);
+    }
+  }
+
+  process.stdout.write(
+    `verified packed client directives and ${clientEntries.length + serverEntries.length} barrel-free entry points\n`,
+  );
+}
+
+/**
+ * The exports map is the whole public surface. A consumer that reaches past it
+ * is depending on something the versioning policy does not protect, so Node
+ * must refuse the path rather than resolve it.
+ */
+async function assertPrivateDeepImportsAreRefused(consumerDirectory) {
+  const privatePaths = [
+    "@squaredlemons/canvas-panels/dist/core/index.js",
+    "@squaredlemons/canvas-panels/dist/ui/index.js",
+    "@squaredlemons/canvas-panels/package.json",
+    "@squaredlemons/canvas-panels/src/core/index.ts",
+    "@squaredlemons/canvas-panels",
+  ];
+  await writeFile(
+    join(consumerDirectory, "deep-import-probe.mjs"),
+    `const refused = [];
+for (const specifier of ${JSON.stringify(privatePaths)}) {
+  try {
+    await import(specifier);
+  } catch (error) {
+    if (error.code !== "ERR_PACKAGE_PATH_NOT_EXPORTED" && error.code !== "ERR_MODULE_NOT_FOUND") {
+      throw new Error("unexpected resolution failure for " + specifier + ": " + error.code);
+    }
+    refused.push(specifier);
+    continue;
+  }
+  throw new Error("private deep import resolved: " + specifier);
+}
+if (refused.length !== ${privatePaths.length}) throw new Error("deep import probe did not run");
+console.log("verified packed private deep imports stay unreachable");
+`,
+  );
+  const { stdout } = await run(
+    process.execPath,
+    ["deep-import-probe.mjs"],
+    consumerDirectory,
+  );
+  process.stdout.write(stdout);
+}
+
+/**
+ * A second React in the tree is what silently breaks hooks in a consumer, and
+ * the package is the one thing that must never be the cause.
+ */
+async function assertSingleReactInstallation(consumerDirectory) {
+  const found = new Map();
+
+  // Walks one `node_modules`. Its children are either `@scope` directories,
+  // whose children are packages, or packages themselves — and a package may
+  // nest its own `node_modules`, which is exactly where a second copy hides.
+  const walkModules = async (modulesDirectory) => {
+    for (const entry of await readdir(modulesDirectory, {
+      withFileTypes: true,
+    })) {
+      // A hoisted or linked dependency arrives as a symlink, so a check that
+      // only accepted real directories would miss the duplicate it is for.
+      if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
+      const path = join(modulesDirectory, entry.name);
+      if (entry.name.startsWith("@")) {
+        await walkModules(path);
+        continue;
+      }
+      if (entry.name === "react" || entry.name === "react-dom") {
+        found.set(entry.name, [...(found.get(entry.name) ?? []), path]);
+      }
+      const nested = join(path, "node_modules");
+      if (existsSync(nested)) await walkModules(nested);
+    }
+  };
+  await walkModules(join(consumerDirectory, "node_modules"));
+
+  // Positive control: the consumer genuinely depends on both, so finding
+  // neither would mean the walk never enumerated anything and the duplicate
+  // check below had nothing to disagree with.
+  for (const name of ["react", "react-dom"]) {
+    const copies = found.get(name) ?? [];
+    if (copies.length === 0) {
+      throw new Error(`clean consumer resolved no ${name} at all`);
+    }
+    if (copies.length !== 1) {
+      throw new Error(
+        `clean consumer resolved ${copies.length} copies of ${name}: ${copies.join(", ")}`,
+      );
+    }
+  }
+}
+
+/**
+ * Every area an integrator has to be able to answer for themselves, read from
+ * the installed package rather than the repository: the tarball ships `dist`
+ * and one README, so if it is not in there it is not available to a consumer at
+ * all.
+ */
+const documentedAreas = Object.freeze([
+  "Installation",
+  "Architecture",
+  "API",
+  "Accessibility",
+  "Navigation",
+  "Theming",
+  "Next.js",
+  "Extensions",
+  "Testing",
+  "Compatibility",
+  "Migration",
+  "Rollback",
+]);
+
+async function assertDocumentationIsComplete(installedDirectory, exports) {
+  const readme = await readFile(join(installedDirectory, "README.md"), "utf8");
+  const headings = new Set(
+    [...readme.matchAll(/^#{2,3}\s+(.+?)\s*$/gm)].map(([, heading]) => heading),
+  );
+
+  for (const area of documentedAreas) {
+    if (!headings.has(area)) {
+      throw new Error(`packed documentation has no "${area}" section`);
+    }
+  }
+
+  // Documentation is only executable if what it tells a reader to import is
+  // actually importable. Every package specifier the examples name must be a
+  // declared export, and every declared export must be documented somewhere.
+  const declared = new Set(
+    Object.keys(exports).map((subpath) =>
+      subpath.replace(/^\.\//, "@squaredlemons/canvas-panels/"),
+    ),
+  );
+  // Only subpath imports are claims about the exports map. Naming the package
+  // itself — in a dependency entry, or in prose — is not.
+  const documented = new Set(
+    [
+      ...readme.matchAll(/["'](@squaredlemons\/canvas-panels\/[^"']+)["']/g),
+    ].map(([, specifier]) => specifier),
+  );
+
+  for (const specifier of documented) {
+    if (!declared.has(specifier)) {
+      throw new Error(
+        `packed documentation imports an undeclared subpath: ${specifier}`,
+      );
+    }
+  }
+  for (const specifier of declared) {
+    if (!documented.has(specifier)) {
+      throw new Error(`packed documentation never shows ${specifier}`);
+    }
+  }
+
+  process.stdout.write(
+    `verified packed documentation covers ${documentedAreas.length} areas and all ${declared.size} public subpaths\n`,
+  );
 }
 
 async function assertTarballLockfile(consumerDirectory) {
@@ -140,12 +395,10 @@ import { createPanelEngine, definePanel, defineRootPanel } from "@squaredlemons/
 import { createPanelEditor, editorGuardMessages, resolveEditorGuard } from "@squaredlemons/canvas-panels/extensions/editor";
 import { createPanelResource, createResourceExchange, resolveResourceDeferral } from "@squaredlemons/canvas-panels/extensions/resources";
 import { createOverlayWorkspace, defineOverlayWorkspace, overlayNavigationParameterPrefix, overlayPresentation } from "@squaredlemons/canvas-panels/overlay";
-import { createCanvasModule, defineCanvasContext } from "@squaredlemons/canvas-panels/ui";
+import { buildNavigationDocument, buildPanelStack, createTestClock, createTestFocusTarget, createTestHistory, createTestIdentities, createTestLifecycle, createTestRestore, createTestViewport } from "@squaredlemons/canvas-panels/testing";
+import { canvasBreakpointQueries, createCanvasModule, defineCanvasContext } from "@squaredlemons/canvas-panels/ui";
 
-await Promise.all([
-  import("@squaredlemons/canvas-panels/react"),
-  import("@squaredlemons/canvas-panels/testing"),
-]);
+await import("@squaredlemons/canvas-panels/react");
 
 const root = defineRootPanel({ kind: "classes", title: "Classes" });
 const classPanel = definePanel({
@@ -506,6 +759,94 @@ if (emptyDismissal.status !== "rejected" || emptyDismissal.reason !== "root-pane
   throw new Error("packed overlay dismissed a layer that was not presented");
 }
 console.log("verified packed overlay Workspace consumer");
+
+const identities = createTestIdentities();
+if (identities.workspace() !== "test-workspace-1" || identities.panel() !== "test-panel-1") {
+  throw new Error("packed testing identities were not deterministic");
+}
+const builtStack = buildPanelStack([
+  { kind: "classes", title: "Classes" },
+  { kind: "class", title: "Class A", descriptor: { classId: "class-a" } },
+]);
+if (builtStack.length !== 2 || builtStack[0].closable !== false || builtStack[1].deepest !== true || builtStack[1].descriptor.classId !== "class-a") {
+  throw new Error("packed testing read-model builder produced an incomplete stack");
+}
+const testClock = createTestClock({ start: 5 });
+let ticked = 0;
+testClock.setTimeout(() => { ticked = testClock.now(); }, 10);
+if (testClock.advance(20) !== 1 || ticked !== 15) {
+  throw new Error("packed testing clock did not run its timer at its due point");
+}
+const testViewport = createTestViewport({ breakpoint: "mobile" });
+if (testViewport.queries !== canvasBreakpointQueries) {
+  throw new Error("packed testing viewport answers for a different breakpoint set");
+}
+if (!testViewport.matchMedia(canvasBreakpointQueries[0][1]).matches) {
+  throw new Error("packed testing viewport did not report its own breakpoint");
+}
+const testFocus = createTestFocusTarget();
+testFocus.ref.current.focus({ preventScroll: true });
+if (testFocus.focusCount !== 1 || testFocus.ref.current.isConnected !== true) {
+  throw new Error("packed testing focus target did not record its focus");
+}
+const testHistory = createTestHistory({ url: "/classes" });
+testHistory.port.push({ page: 1 }, "/classes?canvas=one");
+testHistory.back();
+if (testHistory.index !== 0 || testHistory.writes.length !== 1) {
+  throw new Error("packed testing history conflated a traversal with a write");
+}
+
+// The Panel Engine only ever encodes the current descriptor version, so a
+// hand-built historical document is the only way a packed consumer can prove a
+// migration still runs.
+const restoreProbe = createTestRestore();
+const historicalPanel = definePanel({
+  kind: "historical",
+  title: ({ name }) => name,
+  persistence: {
+    mode: "navigation-with-loader",
+    version: 2,
+    codec: {
+      encode: ({ id, name }) => ({ id, name }),
+      validate: (value) => typeof value === "object" && value !== null && typeof value.id === "string" && typeof value.name === "string",
+      decode: ({ id, name }) => ({ id, name }),
+      migrations: [{ from: 1, to: 2, migrate: ({ id }) => ({ id, name: id }) }],
+    },
+    restore: restoreProbe.restore,
+  },
+});
+const historicalEngine = createPanelEngine({ root, panels: [historicalPanel] });
+const historicalDocument = buildNavigationDocument([
+  { kind: "historical", version: 1, descriptor: { id: "report-a" } },
+]);
+const historicalRestore = await historicalEngine.restoreNavigationDocument(historicalDocument, { signal: new AbortController().signal });
+if (
+  historicalRestore.status !== "restored" ||
+  historicalRestore.navigationIntent !== "replace" ||
+  historicalRestore.references[0].input.name !== "report-a" ||
+  restoreProbe.calls.length !== 1
+) {
+  throw new Error("packed historical Navigation Document did not migrate and restore");
+}
+
+const testEditor = createTestLifecycle({ guard: { status: "confirm", message: "Unsaved" }, mode: "manual" });
+const guardedClass = historicalEngine.open({ panel: historicalPanel.reference({ id: "report-b", name: "Report B" }) });
+if (guardedClass.status !== "opened") throw new Error("packed testing lifecycle had no Panel to guard");
+const guardedTarget = historicalEngine.getSnapshot().panels[1].instanceRef;
+historicalEngine.registerLifecycle({ target: guardedTarget, lifecycle: testEditor.lifecycle });
+if (historicalEngine.close({ target: guardedTarget }).status !== "confirmation-required") {
+  throw new Error("packed testing lifecycle did not raise its Guarded Transition");
+}
+const heldResolution = historicalEngine.resolveTransition({ decision: "save" });
+await Promise.resolve();
+if (testEditor.saves.length !== 1 || testEditor.saves[0].settled || historicalEngine.getSnapshot().panels.length !== 2) {
+  throw new Error("packed testing lifecycle committed over a write in flight");
+}
+testEditor.saves[0].settle();
+if ((await heldResolution).status !== "committed" || historicalEngine.getSnapshot().panels.length !== 1) {
+  throw new Error("packed testing lifecycle did not commit once its write settled");
+}
+console.log("verified packed testing tools consumer");
 `,
   );
   await run(
@@ -517,6 +858,22 @@ console.log("verified packed overlay Workspace consumer");
   await assertInstalledSubpathsStayOptional(reactConsumer);
   process.stdout.write(
     "verified packed base entry points leave the optional subpaths optional\n",
+  );
+  const scanned = await assertNoSecretMaterial(
+    join(reactConsumer, "node_modules/@squaredlemons/canvas-panels"),
+  );
+  process.stdout.write(
+    `verified packed artifact carries no secret material across ${scanned} files\n`,
+  );
+  await assertSingleReactInstallation(reactConsumer);
+  process.stdout.write("verified packed consumer resolves a single React\n");
+  await assertInstalledArtifactShape(
+    join(reactConsumer, "node_modules/@squaredlemons/canvas-panels"),
+  );
+  await assertPrivateDeepImportsAreRefused(reactConsumer);
+  await assertDocumentationIsComplete(
+    join(reactConsumer, "node_modules/@squaredlemons/canvas-panels"),
+    packageJson.exports,
   );
   const reactResult = await run(process.execPath, ["probe.mjs"], reactConsumer);
   process.stdout.write(reactResult.stdout);
