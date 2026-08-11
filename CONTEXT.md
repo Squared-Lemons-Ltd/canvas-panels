@@ -62,6 +62,20 @@ Only the Active Panel is claimed for. A Panel that fails while another is active
 
 Focus arriving inside a Panel is not a claim. It records the DOM-Focused Panel and publishes it for Context Targets, neither of which re-opens a claim, so a Canvas settles after a focus change instead of looping.
 
+## Overlay Workspace
+
+A Canvas Workspace presented above the application for global or modal Panels, imported from its own subpath and reached only through the handle that created it. It is an ordinary Panel Engine with an ordinary Bound Canvas Module rendered into it: Panels open, close, guard, and announce exactly as they do in the primary Canvas, and it is presented precisely while something has been routed into it. Routing is always explicit—no context, hook, or ambient "global layer" lets a Panel reach an Overlay Workspace without naming it, and a Panel's own navigation keeps going to its own Workspace whether an overlay is up or not. Its persistence namespace is minted under a reserved prefix rather than accepted verbatim, so it can never take the Navigation Parameter a primary Canvas owns. Dismissing it is an ordinary close of the shallowest routed Panel, which resolves every affected Transition Guard as one Guarded Transition.
+
+A modal Overlay Workspace owns the page while it is up: the main content is inert, Tab cycles within the layer, and focus returns to whatever it was taken from. A non-modal one changes nothing about Tab order or the reachability of the page behind it. Presenting the overlay is itself a claim on focus, honoured exactly once and only when the Panel Focus Owner inside it placed focus nowhere—the overlay never competes with it, and never takes focus back once it has been moved.
+
+## Overlay Inner Layer
+
+An application-owned menu, popover, or listbox open inside an Overlay Workspace, registered with it for exactly as long as it is open so that Escape closes it first. The overlay neither renders nor closes it: registering says only that something nested is open and names what to call, which is what lets an application keep its own transient UI without the overlay having to know what that UI is.
+
+## Overlay Escape Order
+
+Which layer an Escape belongs to, resolved innermost first. A Guarded Transition dialog is innermost: it is raised by the overlay's own dismissal, it renders above everything with the rest inert, and its Escape means Stay, so letting the overlay act on the same keypress would cancel a dismissal and immediately request it again. Below it come the Overlay Inner Layers, and then the modal overlay itself. The order stops there: with nothing routed into it an overlay renders no layer at all, so no Escape can reach it and the key goes to the focused Canvas Panel and the application by the ordinary route—which is what keeps Escape usable once an overlay has gone.
+
 ## Context Target
 
 An optional, host-selected Panel used as ambient context by an application concern such as assistance, analytics, or help.

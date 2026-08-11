@@ -7,6 +7,10 @@ import {
   type PanelKey,
   type PanelLifecycle,
 } from "../../packages/canvas-panels/dist/core/index.js";
+import {
+  createOverlayWorkspace,
+  defineOverlayWorkspace,
+} from "../../packages/canvas-panels/dist/overlay/index.js";
 import { createCanvasModule } from "../../packages/canvas-panels/dist/ui/index.js";
 
 const root = defineRootPanel({ kind: "classes", title: "Classes" });
@@ -324,5 +328,26 @@ engine.close({
   },
 });
 
+const helpRoot = defineRootPanel({ kind: "help-root", title: "Help" });
+const shortcuts = definePanel({
+  kind: "shortcuts",
+  title: (input: { topic: string }) => input.topic,
+});
+const HelpCanvas = createCanvasModule({
+  root: helpRoot,
+  panels: [shortcuts],
+  renderers: { "help-root": () => null, shortcuts: () => null },
+});
+const helpOverlay = createOverlayWorkspace({
+  canvas: HelpCanvas,
+  definition: defineOverlayWorkspace({ label: "Help", name: "help" }),
+  engine: createPanelEngine({ root: helpRoot, panels: [shortcuts] }),
+});
+helpOverlay.open(shortcuts.reference({ topic: "Shortcuts" }));
+const overlayNamespace: string = helpOverlay.definition.namespace;
+// @ts-expect-error An overlay routes only the Panels its own Workspace registered.
+helpOverlay.open(student.reference({ name: "Ada Lovelace" }));
+
+void overlayNamespace;
 void invalidId;
 void invalidPanelKey;

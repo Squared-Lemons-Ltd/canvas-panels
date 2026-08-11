@@ -24,9 +24,10 @@ test("the packed package installs into clean React and Next consumers", async ()
   );
   assert.match(
     stdout,
-    /verified packed base entry points leave the extensions optional/,
+    /verified packed base entry points leave the optional subpaths optional/,
   );
   assert.match(stdout, /verified packed editor extension consumer/);
   assert.match(stdout, /verified packed resource extension consumer/);
+  assert.match(stdout, /verified packed overlay Workspace consumer/);
   assert.match(stdout, /verified packed Next consumer/);
 });

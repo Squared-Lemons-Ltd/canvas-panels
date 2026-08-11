@@ -2,11 +2,11 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
   distributionSubpaths,
-  extensionsReachedFromBaseEntryPoints,
+  optionalSubpathsReachedFromBaseEntryPoints,
   reachableModules,
 } from "../scripts/module-graph.mjs";
 
@@ -128,16 +128,61 @@ test("the module graph walker follows the package's own imports", async () => {
   assert.deepEqual([...external].sort(), ["react"]);
 });
 
-test("no base entry point reaches an optional extension", async () => {
-  const reached = await extensionsReachedFromBaseEntryPoints(distribution);
+test("no base entry point reaches an optional subpath", async () => {
+  const reached =
+    await optionalSubpathsReachedFromBaseEntryPoints(distribution);
 
   assert.ok(reached.size > 0, "base entry points must be checked");
-  for (const [entry, extensions] of reached) {
+  for (const [entry, optional] of reached) {
     assert.deepEqual(
-      extensions,
+      optional,
       [],
-      `${entry} must not initialize or bundle an extension`,
+      `${entry} must not initialize or bundle an optional subpath`,
     );
+  }
+});
+
+test("the overlay costs an importer the Panel Engine and nothing else", async () => {
+  const { external, modules } = await reachableModules(
+    join(distribution, "overlay/index.js"),
+  );
+
+  // The overlay speaks the Bound Canvas Module's shape structurally, so an
+  // application that opts into a global layer does not thereby drag the whole
+  // `ui` entry point into a bundle that had not already asked for it.
+  assert.deepEqual(distributionSubpaths(modules, distribution), [
+    "core/index.js",
+    "overlay/index.js",
+    "overlay/routing.js",
+  ]);
+  assert.deepEqual([...external].sort(), ["react"]);
+});
+
+test("overlay definitions and factories exist only on the overlay subpath", async () => {
+  const overlayExports = [
+    "createOverlayWorkspace",
+    "defineOverlayWorkspace",
+    "overlayNavigationParameterPrefix",
+    "overlayPresentation",
+    "resolveOverlayEscape",
+  ];
+  const [overlay, ...base] = await Promise.all(
+    ["overlay/index.js", "core/index.js", "react/index.js", "ui/index.js"].map(
+      (entry) => import(pathToFileURL(join(distribution, entry)).href),
+    ),
+  );
+
+  for (const name of overlayExports) {
+    assert.ok(name in overlay, `the overlay subpath must export ${name}`);
+  }
+  for (const module of base) {
+    for (const name of overlayExports) {
+      assert.equal(
+        name in module,
+        false,
+        `${name} must not be reachable without naming the overlay subpath`,
+      );
+    }
   }
 });
 

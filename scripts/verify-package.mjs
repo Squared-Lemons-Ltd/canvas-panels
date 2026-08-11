@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { extensionsReachedFromBaseEntryPoints } from "./module-graph.mjs";
+import { optionalSubpathsReachedFromBaseEntryPoints } from "./module-graph.mjs";
 
 const execFileAsync = promisify(execFile);
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -38,18 +38,19 @@ async function writeJson(path, value) {
 }
 
 /**
- * A consumer that never imports an extension must never pay for one, so the
- * check runs against the installed tarball rather than the built source.
+ * A consumer that never imports an optional subpath — an extension, or the
+ * overlay composition path — must never pay for one, so the check runs against
+ * the installed tarball rather than the built source.
  */
-async function assertInstalledExtensionsStayOptional(consumerDirectory) {
-  const reached = await extensionsReachedFromBaseEntryPoints(
+async function assertInstalledSubpathsStayOptional(consumerDirectory) {
+  const reached = await optionalSubpathsReachedFromBaseEntryPoints(
     join(consumerDirectory, "node_modules/@squaredlemons/canvas-panels/dist"),
   );
 
-  for (const [entry, extensions] of reached) {
-    if (extensions.length > 0) {
+  for (const [entry, optional] of reached) {
+    if (optional.length > 0) {
       throw new Error(
-        `packed ${entry} initializes an optional extension: ${extensions.join(", ")}`,
+        `packed ${entry} initializes an optional subpath: ${optional.join(", ")}`,
       );
     }
   }
@@ -138,11 +139,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { createPanelEngine, definePanel, defineRootPanel } from "@squaredlemons/canvas-panels/core";
 import { createPanelEditor, editorGuardMessages, resolveEditorGuard } from "@squaredlemons/canvas-panels/extensions/editor";
 import { createPanelResource, createResourceExchange, resolveResourceDeferral } from "@squaredlemons/canvas-panels/extensions/resources";
+import { createOverlayWorkspace, defineOverlayWorkspace, overlayNavigationParameterPrefix, overlayPresentation } from "@squaredlemons/canvas-panels/overlay";
 import { createCanvasModule, defineCanvasContext } from "@squaredlemons/canvas-panels/ui";
 
 await Promise.all([
   import("@squaredlemons/canvas-panels/react"),
-  import("@squaredlemons/canvas-panels/overlay"),
   import("@squaredlemons/canvas-panels/testing"),
 ]);
 
@@ -433,6 +434,78 @@ if (resolveResourceDeferral({
   throw new Error("packed resource deferral lost its ordering");
 }
 console.log("verified packed resource extension consumer");
+
+const overlayDefinition = defineOverlayWorkspace({ label: "Help", name: "help" });
+if (overlayDefinition.namespace !== overlayNavigationParameterPrefix + "help") {
+  throw new Error("packed overlay did not mint its own persistence namespace");
+}
+if (overlayDefinition.namespace === "canvas" || overlayDefinition.modality !== "modal") {
+  throw new Error("packed overlay namespace collided with the primary Canvas");
+}
+let refusedCollision = false;
+try {
+  defineOverlayWorkspace({ label: "Help", name: "help", primaryNamespace: overlayDefinition.namespace });
+} catch {
+  refusedCollision = true;
+}
+if (!refusedCollision) throw new Error("packed overlay accepted the primary Canvas namespace");
+const overlayRoot = defineRootPanel({ kind: "overlay-root", title: "Overlay" });
+const helpPanel = definePanel({ kind: "help", title: ({ topic }) => topic });
+const OverlayCanvas = createCanvasModule({
+  root: overlayRoot,
+  panels: [helpPanel],
+  renderers: {
+    "overlay-root": () => null,
+    help: ({ descriptor }) => createElement("p", null, "Help: " + descriptor.topic),
+  },
+});
+const overlayEngine = createPanelEngine({ root: overlayRoot, panels: [helpPanel] });
+const overlay = createOverlayWorkspace({
+  canvas: OverlayCanvas,
+  definition: overlayDefinition,
+  engine: overlayEngine,
+});
+if (overlayPresentation(overlayEngine.getSnapshot()).presented) {
+  throw new Error("packed overlay presented before anything was routed into it");
+}
+const emptyMarkup = renderToStaticMarkup(createElement(overlay.Host, null, createElement("main", null, "Application")));
+if (emptyMarkup.includes("data-canvas-overlay=") || emptyMarkup.includes("inert=")) {
+  throw new Error("packed overlay rendered a layer over an empty Workspace");
+}
+if (overlay.open(helpPanel.reference({ topic: "Shortcuts" })).status !== "opened") {
+  throw new Error("packed overlay did not route its Panel");
+}
+if (overlayEngine.getSnapshot().panels.length !== 2 || engine.getSnapshot().panels.some(({ kind }) => kind === "help")) {
+  throw new Error("packed overlay routing reached the primary Canvas");
+}
+const overlayMarkup = renderToStaticMarkup(createElement(overlay.Host, null, createElement("main", null, "Application")));
+for (const expected of ['role="dialog"', 'aria-modal="true"', 'aria-label="Help"', 'inert=""', "Help: Shortcuts"]) {
+  if (!overlayMarkup.includes(expected)) {
+    throw new Error("packed overlay layer is missing " + expected);
+  }
+}
+const overlayTarget = overlayEngine.getSnapshot().panels[1].instanceRef;
+overlayEngine.registerLifecycle({
+  target: overlayTarget,
+  lifecycle: {
+    dirty: true,
+    guard: () => ({ status: "confirm", message: "Unsaved packed help" }),
+    save: async () => {},
+    discard: async () => {},
+  },
+});
+if (overlay.dismiss().status !== "confirmation-required") {
+  throw new Error("packed overlay dismissal skipped its Transition Guard");
+}
+const settledOverlay = await overlayEngine.resolveTransition({ decision: "discard" });
+if (settledOverlay.status !== "committed" || overlayEngine.getSnapshot().panels.length !== 1) {
+  throw new Error("packed overlay dismissal did not commit through the guard");
+}
+const emptyDismissal = overlay.dismiss();
+if (emptyDismissal.status !== "rejected" || emptyDismissal.reason !== "root-panel") {
+  throw new Error("packed overlay dismissed a layer that was not presented");
+}
+console.log("verified packed overlay Workspace consumer");
 `,
   );
   await run(
@@ -441,9 +514,9 @@ console.log("verified packed resource extension consumer");
     reactConsumer,
   );
   await assertTarballLockfile(reactConsumer);
-  await assertInstalledExtensionsStayOptional(reactConsumer);
+  await assertInstalledSubpathsStayOptional(reactConsumer);
   process.stdout.write(
-    "verified packed base entry points leave the extensions optional\n",
+    "verified packed base entry points leave the optional subpaths optional\n",
   );
   const reactResult = await run(process.execPath, ["probe.mjs"], reactConsumer);
   process.stdout.write(reactResult.stdout);
