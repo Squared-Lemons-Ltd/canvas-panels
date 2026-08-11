@@ -790,6 +790,56 @@ svg {
   justify-content: space-between;
   margin-top: 10px;
 }
+.editor-actions .link-action {
+  background: none;
+  border: 0;
+  padding: 8px 0;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* Resource invalidation: the studio-activity controls and the panels that
+   react to what they publish. */
+.studio-activity {
+  border-top: 1px solid var(--line);
+  padding: 20px 22px 24px;
+}
+.studio-activity p {
+  color: #59625d;
+  font-size: 11px;
+  line-height: 1.6;
+  margin: 9px 0 13px;
+}
+.studio-activity .editor-actions {
+  margin-top: 0;
+}
+.activity-count {
+  font-family: var(--mono);
+  font-size: 8px;
+  margin-bottom: 0;
+  text-transform: uppercase;
+}
+.project-name {
+  font-family: var(--serif);
+  font-size: 22px;
+  font-style: italic;
+  font-weight: 500;
+  margin: 14px 0 0;
+}
+.project-panel .editor-notice {
+  margin: 0 0 18px;
+}
+.collaborator-panel {
+  padding-bottom: 24px;
+}
+.collaborator-panel code {
+  font-family: var(--mono);
+  font-size: 10px;
+  word-break: break-all;
+}
+.collaborator-panel .project-meta {
+  margin-bottom: 0;
+}
 
 /*
  * Guarded-transition dialog polish. The package owns the dialog's scrim,

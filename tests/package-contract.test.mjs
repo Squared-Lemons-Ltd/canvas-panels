@@ -85,12 +85,12 @@ test("built client entry points retain use-client while server-safe entries stay
     "dist/ui/index.js",
     "dist/next/index.js",
     "dist/extensions/editor.js",
+    "dist/extensions/resources.js",
     "dist/overlay/index.js",
   ];
   const serverEntries = [
     "dist/core/index.js",
     "dist/next/server.js",
-    "dist/extensions/resources.js",
     "dist/testing/index.js",
   ];
 
@@ -153,6 +153,33 @@ test("the editor extension costs an importer nothing but React", async () => {
     "extensions/editor.js",
   ]);
   assert.deepEqual([...external].sort(), ["react"]);
+});
+
+test("the resource extension costs an importer nothing but React", async () => {
+  const { external, modules } = await reachableModules(
+    join(distribution, "extensions/resources.js"),
+  );
+
+  // Resource Keys are opaque, so the extension needs no Panel Engine contract
+  // at all: it reaches no Canvas module, and no Canvas module reaches it.
+  assert.deepEqual(distributionSubpaths(modules, distribution), [
+    "extensions/resources.js",
+  ]);
+  assert.deepEqual([...external].sort(), ["react"]);
+});
+
+test("neither optional extension can reach the other", async () => {
+  for (const entry of ["extensions/editor.js", "extensions/resources.js"]) {
+    const { modules } = await reachableModules(join(distribution, entry));
+
+    assert.deepEqual(
+      distributionSubpaths(modules, distribution).filter(
+        (subpath) => subpath.startsWith("extensions/") && subpath !== entry,
+      ),
+      [],
+      `${entry} must not drag in another extension`,
+    );
+  }
 });
 
 test("workspace fixtures build as applications through package subpaths only", async () => {
