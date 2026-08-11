@@ -158,11 +158,17 @@ export type CanvasPanelLifecycle = PanelLifecycle &
     fallbackFocus?: RefObject<HTMLElement | null>;
   }>;
 
+// The boundary reports that it swapped a Panel's body; it never moves focus
+// itself. Focus for every appearance of a Panel body has one owner — the
+// Workspace — and a second claimant inside the Panel is exactly what made the
+// two fight over the same moment.
 class PanelRendererBoundary extends Component<
   Readonly<{
     children?: ReactNode;
     kind: string;
+    noticeId: string;
     panel: PanelInstanceRef;
+    onBodyReplaced: () => void;
     onError?: (report: RendererErrorReport) => void;
   }>,
   Readonly<{ failed: boolean; retryKey: number }>
@@ -177,6 +183,7 @@ class PanelRendererBoundary extends Component<
     this.props.onError?.(
       Object.freeze({ kind: this.props.kind, panel: this.props.panel }),
     );
+    this.props.onBodyReplaced();
   }
 
   render() {
@@ -189,16 +196,30 @@ class PanelRendererBoundary extends Component<
     }
     return createElement(
       "div",
-      { role: "alert" },
-      createElement("p", null, "This Panel could not be displayed."),
+      {
+        // Landing on the notice is only useful if it says what it is, and the
+        // sentence it already shows is that name.
+        "aria-labelledby": `${this.props.noticeId}-message`,
+        "data-canvas-panel-notice": "",
+        id: this.props.noticeId,
+        role: "alert",
+        tabIndex: -1,
+      },
+      createElement(
+        "p",
+        { id: `${this.props.noticeId}-message` },
+        "This Panel could not be displayed.",
+      ),
       createElement(
         "button",
         {
-          onClick: () =>
+          onClick: () => {
             this.setState(({ retryKey }) => ({
               failed: false,
               retryKey: retryKey + 1,
-            })),
+            }));
+            this.props.onBodyReplaced();
+          },
           type: "button",
         },
         "Retry panel",
@@ -1071,11 +1092,18 @@ export function createCanvasModule<
     const previouslyVisiblePanelIds = useRef<readonly PanelInstanceId[]>([]);
     const previousTransition = useRef(snapshot.transition);
     const initiallyFocusedPanel = useRef<PanelInstanceId | null>(null);
+    const honouredReplacements = useRef(new Map<PanelInstanceId, number>());
     const [dirtyPanelIds, setDirtyPanelIds] = useState<
       ReadonlySet<PanelInstanceId>
     >(() => new Set());
     const [headerRegistrations, setHeaderRegistrations] = useState<
       ReadonlyMap<PanelInstanceId, ReadonlyMap<object, HeaderRegistration>>
+    >(() => new Map());
+    // How many times each Panel's renderer boundary has swapped the body for
+    // its failure notice or back again. It only ever counts up, which is what
+    // lets the focus pass below recognise a swap it has already dealt with.
+    const [bodyReplacements, setBodyReplacements] = useState<
+      ReadonlyMap<PanelInstanceId, number>
     >(() => new Map());
     const [actionRegistrations, setActionRegistrations] = useState<
       ReadonlyMap<PanelInstanceId, ReadonlyMap<object, CanvasActionProps>>
@@ -1110,6 +1138,13 @@ export function createCanvasModule<
       },
       [],
     );
+    const noteBodyReplaced = useCallback((panel: PanelInstanceRef) => {
+      setBodyReplacements((current) => {
+        const next = new Map(current);
+        next.set(panel.instanceId, (current.get(panel.instanceId) ?? 0) + 1);
+        return next;
+      });
+    }, []);
     const registerAction = useCallback(
       (panel: PanelInstanceRef, action: CanvasActionProps) => {
         const owner = Object.freeze({});
@@ -1173,6 +1208,20 @@ export function createCanvasModule<
       }
     }, [signalStore, snapshot.panels]);
 
+    // A closed Panel takes its focus bookkeeping with it, so neither map grows
+    // for the lifetime of the Workspace.
+    useEffect(() => {
+      const open = (instanceId: PanelInstanceId) =>
+        snapshot.panels.some((panel) => panel.instanceId === instanceId);
+      for (const instanceId of honouredReplacements.current.keys()) {
+        if (!open(instanceId)) honouredReplacements.current.delete(instanceId);
+      }
+      setBodyReplacements((current) => {
+        const next = new Map([...current].filter(([id]) => open(id)));
+        return next.size === current.size ? current : next;
+      });
+    }, [snapshot.panels]);
+
     useEffect(() => {
       if (previousTransition.current && !snapshot.transition) {
         const preferred = returnFocus.current;
@@ -1193,20 +1242,87 @@ export function createCanvasModule<
       previousTransition.current = snapshot.transition;
     }, [headerRegistrations, snapshot.activePanelId, snapshot.transition]);
 
+    const activePanelId = snapshot.activePanelId;
+    const activeReplacements = bodyReplacements.get(activePanelId) ?? 0;
+
+    // Every part the package itself renders into a Panel is named from this
+    // Workspace's own id, so a Workspace nested inside a Panel can never be
+    // mistaken for its host — which a descendant selector would do.
+    const panelPartIdFor = useCallback(
+      (panelId: string, part: "heading" | "notice") => {
+        const index = snapshot.panels.findIndex(
+          ({ instanceId }) => instanceId === panelId,
+        );
+        return index < 0 ? null : `${workspaceId}-panel-${index}-${part}`;
+      },
+      [snapshot.panels, workspaceId],
+    );
+
+    // This is the only place a Canvas Workspace decides where focus goes when a
+    // Panel body appears, and it honours each claim exactly once. That is what
+    // keeps focus from feeding back into it: moving focus re-renders whatever
+    // reads the Context Signal store, and this effect then re-runs against a
+    // claim it has already settled and does nothing. Nothing rendered inside a
+    // Panel may claim the same moment — a second claimant is what made the
+    // render loop rather than settle.
+    //
+    // Two different things count as a body appearing, and conflating them is
+    // what a Panel that has recovered once would pay for ever after. Activating
+    // a Panel is the case that already existed. A renderer boundary swapping
+    // the body for its failure notice, or restoring it on a retry, is the
+    // other, and it is counted per Panel because the same Panel can break and
+    // recover any number of times.
     useEffect(() => {
-      const registrations = headerRegistrations.get(snapshot.activePanelId);
-      const initialFocus = registrations
+      // A Guarded Transition dialog owns focus for as long as it is up, and the
+      // Panels behind it are inert. Whatever the boundary did back there is
+      // recorded as settled rather than dragged out in front of the dialog.
+      if (deepestTransition) {
+        honouredReplacements.current.set(activePanelId, activeReplacements);
+        initiallyFocusedPanel.current = activePanelId;
+        return;
+      }
+      if (
+        activeReplacements > 0 &&
+        honouredReplacements.current.get(activePanelId) !== activeReplacements
+      ) {
+        // Whatever the user was standing on has just been destroyed under them,
+        // so this Panel is owed a landing place whatever it registered. The
+        // notice explains the failure; once the body is back, the Panel's own
+        // heading puts the user at the top of what returned. Both are rendered
+        // by the package, so this never waits on an application registration
+        // and settles in the commit that raised the claim.
+        const elementFor = (part: "heading" | "notice") => {
+          const id = panelPartIdFor(activePanelId, part);
+          return id === null ? null : document.getElementById(id);
+        };
+        const target = elementFor("notice") ?? elementFor("heading");
+        if (!target?.isConnected) return;
+        honouredReplacements.current.set(activePanelId, activeReplacements);
+        // A replacement has just put focus inside this Panel, so activation has
+        // nothing left to claim for it.
+        initiallyFocusedPanel.current = activePanelId;
+        target.focus({ preventScroll: true });
+        return;
+      }
+      // Activating a Panel hands focus to whatever that Panel registered, once.
+      // A Panel that registered nothing is left exactly as the application left
+      // it.
+      if (initiallyFocusedPanel.current === activePanelId) return;
+      const registrations = headerRegistrations.get(activePanelId);
+      const registered = registrations
         ? [...registrations.values()].find(({ initialFocus }) => initialFocus)
             ?.initialFocus?.current
         : null;
-      if (
-        initiallyFocusedPanel.current !== snapshot.activePanelId &&
-        initialFocus?.isConnected
-      ) {
-        initialFocus.focus({ preventScroll: true });
-        initiallyFocusedPanel.current = snapshot.activePanelId;
-      }
-    }, [headerRegistrations, snapshot.activePanelId]);
+      if (!registered?.isConnected) return;
+      initiallyFocusedPanel.current = activePanelId;
+      registered.focus({ preventScroll: true });
+    }, [
+      activePanelId,
+      activeReplacements,
+      deepestTransition,
+      headerRegistrations,
+      panelPartIdFor,
+    ]);
 
     const registerWorkspaceLifecycle = useCallback<
       CanvasBinding<Reference>["registerLifecycle"]
@@ -1314,16 +1430,6 @@ export function createCanvasModule<
           : null;
     }, []);
 
-    const headingIdFor = useCallback(
-      (panelId: string) => {
-        const index = snapshot.panels.findIndex(
-          ({ instanceId }) => instanceId === panelId,
-        );
-        return index < 0 ? null : `${workspaceId}-panel-${index}-heading`;
-      },
-      [snapshot.panels, workspaceId],
-    );
-
     // F6 is the only key the Canvas claims. Tab order is left exactly as the
     // DOM defines it, and no arrow or letter shortcut is registered globally,
     // so an application's own controls keep every key they expect.
@@ -1354,13 +1460,13 @@ export function createCanvasModule<
           event.shiftKey ? "backward" : "forward",
         );
         if (target === null) return;
-        const headingId = headingIdFor(target);
+        const headingId = panelPartIdFor(target, "heading");
         const heading = headingId ? document.getElementById(headingId) : null;
         if (!heading) return;
         event.preventDefault();
         heading.focus();
       },
-      [headingIdFor, visiblePanelIds],
+      [panelPartIdFor, visiblePanelIds],
     );
 
     const announcementTemplates = announcements ?? canvasAnnouncementTemplates;
@@ -1693,6 +1799,8 @@ export function createCanvasModule<
                     PanelRendererBoundary,
                     {
                       kind: panel.kind,
+                      noticeId: `${workspaceId}-panel-${panelIndex}-notice`,
+                      onBodyReplaced: () => noteBodyReplaced(panel.instanceRef),
                       panel: panel.instanceRef,
                       ...(config.onRendererError
                         ? { onError: config.onRendererError }
