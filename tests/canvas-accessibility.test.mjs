@@ -650,6 +650,62 @@ test("the separator leaves keys it does not own to the application", () => {
   }
 });
 
+test("a failed decision moves focus to the explanation", async () => {
+  const root = defineRootPanel({ kind: "root", title: "Documents" });
+  const editor = definePanel({ kind: "editor", title: ({ name }) => name });
+  let Canvas;
+  const Editor = ({ descriptor }) => {
+    Canvas.useLifecycle({
+      dirty: true,
+      guard: () => ({ status: "confirm", message: "Unsaved draft" }),
+      save: async () => {
+        throw new Error("Save failed");
+      },
+      discard: async () => {},
+    });
+    return createElement("p", null, descriptor.name);
+  };
+  Canvas = createCanvasModule({
+    root,
+    panels: [editor],
+    renderers: { root: () => null, editor: Editor },
+  });
+  const engine = createPanelEngine({ root, panels: [editor] });
+  installViewport("desktop");
+  let rendered;
+  act(() => {
+    rendered = render(
+      createElement(
+        Canvas.Provider,
+        { engine },
+        createElement(Canvas.Workspace, { label: "Documents Canvas" }),
+      ),
+    );
+  });
+  act(() => {
+    engine.open({
+      originId: engine.getSnapshot().activePanelId,
+      panel: editor.reference({ name: "Draft" }),
+    });
+  });
+  act(() => {
+    engine.close({ target: engine.getSnapshot().panels[1].instanceRef });
+  });
+
+  await act(async () => {
+    fireEvent.click(rendered.getByRole("button", { name: "Save" }));
+  });
+
+  const alert = rendered.container.querySelector(
+    '[data-canvas-transition-dialog] [role="alert"]',
+  );
+  assert.ok(alert, "a failed decision must explain itself");
+  // Every button is disabled while deciding, so without this the browser drops
+  // focus to the body and strands the user outside the modal.
+  assert.equal(dom.window.document.activeElement, alert);
+  rendered.unmount();
+});
+
 const stylesheet = await readFile(
   new URL("../packages/canvas-panels/dist/styles.css", import.meta.url),
   "utf8",

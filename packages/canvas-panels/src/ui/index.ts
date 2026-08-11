@@ -411,12 +411,40 @@ function GuardedTransitionDialog({
   const titleId = useId();
   const messageId = useId();
   const stayButton = useRef<HTMLButtonElement>(null);
+  const dialog = useRef<HTMLDivElement>(null);
+  const errorMessage = useRef<HTMLParagraphElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
 
   useLayoutEffect(() => {
     stayButton.current?.focus({ preventScroll: true });
   }, []);
+
+  // Deciding disables every button, which would drop focus to the body and
+  // strand a keyboard user outside the modal they are still inside. Focus moves
+  // to the dialog itself for the duration.
+  useLayoutEffect(() => {
+    if (!busy) return;
+    const active = document.activeElement;
+    // Deliberately no `instanceof HTMLButtonElement`: that global does not
+    // exist in every environment this renders in, and reaching for it here
+    // would throw during the layout effect rather than fail quietly.
+    const strandedOnDisabledControl =
+      active !== null &&
+      dialog.current?.contains(active) === true &&
+      "disabled" in active &&
+      active.disabled === true;
+    if (strandedOnDisabledControl) {
+      dialog.current?.focus({ preventScroll: true });
+    }
+  }, [busy]);
+
+  // A failed decision has to be read, not just announced: focus lands on the
+  // explanation so the next Tab reaches the buttons that can act on it.
+  useLayoutEffect(() => {
+    if (error === undefined) return;
+    errorMessage.current?.focus({ preventScroll: true });
+  }, [error]);
 
   const decide = async (decision: "save" | "discard" | "stay") => {
     if (busy) return;
@@ -456,7 +484,10 @@ function GuardedTransitionDialog({
         "aria-describedby": messageId,
         "aria-labelledby": titleId,
         "aria-modal": true,
+        "aria-busy": busy || undefined,
         "data-canvas-transition-dialog": "",
+        ref: dialog,
+        tabIndex: -1,
         onKeyDown: (event) => {
           if (event.key === "Escape") {
             event.preventDefault();
@@ -502,7 +533,13 @@ function GuardedTransitionDialog({
           ),
         ),
       ),
-      error ? createElement("p", { role: "alert" }, error) : null,
+      error
+        ? createElement(
+            "p",
+            { ref: errorMessage, role: "alert", tabIndex: -1 },
+            error,
+          )
+        : null,
       createElement(
         "div",
         { "data-canvas-transition-actions": "" },
