@@ -52,6 +52,16 @@ A Panel currently presented by the active responsive policy.
 
 The Panel containing the browser’s currently focused element.
 
+## Panel Focus Owner
+
+The single component that decides where focus goes when a Panel’s body appears: the Canvas Workspace. Nothing rendered inside a Panel claims that moment—the renderer failure boundary reports that it replaced a body and never moves focus itself—because two claimants for one moment never settle and re-render each other indefinitely.
+
+Two different things count as a body appearing, and each is a claim on the Active Panel that the Workspace honours exactly once. Activating a Panel gives focus to whatever that Panel registered as its initial focus; a Panel that registered nothing is left as the application left it. A renderer failure replacing the body, or a retry restoring it, gives focus to the failure notice and then to the Panel’s own heading—both rendered by the package, so a swapped body never waits on an application registration and never strands the user on the document body. The two are counted separately, so a Panel that has recovered once is an ordinary Panel again the next time it is activated.
+
+Only the Active Panel is claimed for. A Panel that fails while another is active keeps its notice and its claim until it is activated, rather than pulling focus out of the Panel someone is working in, and a Guarded Transition dialog owning focus settles the claim behind it instead of dragging focus out in front of the modal. A transition committing is a separate moment with its own rule, and belongs to the same owner.
+
+Focus arriving inside a Panel is not a claim. It records the DOM-Focused Panel and publishes it for Context Targets, neither of which re-opens a claim, so a Canvas settles after a focus change instead of looping.
+
 ## Context Target
 
 An optional, host-selected Panel used as ambient context by an application concern such as assistance, analytics, or help.

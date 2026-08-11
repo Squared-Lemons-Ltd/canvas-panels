@@ -1294,3 +1294,229 @@ test("duplicate renderer lifecycle registration fails inside that Panel boundary
   assert.equal(reports[0].kind, "root");
   rendered.unmount();
 });
+
+test("a renderer failure takes focus to its notice and a retry hands it back to the Panel body", async () => {
+  const broken = definePanel({ kind: "broken", title: ({ name }) => name });
+  const root = defineRootPanel({ kind: "root", title: "Home" });
+  let recover = false;
+  let Canvas;
+
+  function BrokenRenderer() {
+    const initialFocus = useRef(null);
+    Canvas.useLifecycle({
+      dirty: false,
+      initialFocus,
+      guard: () => ({ status: "allow" }),
+      save: async () => {},
+      discard: async () => {},
+    });
+    if (!recover) throw new Error("secret renderer details");
+    return createElement(
+      "button",
+      { ref: initialFocus, type: "button" },
+      "Recovered focus target",
+    );
+  }
+
+  Canvas = createCanvasModule({
+    root,
+    panels: [broken],
+    renderers: {
+      root: () => {
+        const navigation = Canvas.useNavigation();
+        const initialFocus = useRef(null);
+        Canvas.useLifecycle({
+          dirty: false,
+          initialFocus,
+          guard: () => ({ status: "allow" }),
+          save: async () => {},
+          discard: async () => {},
+        });
+        return createElement(
+          "button",
+          {
+            onClick: () => navigation.open(broken, { name: "Broken panel" }),
+            ref: initialFocus,
+            type: "button",
+          },
+          "Open broken panel",
+        );
+      },
+      broken: BrokenRenderer,
+    },
+  });
+  const engine = createPanelEngine({ root, panels: [broken] });
+  const rendered = render(
+    createElement(
+      Canvas.Provider,
+      { engine },
+      createElement(Canvas.Workspace, { label: "Failures" }),
+    ),
+  );
+
+  const originalConsoleError = console.error;
+  console.error = () => {};
+  try {
+    fireEvent.click(
+      rendered.getByRole("button", { name: "Open broken panel" }),
+    );
+    await rendered.findByRole("alert");
+  } finally {
+    console.error = originalConsoleError;
+  }
+
+  // The notice replaced the body a keyboard user was on their way into, so it
+  // has to be the thing they land on, and it has to name itself when they do.
+  const notice = rendered.getByRole("alert", {
+    name: /could not be displayed/i,
+  });
+  await waitFor(() => assert.equal(document.activeElement, notice));
+  assert.equal(notice.getAttribute("tabindex"), "-1");
+
+  // A retry restores the body, and the notice the user was standing on
+  // disappears underneath them: focus must land somewhere deliberate.
+  recover = true;
+  fireEvent.click(rendered.getByRole("button", { name: "Retry panel" }));
+  await rendered.findByRole("button", { name: "Recovered focus target" });
+  // The Panel's own heading is where a restored body starts, so the user is
+  // put at the top of what came back rather than left on the document body.
+  const heading = rendered.getByRole("heading", { name: "Broken panel" });
+  await waitFor(() => assert.equal(document.activeElement, heading));
+
+  // Having recovered once must not cost the Panel its declared initial focus
+  // for the rest of its life: activating it again is an ordinary activation,
+  // not another body replacement.
+  act(() => {
+    engine.activate({ target: engine.getSnapshot().panels[0].instanceRef });
+  });
+  await waitFor(() =>
+    assert.equal(
+      document.activeElement,
+      rendered.getByRole("button", { name: "Open broken panel" }),
+    ),
+  );
+  act(() => {
+    engine.activate({ target: engine.getSnapshot().panels[1].instanceRef });
+  });
+  await waitFor(() =>
+    assert.equal(
+      document.activeElement,
+      rendered.getByRole("button", { name: "Recovered focus target" }),
+    ),
+  );
+  rendered.unmount();
+});
+
+test("focus inside a Panel settles the Workspace instead of re-opening its focus claim", async () => {
+  const editor = definePanel({ kind: "editor", title: ({ name }) => name });
+  const root = defineRootPanel({ kind: "root", title: "Home" });
+  let renders = 0;
+  let Canvas;
+
+  function FocusedContextConsumer() {
+    const target = Canvas.useContextTarget("focused");
+    return createElement(
+      "div",
+      { "data-testid": "focused-context" },
+      target.panel ? "In a Panel" : "Outside",
+    );
+  }
+
+  function Editor({ descriptor }) {
+    renders += 1;
+    const initialFocus = useRef(null);
+    const [revision, setRevision] = useState(0);
+    Canvas.useLifecycle({
+      dirty: false,
+      initialFocus,
+      guard: () => ({ status: "allow" }),
+      save: async () => {},
+      discard: async () => {},
+    });
+    // Re-registering the header is what makes the Workspace re-render and look
+    // at its focus claim again, which is the loop this guards against.
+    Canvas.useHeader({ visualTitle: `${descriptor.name} ${revision}` });
+    return createElement(
+      "div",
+      null,
+      createElement(
+        "button",
+        { ref: initialFocus, type: "button" },
+        "Start here",
+      ),
+      createElement("button", { type: "button" }, "Somewhere else"),
+      createElement(
+        "button",
+        { onClick: () => setRevision((value) => value + 1), type: "button" },
+        "Re-register header",
+      ),
+    );
+  }
+
+  Canvas = createCanvasModule({
+    context: defineCanvasContext(),
+    root,
+    panels: [editor],
+    renderers: {
+      root: () => {
+        const navigation = Canvas.useNavigation();
+        return createElement(
+          "button",
+          {
+            onClick: () => navigation.open(editor, { name: "Draft" }),
+            type: "button",
+          },
+          "Open editor",
+        );
+      },
+      editor: Editor,
+    },
+  });
+  const rendered = render(
+    createElement(
+      Canvas.Provider,
+      null,
+      createElement(FocusedContextConsumer),
+      createElement(Canvas.Workspace, { label: "Settling" }),
+    ),
+  );
+
+  fireEvent.click(rendered.getByRole("button", { name: "Open editor" }));
+  const start = rendered.getByRole("button", { name: "Start here" });
+  await waitFor(() => assert.equal(document.activeElement, start));
+
+  // Moving focus within the Panel publishes the DOM-Focused Panel, so the
+  // Context Signal store definitely fired — and the Workspace still must not
+  // treat that as a fresh claim on focus.
+  const elsewhere = rendered.getByRole("button", { name: "Somewhere else" });
+  const beforeFocusMove = renders;
+  act(() => elsewhere.focus());
+  await act(async () => {});
+  assert.equal(document.activeElement, elsewhere);
+  assert.equal(
+    rendered.getByTestId("focused-context").textContent,
+    "In a Panel",
+  );
+  assert.ok(
+    renders - beforeFocusMove <= 1,
+    `focusing inside a Panel re-rendered it ${renders - beforeFocusMove} times`,
+  );
+
+  fireEvent.click(rendered.getByRole("button", { name: "Re-register header" }));
+  await act(async () => {});
+  // The claim for this body was honoured once and is not re-opened by a
+  // re-render, so the Panel does not snatch focus back to where it started.
+  assert.equal(document.activeElement, elsewhere);
+
+  const settled = renders;
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  });
+  assert.equal(
+    renders,
+    settled,
+    "the Workspace kept re-rendering instead of settling",
+  );
+  assert.equal(document.activeElement, elsewhere);
+  rendered.unmount();
+});
