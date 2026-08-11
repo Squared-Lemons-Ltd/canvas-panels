@@ -782,6 +782,39 @@ test("colours come from system keywords so forced-colours modes survive", () => 
   }
 });
 
+test("Panel widths are viewport-capped so a 320px viewport cannot overflow", () => {
+  const widths = [
+    ...stylesheet.matchAll(/--canvas-panel(?:-active)?-width:\s*([^;]+);/g),
+  ].map(([, value]) => value.trim());
+
+  assert.equal(widths.length, 2, "both Panel widths must be declared");
+  for (const width of widths) {
+    // WCAG 1.4.10 wants content at a 320px viewport without horizontal
+    // scrolling. A fixed rem width would exceed that; capping every width
+    // against `vw` is what makes the Canvas reflow rather than overflow.
+    const cap = width.match(/min\([^,]+,\s*(\d+)vw\s*\)/);
+    assert.ok(cap, `${width} must be capped against the viewport`);
+    assert.ok(
+      Number(cap[1]) <= 100,
+      `${width} may not exceed the viewport itself`,
+    );
+  }
+});
+
+test("the narrowest presentation shows a single Panel so nothing sits off-screen", () => {
+  const canvas = renderCanvas({ breakpoint: "mobile" });
+  openClassAndLearner(canvas);
+
+  const visible = [
+    ...canvas.container.querySelectorAll("[data-canvas-panel]"),
+  ].filter((panel) => !panel.hasAttribute("hidden"));
+
+  // Reflow at 320px depends on there being exactly one Panel to lay out; the
+  // rest are retained but take no space.
+  assert.equal(visible.length, 1);
+  assert.equal(canvas.engine.getSnapshot().panels.length, 3);
+});
+
 test("forced colours restore the separation that shadows provided", () => {
   const block = stylesheet.match(
     /@media \(forced-colors: active\) \{([\s\S]*?)\n {2}\}/,

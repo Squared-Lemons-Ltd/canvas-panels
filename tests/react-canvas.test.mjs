@@ -1070,6 +1070,59 @@ test("renderer failures preserve package chrome and retry only the Panel body", 
   rendered.unmount();
 });
 
+test("every header action stays individually reachable however many there are", () => {
+  const root = defineRootPanel({ kind: "root", title: "Home" });
+  let Canvas;
+  Canvas = createCanvasModule({
+    root,
+    panels: [],
+    renderers: {
+      root: () =>
+        createElement(
+          Fragment,
+          null,
+          // Far more actions than a header can lay out, which is the condition
+          // overflow has to survive.
+          ...Array.from({ length: 12 }, (_, index) =>
+            createElement(Canvas.Action, {
+              id: `action-${index}`,
+              key: index,
+              label: `Action ${index}`,
+              onSelect: () => {},
+            }),
+          ),
+        ),
+    },
+  });
+  const engine = createPanelEngine({ root, panels: [] });
+  const rendered = render(
+    createElement(
+      Canvas.Provider,
+      { engine },
+      createElement(Canvas.Workspace, { label: "Actions" }),
+    ),
+  );
+
+  const header = rendered.container.querySelector("[data-canvas-panel-header]");
+  const buttons = [...header.querySelectorAll("button")];
+  const named = buttons.filter((button) =>
+    /^Action \d+$/.test(button.getAttribute("aria-label") ?? ""),
+  );
+
+  assert.equal(named.length, 12, "no action may be dropped from the header");
+  // Overflow is a presentation problem; it must never become a reachability
+  // one, so each action keeps its own accessible name and stays exposed.
+  assert.equal(
+    new Set(named.map((button) => button.getAttribute("aria-label"))).size,
+    12,
+  );
+  for (const button of named) {
+    assert.equal(button.hasAttribute("aria-hidden"), false);
+    assert.equal(button.hasAttribute("disabled"), false);
+  }
+  rendered.unmount();
+});
+
 test("scoped composition registers actions, titles, focus targets, lifecycle labels, and context signals", async () => {
   const editor = definePanel({ kind: "editor", title: ({ name }) => name });
   const selections = [];
