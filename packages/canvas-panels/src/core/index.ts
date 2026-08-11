@@ -169,6 +169,23 @@ export type PendingGuardedTransition = Readonly<{
   panels: readonly PendingGuardedPanel[];
 }>;
 
+/**
+ * The declared responsive breakpoints a Canvas Workspace presents. Presentation
+ * selects which Panels are visible; it never changes the logical Panel Stack.
+ */
+export const canvasBreakpoints = Object.freeze([
+  "desktop",
+  "tablet",
+  "mobile",
+] as const);
+
+export type CanvasBreakpoint = (typeof canvasBreakpoints)[number];
+
+export type PresentationOutcome =
+  | Readonly<{ status: "updated"; breakpoint: CanvasBreakpoint }>
+  | Readonly<{ status: "unchanged"; breakpoint: CanvasBreakpoint }>
+  | Readonly<{ status: "rejected"; reason: "unsupported-breakpoint" }>;
+
 export type PanelEngineSnapshot = Readonly<{
   workspaceId: WorkspaceId;
   version: StackVersion;
@@ -176,6 +193,7 @@ export type PanelEngineSnapshot = Readonly<{
   activePanelId: PanelInstanceId;
   deepestPanelId: PanelInstanceId;
   visiblePanelIds: readonly PanelInstanceId[];
+  breakpoint: CanvasBreakpoint;
   transition: PendingGuardedTransition | null;
 }>;
 
@@ -460,6 +478,9 @@ export type PanelEngine<Reference extends PanelReference = PanelReference> =
       update: NoInfer<Update>;
     }) => UpdatePanelOutcome;
     close: (command?: { target?: PanelInstanceRef }) => ClosePanelOutcome;
+    setPresentation: (command: {
+      breakpoint: CanvasBreakpoint;
+    }) => PresentationOutcome;
     registerLifecycle: (command: {
       target: PanelInstanceRef;
       lifecycle: PanelLifecycle;
@@ -559,6 +580,152 @@ const navigationDocumentSchemaVersion = 1;
 const maximumNavigationDocumentBytes = 16_384;
 const maximumNavigationDocumentPanels = 32;
 const maximumNavigationDescriptorDepth = 32;
+const navigationParameterVersion = 1;
+const navigationParameterPrefix = `v${navigationParameterVersion}.`;
+
+/**
+ * The query parameter name a URL-Owning Canvas Workspace claims by default.
+ */
+export const navigationParameterName = "canvas";
+
+/**
+ * The longest supported navigation parameter value, derived from the
+ * Navigation Document byte limit once base64url expansion is applied.
+ */
+export const maximumNavigationParameterLength =
+  navigationParameterPrefix.length +
+  Math.ceil((maximumNavigationDocumentBytes * 4) / 3);
+
+export type NavigationParameterDiagnostic = Readonly<{
+  code:
+    | "missing-prefix"
+    | "unsupported-parameter-version"
+    | "parameter-too-large"
+    | "invalid-base64url"
+    | "invalid-utf8";
+  path: string;
+}>;
+
+export type NavigationParameterDecodeOutcome =
+  | Readonly<{ status: "decoded"; document: string }>
+  | Readonly<{ status: "rejected"; diagnostic: NavigationParameterDiagnostic }>;
+
+const base64urlAlphabet =
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+const base64urlSextets = new Map(
+  [...base64urlAlphabet].map((character, sextet) => [character, sextet]),
+);
+
+function encodeBase64Url(bytes: Uint8Array): string {
+  let encoded = "";
+  for (let index = 0; index < bytes.length; index += 3) {
+    const first = bytes[index] as number;
+    const second = bytes[index + 1];
+    const third = bytes[index + 2];
+    encoded += base64urlAlphabet[first >> 2];
+    encoded += base64urlAlphabet[((first & 0b11) << 4) | ((second ?? 0) >> 4)];
+    if (second === undefined) break;
+    encoded +=
+      base64urlAlphabet[((second & 0b1111) << 2) | ((third ?? 0) >> 6)];
+    if (third === undefined) break;
+    encoded += base64urlAlphabet[third & 0b111111];
+  }
+  return encoded;
+}
+
+function decodeBase64Url(encoded: string): Uint8Array | null {
+  // A single trailing sextet cannot complete a byte, so it is never canonical.
+  if (encoded.length === 0 || encoded.length % 4 === 1) return null;
+  const bytes = new Uint8Array(Math.floor((encoded.length * 3) / 4));
+  let byteLength = 0;
+  let accumulator = 0;
+  let bits = 0;
+  for (const character of encoded) {
+    const sextet = base64urlSextets.get(character);
+    if (sextet === undefined) return null;
+    accumulator = (accumulator << 6) | sextet;
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      bytes[byteLength] = (accumulator >> bits) & 0xff;
+      byteLength += 1;
+    }
+  }
+  // Reject non-canonical encodings whose discarded padding bits are set.
+  if (bits > 0 && (accumulator & ((1 << bits) - 1)) !== 0) return null;
+  return bytes.subarray(0, byteLength);
+}
+
+/**
+ * Wraps an encoded Navigation Document as a versioned, namespaced navigation
+ * parameter value suitable for a URL query string.
+ */
+export function encodeNavigationParameter(document: string): string {
+  if (utf8ByteLength(document) > maximumNavigationDocumentBytes) {
+    throw new RangeError("Navigation Document exceeds the byte limit");
+  }
+  const bytes = new TextEncoder().encode(document);
+  return `${navigationParameterPrefix}${encodeBase64Url(bytes)}`;
+}
+
+/**
+ * Unwraps a navigation parameter value into the encoded Navigation Document it
+ * carries. Document-level validation remains the Panel Engine's responsibility.
+ */
+export function decodeNavigationParameter(
+  value: string,
+): NavigationParameterDecodeOutcome {
+  const reject = (
+    code: NavigationParameterDiagnostic["code"],
+  ): NavigationParameterDecodeOutcome =>
+    Object.freeze({
+      status: "rejected",
+      diagnostic: Object.freeze({ code, path: "$" }),
+    } as const);
+
+  if (typeof value !== "string") return reject("missing-prefix");
+  const prefix = /^v(\d+)\./.exec(value);
+  if (!prefix) return reject("missing-prefix");
+  if (prefix[1] !== String(navigationParameterVersion)) {
+    return reject("unsupported-parameter-version");
+  }
+  if (value.length > maximumNavigationParameterLength) {
+    return reject("parameter-too-large");
+  }
+  const bytes = decodeBase64Url(value.slice(prefix[0].length));
+  if (!bytes) return reject("invalid-base64url");
+  let document: string;
+  try {
+    document = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    return reject("invalid-utf8");
+  }
+  return Object.freeze({ status: "decoded", document } as const);
+}
+
+/**
+ * Resolves which Panels the declared breakpoint presents. Desktop presents the
+ * whole ordered stack, tablet adds one previous-context Panel to the Active
+ * Panel, and mobile presents the Active Panel alone.
+ */
+function resolveVisiblePanelIds(
+  panels: readonly OpenPanel[],
+  activePanelId: PanelInstanceId,
+  breakpoint: CanvasBreakpoint,
+): readonly PanelInstanceId[] {
+  if (breakpoint === "desktop") {
+    return Object.freeze(panels.map(({ instanceId }) => instanceId));
+  }
+  const activeIndex = panels.findIndex(
+    ({ instanceId }) => instanceId === activePanelId,
+  );
+  const previousContext = breakpoint === "tablet" ? 1 : 0;
+  return Object.freeze(
+    panels
+      .slice(Math.max(0, activeIndex - previousContext), activeIndex + 1)
+      .map(({ instanceId }) => instanceId),
+  );
+}
 
 function utf8ByteLength(value: string): number {
   let bytes = 0;
@@ -1007,6 +1174,7 @@ export function createPanelEngine<
     activePanelId: instanceId,
     deepestPanelId: instanceId,
     visiblePanelIds: Object.freeze([instanceId]),
+    breakpoint: "desktop" as CanvasBreakpoint,
     transition: null,
   }) as PanelEngineSnapshot;
   const listeners = new Set<() => void>();
@@ -1106,9 +1274,12 @@ export function createPanelEngine<
       panels: Object.freeze(panels),
       activePanelId,
       deepestPanelId: deepestPanel.instanceId,
-      visiblePanelIds: Object.freeze(
-        panels.map(({ instanceId: visiblePanelId }) => visiblePanelId),
+      visiblePanelIds: resolveVisiblePanelIds(
+        panels,
+        activePanelId,
+        snapshot.breakpoint,
       ),
+      breakpoint: snapshot.breakpoint,
       transition: snapshot.transition,
     });
     notifySubscribers();
@@ -1514,6 +1685,31 @@ export function createPanelEngine<
     subscribe: (listener: () => void) => {
       listeners.add(listener);
       return () => listeners.delete(listener);
+    },
+    setPresentation: ({ breakpoint }) => {
+      if (!canvasBreakpoints.includes(breakpoint)) {
+        return Object.freeze({
+          status: "rejected",
+          reason: "unsupported-breakpoint",
+        } as const);
+      }
+      if (breakpoint === snapshot.breakpoint) {
+        return Object.freeze({ status: "unchanged", breakpoint } as const);
+      }
+      // Presentation is not a stack change: the Panel Stack, activation, and
+      // transition history are carried across unchanged and the Stack Version
+      // is deliberately not advanced.
+      snapshot = Object.freeze({
+        ...snapshot,
+        visiblePanelIds: resolveVisiblePanelIds(
+          snapshot.panels,
+          snapshot.activePanelId,
+          breakpoint,
+        ),
+        breakpoint,
+      });
+      notifySubscribers();
+      return Object.freeze({ status: "updated", breakpoint } as const);
     },
     registerLifecycle: ({ target, lifecycle }) => {
       const panel = snapshot.panels.find(

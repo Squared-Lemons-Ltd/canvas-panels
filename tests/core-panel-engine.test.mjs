@@ -4,8 +4,10 @@ import test from "node:test";
 
 import {
   createPanelEngine,
+  decodeNavigationParameter,
   definePanel,
   defineRootPanel,
+  encodeNavigationParameter,
 } from "../packages/canvas-panels/dist/core/index.js";
 
 function targetFor(engine, panelId) {
@@ -2499,4 +2501,204 @@ test("an aborted restoration retains navigation-only Panels before the next load
     reason: "aborted",
     failedPanelIndex: 1,
   });
+});
+
+test("a Navigation Document round-trips through the versioned navigation parameter", () => {
+  const document =
+    '{"panels":[{"descriptor":{"id":"section-a"},"kind":"section","version":1}],"version":1}';
+  const parameter = encodeNavigationParameter(document);
+
+  assert.match(parameter, /^v1\.[A-Za-z0-9_-]+$/);
+  assert.equal(parameter.includes("="), false);
+  assert.deepEqual(decodeNavigationParameter(parameter), {
+    status: "decoded",
+    document,
+  });
+});
+
+test("the navigation parameter encodes non-ASCII descriptors without padding", () => {
+  const document = '{"panels":[],"version":1,"note":"Ada — Lovelace ✓"}';
+  const parameter = encodeNavigationParameter(document);
+
+  assert.match(parameter, /^v1\.[A-Za-z0-9_-]+$/);
+  assert.equal(decodeNavigationParameter(parameter).document, document);
+});
+
+test("the navigation parameter rejects malformed values with typed diagnostics", () => {
+  const rejections = [
+    ["", "missing-prefix"],
+    ["eyJwYW5lbHMiOltdfQ", "missing-prefix"],
+    ["v2.eyJwYW5lbHMiOltdfQ", "unsupported-parameter-version"],
+    ["v1.", "invalid-base64url"],
+    ["v1.not base64url!", "invalid-base64url"],
+    ["v1.eyJwYW5lbHMiOltdfQ==", "invalid-base64url"],
+    [`v1.${"A".repeat(30_000)}`, "parameter-too-large"],
+  ];
+
+  for (const [value, code] of rejections) {
+    const outcome = decodeNavigationParameter(value);
+    assert.equal(
+      outcome.status,
+      "rejected",
+      `expected ${value} to be rejected`,
+    );
+    assert.deepEqual(outcome.diagnostic, { code, path: "$" });
+  }
+});
+
+test("the navigation parameter refuses to encode an oversized Navigation Document", () => {
+  const oversized = `{"panels":[],"version":1,"pad":"${"a".repeat(17_000)}"}`;
+
+  assert.throws(
+    () => encodeNavigationParameter(oversized),
+    /Navigation Document exceeds the byte limit/,
+  );
+});
+
+test("the navigation parameter rejects encoded bytes that are not valid UTF-8", () => {
+  const outcome = decodeNavigationParameter("v1._w");
+
+  assert.equal(outcome.status, "rejected");
+  assert.deepEqual(outcome.diagnostic, { code: "invalid-utf8", path: "$" });
+});
+
+function openThreePanelStack() {
+  const root = defineRootPanel({ kind: "classes", title: "Classes" });
+  const classPanel = definePanel({
+    kind: "class",
+    deduplication: "reuse",
+    key: ({ classId }) => classId,
+    title: ({ name }) => name,
+  });
+  const learner = definePanel({
+    kind: "learner",
+    deduplication: "allow-many",
+    title: ({ name }) => name,
+  });
+  const engine = createPanelEngine({ root, panels: [classPanel, learner] });
+  engine.open({
+    originId: engine.getSnapshot().activePanelId,
+    panel: classPanel.reference({ classId: "a", name: "A" }),
+  });
+  engine.open({
+    originId: engine.getSnapshot().activePanelId,
+    panel: learner.reference({ learnerId: "ada", name: "Ada" }),
+  });
+  return { engine, classPanel, learner };
+}
+
+test("a Canvas presents every Panel on desktop by default", () => {
+  const { engine } = openThreePanelStack();
+  const snapshot = engine.getSnapshot();
+
+  assert.equal(snapshot.breakpoint, "desktop");
+  assert.deepEqual(
+    snapshot.visiblePanelIds,
+    snapshot.panels.map(({ instanceId }) => instanceId),
+  );
+});
+
+test("tablet presents the Active Panel plus one previous-context Panel", () => {
+  const { engine } = openThreePanelStack();
+
+  assert.deepEqual(engine.setPresentation({ breakpoint: "tablet" }), {
+    status: "updated",
+    breakpoint: "tablet",
+  });
+
+  const snapshot = engine.getSnapshot();
+  assert.deepEqual(
+    snapshot.visiblePanelIds,
+    snapshot.panels.slice(1).map(({ instanceId }) => instanceId),
+  );
+});
+
+test("mobile presents exactly one interactive focused Panel", () => {
+  const { engine } = openThreePanelStack();
+  engine.setPresentation({ breakpoint: "mobile" });
+  const snapshot = engine.getSnapshot();
+
+  assert.deepEqual(snapshot.visiblePanelIds, [snapshot.activePanelId]);
+  assert.equal(snapshot.visiblePanelIds.length, 1);
+});
+
+test("a Root-only Canvas presents the Root Panel at every breakpoint", () => {
+  const root = defineRootPanel({ kind: "classes", title: "Classes" });
+  const engine = createPanelEngine({ root, panels: [] });
+
+  for (const breakpoint of ["desktop", "tablet", "mobile"]) {
+    engine.setPresentation({ breakpoint });
+    const snapshot = engine.getSnapshot();
+    assert.deepEqual(snapshot.visiblePanelIds, [snapshot.activePanelId]);
+  }
+});
+
+test("changing presentation never mutates stack, activation, or transition state", () => {
+  const { engine } = openThreePanelStack();
+  const before = engine.getSnapshot();
+
+  engine.setPresentation({ breakpoint: "mobile" });
+  engine.setPresentation({ breakpoint: "tablet" });
+  engine.setPresentation({ breakpoint: "desktop" });
+  const after = engine.getSnapshot();
+
+  assert.equal(after.version, before.version);
+  assert.equal(after.panels, before.panels);
+  assert.equal(after.activePanelId, before.activePanelId);
+  assert.equal(after.deepestPanelId, before.deepestPanelId);
+  assert.equal(after.transition, before.transition);
+  assert.deepEqual(after.visiblePanelIds, before.visiblePanelIds);
+});
+
+test("re-declaring the current breakpoint is a no-op that does not notify", () => {
+  const { engine } = openThreePanelStack();
+  engine.setPresentation({ breakpoint: "mobile" });
+  const snapshot = engine.getSnapshot();
+  let notifications = 0;
+  engine.subscribe(() => {
+    notifications += 1;
+  });
+
+  assert.deepEqual(engine.setPresentation({ breakpoint: "mobile" }), {
+    status: "unchanged",
+    breakpoint: "mobile",
+  });
+  assert.equal(notifications, 0);
+  assert.equal(engine.getSnapshot(), snapshot);
+});
+
+test("activating an earlier Panel re-resolves visibility at the current breakpoint", () => {
+  const { engine } = openThreePanelStack();
+  engine.setPresentation({ breakpoint: "mobile" });
+  const rootRef = engine.getSnapshot().panels[0].instanceRef;
+
+  engine.activate({ target: rootRef });
+  const snapshot = engine.getSnapshot();
+
+  assert.equal(snapshot.activePanelId, rootRef.instanceId);
+  assert.deepEqual(snapshot.visiblePanelIds, [rootRef.instanceId]);
+  assert.equal(snapshot.panels.length, 3);
+});
+
+test("an unsupported breakpoint is rejected without changing presentation", () => {
+  const { engine } = openThreePanelStack();
+  engine.setPresentation({ breakpoint: "tablet" });
+
+  assert.deepEqual(engine.setPresentation({ breakpoint: "watch" }), {
+    status: "rejected",
+    reason: "unsupported-breakpoint",
+  });
+  assert.equal(engine.getSnapshot().breakpoint, "tablet");
+});
+
+test("subscribers observe a breakpoint change exactly once", () => {
+  const { engine } = openThreePanelStack();
+  let notifications = 0;
+  engine.subscribe(() => {
+    notifications += 1;
+  });
+
+  engine.setPresentation({ breakpoint: "mobile" });
+
+  assert.equal(notifications, 1);
 });

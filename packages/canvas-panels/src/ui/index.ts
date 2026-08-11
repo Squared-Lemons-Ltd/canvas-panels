@@ -17,6 +17,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import {
+  type CanvasBreakpoint,
   createPanelEngine,
   type DeepReadonly,
   type OpenPanel,
@@ -32,6 +33,49 @@ import {
   type RootPanelDefinition,
 } from "../core/index.js";
 import { type CanvasBinding, createCanvasBindings } from "../react/index.js";
+
+/**
+ * The media queries that select each declared breakpoint, ordered from the
+ * narrowest presentation to the widest. They are part of the Public Contract so
+ * applications can align their own layout with the Canvas.
+ */
+export const canvasBreakpointQueries: readonly (readonly [
+  CanvasBreakpoint,
+  string,
+])[] = Object.freeze([
+  Object.freeze(["mobile", "(max-width: 47.999rem)"] as const),
+  Object.freeze([
+    "tablet",
+    "(min-width: 48rem) and (max-width: 79.999rem)",
+  ] as const),
+  Object.freeze(["desktop", "(min-width: 80rem)"] as const),
+]);
+
+/**
+ * Observes the declared breakpoints and reports presentation changes to the
+ * Panel Engine. Environments without `matchMedia` — servers and pre-hydration
+ * renders — present the desktop Canvas, which the stylesheet mirrors so the
+ * first paint never flashes the wrong presentation.
+ */
+function useBreakpointPresentation<Reference extends PanelReference>(
+  engine: PanelEngine<Reference>,
+): void {
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const lists = canvasBreakpointQueries.map(
+      ([breakpoint, query]) => [breakpoint, window.matchMedia(query)] as const,
+    );
+    const apply = () => {
+      const matched = lists.find(([, list]) => list.matches);
+      engine.setPresentation({ breakpoint: matched?.[0] ?? "desktop" });
+    };
+    apply();
+    for (const [, list] of lists) list.addEventListener("change", apply);
+    return () => {
+      for (const [, list] of lists) list.removeEventListener("change", apply);
+    };
+  }, [engine]);
+}
 
 type WorkspaceHierarchy = Readonly<{
   reportPending: (workspaceId: string, pending: boolean) => void;
@@ -208,12 +252,21 @@ export type CanvasWorkspaceProps = Readonly<{
   label: string;
 }>;
 
-export type CanvasModuleProviderProps = Readonly<{
+export type CanvasModuleProviderProps<
+  Reference extends PanelReference = PanelReference,
+> = Readonly<{
   children: ReactNode;
+  /**
+   * An application-owned Panel Engine. Supply one when the Canvas Workspace
+   * must exist before it is rendered — restoring a deep link, for instance,
+   * has to seed the stack ahead of the first paint. Omit it and the Bound
+   * Canvas Module creates and owns its own engine.
+   */
+  engine?: PanelEngine<Reference>;
 }>;
 
 type InternalCanvasModuleProviderProps<Reference extends PanelReference> =
-  CanvasModuleProviderProps & Readonly<{ engine?: PanelEngine<Reference> }>;
+  CanvasModuleProviderProps<Reference>;
 
 export type CanvasPanelReadModel<
   Descriptor = unknown,
@@ -274,7 +327,7 @@ export type BoundCanvasModule<
   Signal = never,
 > = Readonly<{
   Action: ComponentType<CanvasActionProps>;
-  Provider: ComponentType<CanvasModuleProviderProps>;
+  Provider: ComponentType<CanvasModuleProviderProps<Reference>>;
   Workspace: ComponentType<CanvasWorkspaceProps>;
   useNavigation: () => CanvasNavigation<Reference, RegisteredDefinition>;
   usePanel: {
@@ -915,8 +968,9 @@ export function createCanvasModule<
   }
 
   function Workspace({ label }: CanvasWorkspaceProps) {
-    const { snapshot, close, registerLifecycle, resolveTransition } =
+    const { snapshot, activate, close, registerLifecycle, resolveTransition } =
       bindings.useCanvas();
+    useBreakpointPresentation(bindings.useEngine());
     const workspaceId = useId();
     const parentWorkspace = useContext(WorkspaceHierarchyContext);
     const signalStore = useContext(SignalStoreContext);
@@ -1100,6 +1154,40 @@ export function createCanvasModule<
       return () => window.removeEventListener("beforeunload", preventUnload);
     }, [dirtyPanelIds]);
 
+    // A retained Panel that leaves the current presentation must not keep the
+    // browser's focus, or keyboard users would be stranded on inert content.
+    const activeIndex = snapshot.panels.findIndex(
+      ({ instanceId }) => instanceId === snapshot.activePanelId,
+    );
+
+    // Where focus belongs once the presentation changes: the Active Panel when
+    // it is still shown, otherwise the deepest Panel the presentation kept.
+    const focusRefugeHeadingId = (() => {
+      const refugeId = snapshot.visiblePanelIds.includes(snapshot.activePanelId)
+        ? snapshot.activePanelId
+        : snapshot.visiblePanelIds.at(-1);
+      const index = snapshot.panels.findIndex(
+        ({ instanceId }) => instanceId === refugeId,
+      );
+      return index < 0 ? null : `${workspaceId}-panel-${index}-heading`;
+    })();
+
+    // A retained Panel that leaves the current presentation must not keep the
+    // browser's focus, or keyboard users would be stranded on inert content.
+    const visiblePanelIds = snapshot.visiblePanelIds;
+    useEffect(() => {
+      const focused = document.activeElement;
+      if (!(focused instanceof HTMLElement)) return;
+      const owner = focused
+        .closest("[data-canvas-panel]")
+        ?.getAttribute("data-canvas-panel-id");
+      if (!owner || visiblePanelIds.includes(owner as PanelInstanceId)) return;
+      const heading = focusRefugeHeadingId
+        ? document.getElementById(focusRefugeHeadingId)
+        : null;
+      (heading ?? application.current)?.focus();
+    }, [visiblePanelIds, focusRefugeHeadingId]);
+
     const rememberFocus = useCallback(() => {
       returnFocus.current =
         typeof document !== "undefined" &&
@@ -1118,12 +1206,66 @@ export function createCanvasModule<
           "div",
           {
             "aria-label": label,
+            "data-canvas-breakpoint": snapshot.breakpoint,
             "data-canvas-workspace": "",
             role: "region",
           },
+          snapshot.breakpoint !== "mobile"
+            ? null
+            : createElement(
+                "nav",
+                {
+                  "aria-label": `${label} navigation`,
+                  "data-canvas-mobile-navigation": "",
+                },
+                activeIndex > 0
+                  ? createElement(
+                      "button",
+                      {
+                        "data-canvas-back": "",
+                        onClick: () => {
+                          rememberFocus();
+                          const previous = snapshot.panels[activeIndex - 1];
+                          if (previous)
+                            activate({ target: previous.instanceRef });
+                        },
+                        type: "button",
+                      },
+                      "Back",
+                    )
+                  : null,
+                createElement(
+                  "ol",
+                  { "data-canvas-breadcrumbs": "" },
+                  ...snapshot.panels
+                    .slice(0, activeIndex + 1)
+                    .map((panel, breadcrumbIndex) =>
+                      createElement(
+                        "li",
+                        { key: panel.instanceId },
+                        createElement(
+                          "button",
+                          {
+                            "aria-current":
+                              breadcrumbIndex === activeIndex
+                                ? "page"
+                                : undefined,
+                            onClick: () => {
+                              rememberFocus();
+                              activate({ target: panel.instanceRef });
+                            },
+                            type: "button",
+                          },
+                          panel.title,
+                        ),
+                      ),
+                    ),
+                ),
+              ),
           createElement(
             "div",
             {
+              "data-canvas-application": "",
               "data-testid": "canvas-panels-application",
               "aria-hidden": deepestTransition ? true : undefined,
               inert: deepestTransition ? true : undefined,
@@ -1131,6 +1273,10 @@ export function createCanvasModule<
             },
             snapshot.panels.map((panel, panelIndex) => {
               const headingId = `${workspaceId}-panel-${panelIndex}-heading`;
+              const visible = snapshot.visiblePanelIds.includes(
+                panel.instanceId,
+              );
+              const active = panel.instanceId === snapshot.activePanelId;
               const Renderer = renderers[panel.kind];
               if (!Renderer) {
                 throw new Error(
@@ -1162,13 +1308,16 @@ export function createCanvasModule<
               return createElement(
                 "section",
                 {
+                  "aria-hidden": visible ? undefined : true,
                   "aria-labelledby": headingId,
-                  "data-active":
-                    panel.instanceId === snapshot.activePanelId
-                      ? ""
-                      : undefined,
+                  "data-active": active ? "" : undefined,
                   "data-canvas-panel": "",
+                  "data-canvas-panel-context":
+                    visible && !active ? "previous" : undefined,
+                  "data-canvas-panel-id": panel.instanceId,
                   "data-panel-kind": panel.kind,
+                  hidden: !visible,
+                  inert: !visible,
                   key: panel.instanceId,
                   onBlurCapture: (event) => {
                     if (!event.currentTarget.contains(event.relatedTarget))
@@ -1230,21 +1379,25 @@ export function createCanvasModule<
                       ),
                 ),
                 createElement(
-                  PanelRendererBoundary,
-                  {
-                    kind: panel.kind,
-                    panel: panel.instanceRef,
-                    ...(config.onRendererError
-                      ? { onError: config.onRendererError }
-                      : {}),
-                  },
-                  createElement(ScopedRenderer, {
-                    Renderer,
-                    panel,
-                    registerAction,
-                    registerHeader,
-                    registerLifecycle: registerWorkspaceLifecycle,
-                  }),
+                  "div",
+                  { "data-canvas-panel-body": "" },
+                  createElement(
+                    PanelRendererBoundary,
+                    {
+                      kind: panel.kind,
+                      panel: panel.instanceRef,
+                      ...(config.onRendererError
+                        ? { onError: config.onRendererError }
+                        : {}),
+                    },
+                    createElement(ScopedRenderer, {
+                      Renderer,
+                      panel,
+                      registerAction,
+                      registerHeader,
+                      registerLifecycle: registerWorkspaceLifecycle,
+                    }),
+                  ),
                 ),
               );
             }),

@@ -416,60 +416,33 @@ svg {
   margin-right: auto;
 }
 
+/*
+ * The Canvas is themed entirely through the package's documented `--canvas-*`
+ * tokens. Nothing here reaches into the package's private `[data-canvas-*]`
+ * selectors, which is the same integration boundary a real consumer keeps.
+ */
 [data-canvas-workspace] {
-  position: relative;
-}
-[data-canvas-workspace] > [data-testid="canvas-panels-application"] {
-  background: #f8f8f3;
-  display: flex;
-  min-height: 610px;
-  overflow-x: auto;
-}
-[data-canvas-panel] {
-  background: #f8f8f3;
-  border-right: 1px solid var(--line);
-  flex: 0 0 min(390px, 84vw);
-  min-width: 0;
-  transition: flex-basis 300ms ease;
-}
-[data-canvas-panel][data-active] {
-  background: #fff;
-  flex-basis: min(580px, 90vw);
-}
-[data-canvas-panel-header] {
-  align-items: center;
-  border-bottom: 1px solid var(--line);
-  display: flex;
-  min-height: 62px;
-  padding: 0 22px;
-}
-[data-canvas-panel-header] h2 {
+  --canvas-surface: #f8f8f3;
+  --canvas-surface-active: #fff;
+  --canvas-border: var(--line);
+  --canvas-text: var(--ink);
+  --canvas-text-muted: var(--muted);
+
+  --canvas-panel-width: min(390px, 84vw);
+  --canvas-panel-active-width: min(580px, 90vw);
+  --canvas-panel-min-height: 610px;
+
+  --canvas-header-min-height: 62px;
+  --canvas-header-padding-inline: 22px;
+
+  --canvas-action-surface-hover: var(--ink);
+  --canvas-action-text: var(--muted);
+  --canvas-action-text-hover: #fff;
+  --canvas-action-padding: 7px 10px;
+  --canvas-transition-duration: 160ms;
+
   font-size: 14px;
-  font-weight: 600;
   letter-spacing: -0.02em;
-  margin: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-[data-canvas-panel-header] button {
-  background: transparent;
-  border: 1px solid var(--line);
-  border-radius: 99px;
-  color: #59625d;
-  cursor: pointer;
-  font-family: var(--mono);
-  font-size: 8px;
-  margin-left: auto;
-  padding: 7px 10px;
-  text-transform: uppercase;
-  transition:
-    background 160ms ease,
-    color 160ms ease;
-}
-[data-canvas-panel-header] button:hover {
-  background: var(--ink);
-  color: white;
 }
 .panel-intro {
   padding: 28px 22px 18px;
@@ -764,16 +737,23 @@ svg {
   margin-top: 10px;
 }
 
+/*
+ * Guarded-transition dialog polish. The package owns the dialog's scrim,
+ * width, padding, and radius through tokens; the decorative rules below stay
+ * showcase-owned until the accessibility slice (#26) tokenizes dialog chrome.
+ */
+[data-canvas-workspace] {
+  --canvas-surface-overlay: rgba(20, 29, 25, 0.58);
+  --canvas-dialog-width: min(100%, 470px);
+  --canvas-dialog-padding: 30px;
+  --canvas-radius: 7px;
+}
 [data-canvas-transition-backdrop] {
   backdrop-filter: blur(8px);
-  background: rgba(20, 29, 25, 0.58);
 }
 [data-canvas-transition-dialog] {
   border: 0;
-  border-radius: 7px;
   box-shadow: 0 30px 90px rgba(0, 0, 0, 0.3);
-  max-width: 470px;
-  padding: 30px;
 }
 [data-canvas-transition-dialog]::before {
   background: var(--lime);
@@ -837,19 +817,14 @@ svg {
   line-height: 1.7;
 }
 .isolation-lab [data-canvas-workspace] {
+  --canvas-panel-min-height: 350px;
+  --canvas-panel-width: min(300px, 80vw);
+  --canvas-panel-active-width: min(390px, 86vw);
+
   border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 5px;
   color: var(--ink);
   overflow: hidden;
-}
-.isolation-lab [data-testid="canvas-panels-application"] {
-  min-height: 350px;
-}
-.isolation-lab [data-canvas-panel] {
-  flex-basis: min(300px, 80vw);
-}
-.isolation-lab [data-canvas-panel][data-active] {
-  flex-basis: min(390px, 86vw);
 }
 .isolation-lab .panel-intro {
   padding-top: 18px;
@@ -1052,11 +1027,10 @@ textarea:focus-visible {
     animation: none;
   }
 
+  /* The package disables its own Canvas motion under reduced motion. */
   .skip-link,
   .site-header nav a,
   .hero-primary,
-  [data-canvas-panel],
-  [data-canvas-panel-header] button,
   .project-row,
   .editor-panel textarea {
     transition: none;

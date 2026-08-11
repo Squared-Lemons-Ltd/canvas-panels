@@ -11,7 +11,10 @@ const allowedLayers = new Map([
   ["core", new Set()],
   ["react", new Set(["core"])],
   ["ui", new Set(["core", "react"])],
-  ["next", new Set(["core", "react"])],
+  // The client adapter may build on the server-safe adapter because
+  // `next-server` is isomorphic; the reverse direction stays forbidden so
+  // server entry points never pull in client-only code.
+  ["next", new Set(["core", "react", "next-server"])],
   ["next-server", new Set(["core"])],
   ["editor", new Set(["core", "react"])],
   ["resources", new Set(["core", "react"])],

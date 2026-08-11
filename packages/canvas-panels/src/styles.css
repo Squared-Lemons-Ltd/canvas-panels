@@ -1,27 +1,259 @@
+/*
+ * Canvas Panels compiled stylesheet.
+ *
+ * Everything lives in the `canvas-panels` cascade layer, so any application
+ * rule written outside a layer wins without needing higher specificity. The
+ * stylesheet ships no preflight and no utility classes: it never resets host
+ * elements and never needs a consumer Tailwind scan.
+ *
+ * Applications theme the Canvas by redeclaring the documented `--canvas-*`
+ * tokens on any ancestor of the Workspace. The private `[data-canvas-*]`
+ * attributes below are implementation detail; token overrides are the
+ * supported integration seam.
+ */
 @layer canvas-panels {
+  [data-canvas-workspace] {
+    /* Surfaces */
+    --canvas-surface: Canvas;
+    --canvas-surface-active: Canvas;
+    --canvas-surface-overlay: rgb(0 0 0 / 45%);
+    --canvas-border: color-mix(in srgb, CanvasText 18%, transparent);
+    --canvas-text: CanvasText;
+    --canvas-text-muted: color-mix(in srgb, CanvasText 65%, transparent);
+
+    /* Panel metrics */
+    --canvas-panel-width: min(24rem, 84vw);
+    --canvas-panel-active-width: min(36rem, 90vw);
+    --canvas-panel-min-height: 24rem;
+    --canvas-panel-gap: 0;
+
+    /* Chrome metrics */
+    --canvas-header-min-height: 3.5rem;
+    --canvas-header-padding-inline: 1.25rem;
+    --canvas-body-padding: 0;
+    --canvas-radius: 0.75rem;
+    --canvas-dialog-width: min(100%, 32rem);
+    --canvas-dialog-padding: 1.5rem;
+
+    /* Header actions */
+    --canvas-action-surface: transparent;
+    --canvas-action-surface-hover: color-mix(
+      in srgb,
+      CanvasText 10%,
+      transparent
+    );
+    --canvas-action-text: var(--canvas-text-muted);
+    --canvas-action-text-hover: var(--canvas-text);
+    --canvas-action-text-destructive: color-mix(in srgb, red 70%, CanvasText);
+    --canvas-action-border: var(--canvas-border);
+    --canvas-action-radius: 99px;
+    --canvas-action-padding: 0.4rem 0.7rem;
+
+    /* Motion */
+    --canvas-transition-duration: 300ms;
+    --canvas-transition-easing: ease;
+
+    color: var(--canvas-text);
+    display: flex;
+    flex-direction: column;
+    position: relative;
+  }
+
+  /* The Canvas scrolls horizontally within itself; the document never does. */
+  [data-canvas-application] {
+    background: var(--canvas-surface);
+    display: flex;
+    gap: var(--canvas-panel-gap);
+    max-width: 100%;
+    min-height: var(--canvas-panel-min-height);
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+  }
+
+  [data-canvas-panel] {
+    background: var(--canvas-surface);
+    border-right: 1px solid var(--canvas-border);
+    display: flex;
+    flex: 0 0 var(--canvas-panel-width);
+    flex-direction: column;
+    min-width: 0;
+    transition: flex-basis var(--canvas-transition-duration)
+      var(--canvas-transition-easing);
+  }
+
+  [data-canvas-panel][data-active] {
+    background: var(--canvas-surface-active);
+    flex-basis: var(--canvas-panel-active-width);
+  }
+
+  /*
+   * Retained Panels outside the current presentation stay mounted so their
+   * scroll position and component state survive, but take no layout space.
+   */
+  [data-canvas-panel][hidden] {
+    display: none;
+  }
+
+  [data-canvas-panel-header] {
+    align-items: center;
+    border-bottom: 1px solid var(--canvas-border);
+    display: flex;
+    flex: 0 0 auto;
+    gap: 0.5rem;
+    min-height: var(--canvas-header-min-height);
+    padding-inline: var(--canvas-header-padding-inline);
+  }
+
+  [data-canvas-panel-header] h2 {
+    font: inherit;
+    font-weight: 600;
+    margin: 0;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  [data-canvas-dirty-label] {
+    color: var(--canvas-text-muted);
+  }
+
+  [data-canvas-panel-header] button,
+  [data-canvas-mobile-navigation] button {
+    background: var(--canvas-action-surface);
+    border: 1px solid var(--canvas-action-border);
+    border-radius: var(--canvas-action-radius);
+    color: var(--canvas-action-text);
+    cursor: pointer;
+    font: inherit;
+    padding: var(--canvas-action-padding);
+    transition:
+      background var(--canvas-transition-duration)
+      var(--canvas-transition-easing),
+      color var(--canvas-transition-duration) var(--canvas-transition-easing);
+  }
+
+  [data-canvas-panel-header] button {
+    margin-inline-start: auto;
+  }
+
+  [data-canvas-panel-header] button + button {
+    margin-inline-start: 0;
+  }
+
+  [data-canvas-panel-header] button:hover,
+  [data-canvas-mobile-navigation] button:hover {
+    background: var(--canvas-action-surface-hover);
+    color: var(--canvas-action-text-hover);
+  }
+
+  [data-canvas-panel-header] button[disabled] {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+
+  [data-canvas-panel-header] button[data-destructive] {
+    color: var(--canvas-action-text-destructive);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    [data-canvas-panel-header] button,
+    [data-canvas-mobile-navigation] button {
+      transition: none;
+    }
+  }
+
+  /* Each Panel body scrolls on its own so headers stay visible. */
+  [data-canvas-panel-body] {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: var(--canvas-body-padding);
+  }
+
+  [data-canvas-mobile-navigation] {
+    align-items: center;
+    border-bottom: 1px solid var(--canvas-border);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    padding: 0.5rem var(--canvas-header-padding-inline);
+  }
+
+  [data-canvas-breadcrumbs] {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    list-style: none;
+    margin: 0;
+    min-width: 0;
+    padding: 0;
+  }
+
+  [data-canvas-breadcrumbs] li + li::before {
+    color: var(--canvas-text-muted);
+    content: "/";
+    padding-inline-end: 0.25rem;
+  }
+
+  [data-canvas-breadcrumbs] [aria-current="page"] {
+    font-weight: 600;
+  }
+
+  /*
+   * Narrow presentations give the focused Panel the full Canvas width. The
+   * queries mirror `canvasBreakpointQueries`, so the first paint matches the
+   * presentation the Panel Engine resolves once it hydrates.
+   */
+  @media (max-width: 79.999rem) {
+    [data-canvas-panel],
+    [data-canvas-panel][data-active] {
+      flex-basis: 100%;
+    }
+
+    [data-canvas-panel][data-canvas-panel-context="previous"] {
+      flex-basis: 35%;
+    }
+  }
+
+  @media (max-width: 47.999rem) {
+    [data-canvas-panel],
+    [data-canvas-panel][data-active] {
+      border-right: 0;
+      flex-basis: 100%;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    [data-canvas-panel] {
+      transition: none;
+    }
+  }
+
   [data-canvas-transition-backdrop] {
-    position: fixed;
-    inset: 0;
-    z-index: 1000;
+    background: var(--canvas-surface-overlay, rgb(0 0 0 / 45%));
     display: grid;
-    place-items: center;
+    inset: 0;
     padding: 1rem;
-    background: rgb(0 0 0 / 45%);
+    place-items: center;
+    position: fixed;
+    z-index: 1000;
   }
 
   [data-canvas-transition-dialog] {
-    width: min(100%, 32rem);
-    padding: 1.5rem;
-    border-radius: 0.75rem;
     background: Canvas;
-    color: CanvasText;
+    border-radius: var(--canvas-radius, 0.75rem);
     box-shadow: 0 1rem 3rem rgb(0 0 0 / 25%);
+    color: CanvasText;
+    padding: var(--canvas-dialog-padding, 1.5rem);
+    width: var(--canvas-dialog-width, min(100%, 32rem));
   }
 
   [data-canvas-transition-actions] {
     display: flex;
     flex-wrap: wrap;
-    justify-content: flex-end;
     gap: 0.5rem;
+    justify-content: flex-end;
   }
 }

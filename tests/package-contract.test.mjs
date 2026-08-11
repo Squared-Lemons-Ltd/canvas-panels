@@ -136,6 +136,40 @@ test("workspace fixtures build as applications through package subpaths only", a
   }
 });
 
+test("the Next fixture proves deep links across the server and client boundary", async () => {
+  const [page, canvas, panels] = await Promise.all([
+    readFile(join(root, "apps/next-fixture/app/canvas/page.tsx"), "utf8"),
+    readFile(
+      join(root, "apps/next-fixture/app/canvas/classes-canvas.tsx"),
+      "utf8",
+    ),
+    readFile(join(root, "apps/next-fixture/app/canvas/panels.ts"), "utf8"),
+  ]);
+
+  // The route entry stays a Server Component that decodes navigation state.
+  assert.doesNotMatch(page, /^(?:"use client"|'use client');/);
+  assert.match(page, /@squaredlemons\/canvas-panels\/next\/server/);
+  assert.match(page, /readCanvasNavigationState/);
+  assert.doesNotMatch(page, /@squaredlemons\/canvas-panels\/(?:ui|react)\b/);
+
+  // The client half seeds before first render and then owns URL synchronization.
+  assert.match(canvas, /^(?:"use client"|'use client');/);
+  assert.match(canvas, /@squaredlemons\/canvas-panels\/next"/);
+  assert.match(canvas, /seedCanvasNavigation/);
+  assert.match(canvas, /useCanvasNavigationSync/);
+  assert.match(canvas, /from "next\/navigation"/);
+
+  // Persistent Panel Kinds are required for a deep link to reconstruct at all.
+  assert.match(panels, /mode: "navigation"/);
+
+  for (const source of [page, canvas, panels]) {
+    assert.doesNotMatch(
+      source,
+      /packages\/canvas-panels\/src|\.\.\/\.\.\/packages/,
+    );
+  }
+});
+
 test("continuous integration runs every delivery-path gate on Node 22 and 24", async () => {
   const workflow = await readFile(
     join(root, ".github/workflows/ci.yml"),
