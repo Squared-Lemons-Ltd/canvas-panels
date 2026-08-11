@@ -158,6 +158,30 @@ The optional, package-owned coordinator that turns what an application reports a
 
 One run of a Panel Editor's save, discard, or reload, carrying the abort signal that cancels it and the Guarded Transition that asked for it—or `null` when the application asked directly. Only one runs at a time: an operation the coordinator wants and the application has already started is joined rather than run twice, and anything else waits for it to settle. An operation that was cancelled is not a failure.
 
+## Resource
+
+Anything an application's Panels show that more than one of them may be showing at once. It is entirely application-owned: Canvas Panels never learns what a Resource is, where it comes from, or who may see it—only that two Panels are looking at the same one.
+
+## Resource Key
+
+The opaque, application-defined name of one Resource, written as `/`-separated segments. Canvas Panels compares Resource Keys and nothing else: it never parses a segment, resolves what one names, fetches it, caches it, or decides who may see it. A subscription names either an exact Resource Key or a pattern in which `*` stands for exactly one segment in any position.
+
+## Resource Invalidation
+
+The announcement that the Resource one Resource Key names has changed or been deleted. It carries the publisher's own opaque token, so whoever made the change is not told to re-read it, and it says whether the Resource Keys nested beneath it are invalidated too. Propagation runs downward only: whether a parent's change means its children changed is the application's judgement, so the publisher makes it, and a child's change never implies anything about its parent.
+
+## Resource Exchange
+
+The optional, package-owned point where the Panels of one Canvas Workspace tell each other that a Resource they show has changed or gone. Recipients are fixed when an invalidation is published and delivered in publication order, so a Panel that publishes in response to being told never interleaves with the delivery that told it. It owns no fetching, cache, repository, permission, or domain schema, and a Workspace nested inside a Panel can be given its own so nothing it publishes leaves it.
+
+## Panel Resource
+
+The optional, package-owned coordinator that turns one Panel's Resource Keys, its own report of whether it has unsaved work, and the re-read it supplies into the decision of when what the Panel hears may replace what it is showing. It owns no fetching, cache, repository, permission, or domain schema, and it registers no lifecycle of its own: it defers to what the Panel's Panel Editor—or the Panel itself—already reports. It is imported from its own subpath, and no base entry point can reach it.
+
+## Deferred Reload
+
+A Resource Invalidation a Panel has heard and not yet applied. Only one case reads on a Panel's behalf: a change reaching a Panel with nothing to lose and a re-read to run. Unsaved work is held, because an invalidation must never be the reason a human loses what they typed—the Panel's ordinary lifecycle settles the edit, and the held read follows by itself. A deletion is held because it is a decision rather than a refresh, and is superseded only by news about the same Resource. A read that failed is held rather than retried.
+
 ## Context Signal
 
 An optional, application-typed, in-memory value published by a mounted Panel for an application-selected Context Target. Canvas Panels stores and selects the value but does not interpret, serialize, log, announce, or infer it from rendered content.

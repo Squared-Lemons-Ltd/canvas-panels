@@ -6,6 +6,13 @@ import {
   type EditorStatus,
   usePanelEditor,
 } from "@squaredlemons/canvas-panels/extensions/editor";
+import {
+  createResourceExchange,
+  ResourceExchangeProvider,
+  usePanelResource,
+  useResourceExchange,
+  useResourceSubscription,
+} from "@squaredlemons/canvas-panels/extensions/resources";
 import "@squaredlemons/canvas-panels/styles.css";
 import {
   type CanvasPanelLifecycle,
@@ -44,10 +51,28 @@ type BriefInput = Readonly<{
   title: string;
   initial: string;
 }>;
+type CollaboratorInput = Readonly<{
+  personId: string;
+  name: string;
+  role: string;
+}>;
 
 type PortfolioRenderProps = CanvasPanelRenderProps<undefined, "portfolio">;
 type ProjectRenderProps = CanvasPanelRenderProps<ProjectInput, "project">;
 type BriefRenderProps = CanvasPanelRenderProps<BriefInput, "brief">;
+type CollaboratorRenderProps = CanvasPanelRenderProps<
+  CollaboratorInput,
+  "collaborator"
+>;
+
+/**
+ * The showcase's opaque Resource Keys. Canvas Panels never parses one: these
+ * shapes are the studio's own, and only this file knows what they mean.
+ */
+const projectKey = (projectId: string) => `projects/${projectId}`;
+const briefKey = (projectId: string, briefId: string) =>
+  `projects/${projectId}/briefs/${briefId}`;
+const personKey = (personId: string) => `people/${personId}`;
 
 const projects: readonly Project[] = [
   {
@@ -85,7 +110,34 @@ const projects: readonly Project[] = [
   },
 ];
 
-const BriefStoreContext = createContext<Map<string, string> | null>(null);
+/**
+ * The studio's own records. The package stores none of this: it carries the
+ * keys that name it and leaves reading and writing to the application.
+ */
+type StudioRecords = Readonly<{
+  briefs: Map<string, string>;
+  names: Map<string, string>;
+  archived: Set<string>;
+}>;
+
+const StudioRecordsContext = createContext<StudioRecords | null>(null);
+
+function createStudioRecords(): StudioRecords {
+  return {
+    archived: new Set<string>(),
+    briefs: new Map<string, string>(),
+    names: new Map<string, string>(),
+  };
+}
+
+function useStudioRecords(): StudioRecords {
+  const records = useContext(StudioRecordsContext);
+  if (!records) {
+    throw new Error("Showcase Panels require a Workspace-owned record store");
+  }
+  return records;
+}
+
 const portfolio = defineRootPanel({ kind: "portfolio", title: "Portfolio" });
 const projectPanel = definePanel({
   kind: "project",
@@ -97,6 +149,12 @@ const briefPanel = definePanel({
   kind: "brief",
   deduplication: "allow-many",
   title: (input: BriefInput) => input.title,
+});
+const collaboratorPanel = definePanel({
+  kind: "collaborator",
+  deduplication: "reuse",
+  key: (input: CollaboratorInput) => input.personId,
+  title: (input: CollaboratorInput) => input.name,
 });
 
 function Icon({
@@ -126,8 +184,80 @@ function Icon({
   );
 }
 
+const atlasBriefKey = briefKey("atlas", "atlas-direction");
+
+/**
+ * Stands in for a change made by someone else, or pushed by a service. It
+ * publishes without a source, so every subscribed Panel hears it.
+ */
+function StudioActivity({ heard }: Readonly<{ heard: number }>) {
+  const records = useStudioRecords();
+  const exchange = useResourceExchange();
+
+  return (
+    <div className="studio-activity">
+      <span className="eyebrow">Elsewhere in the studio</span>
+      <p>
+        Open Atlas and its brief first, then watch what each panel does with
+        what it hears.
+      </p>
+      <div className="editor-actions">
+        <button
+          onClick={() => {
+            records.names.set("atlas", "Atlas Field Guide, second edition");
+            exchange.publish({ key: projectKey("atlas"), kind: "changed" });
+          }}
+          type="button"
+        >
+          Rename Atlas
+        </button>
+        <button
+          onClick={() => {
+            records.briefs.set(
+              atlasBriefKey,
+              "Rewritten elsewhere: lead with the field, not the guide.",
+            );
+            exchange.publish({ key: atlasBriefKey, kind: "changed" });
+          }}
+          type="button"
+        >
+          Rewrite the Atlas brief
+        </button>
+        <button
+          onClick={() => {
+            records.archived.add("atlas");
+            exchange.publish({
+              key: projectKey("atlas"),
+              kind: "deleted",
+              nested: true,
+            });
+          }}
+          type="button"
+        >
+          Archive Atlas
+        </button>
+      </div>
+      <p className="activity-count">
+        This list has re-read {heard} {heard === 1 ? "time" : "times"}.
+      </p>
+    </div>
+  );
+}
+
 function PortfolioPanel(_: PortfolioRenderProps) {
   const navigation = ShowcaseCanvas.useNavigation();
+  const records = useStudioRecords();
+  const [heard, setHeard] = useState(0);
+
+  // The list shows every project, so it listens on every project key. It has
+  // no draft of its own, so what it hears it simply re-reads.
+  useResourceSubscription({
+    keys: ["projects/*"],
+    notify: () => setHeard((count) => count + 1),
+  });
+
+  const listed = projects.filter(({ id }) => !records.archived.has(id));
+
   return (
     <div className="portfolio-panel">
       <div className="panel-intro">
@@ -138,14 +268,14 @@ function PortfolioPanel(_: PortfolioRenderProps) {
         </p>
       </div>
       <div className="project-list">
-        {projects.map((project, index) => (
+        {listed.map((project, index) => (
           <button
             className="project-row"
             key={project.id}
             onClick={() =>
               navigation.open(projectPanel, {
                 projectId: project.id,
-                name: project.name,
+                name: records.names.get(project.id) ?? project.name,
               })
             }
             style={{ "--project-accent": project.accent } as CSSProperties}
@@ -153,7 +283,7 @@ function PortfolioPanel(_: PortfolioRenderProps) {
           >
             <span className="project-index">0{index + 1}</span>
             <span className="project-copy">
-              <strong>{project.name}</strong>
+              <strong>{records.names.get(project.id) ?? project.name}</strong>
               <small>{project.client}</small>
             </span>
             <span className="project-stage">{project.stage}</span>
@@ -163,25 +293,50 @@ function PortfolioPanel(_: PortfolioRenderProps) {
           </button>
         ))}
       </div>
+      <StudioActivity heard={heard} />
     </div>
   );
 }
 
-function ProjectPanel({ descriptor: input }: ProjectRenderProps) {
+function ProjectPanel({ descriptor: input, panel }: ProjectRenderProps) {
   const navigation = ShowcaseCanvas.useNavigation();
+  const records = useStudioRecords();
   const project = projects.find(({ id }) => id === input.projectId);
   if (!project) throw new Error(`Unknown showcase project: ${input.projectId}`);
+  const key = projectKey(input.projectId);
+  const [name, setName] = useState(
+    () => records.names.get(input.projectId) ?? project.name,
+  );
+
+  // Nothing here is unsaved, so a change is simply re-read. A deletion is not:
+  // the panel is told, and a human decides what to do about it.
+  const resource = usePanelResource({
+    keys: [key],
+    reload: async () => {
+      await pause(serviceLatency);
+      setName(records.names.get(input.projectId) ?? project.name);
+    },
+    source: panel.instanceId,
+  });
+
   return (
     <div
       className="project-panel"
       style={{ "--project-accent": project.accent } as CSSProperties}
     >
+      {resource.deleted ? (
+        <p className="editor-notice" role="status">
+          This project was archived elsewhere. Nothing has been taken away from
+          you — close the panel when you are ready.
+        </p>
+      ) : null}
       <div className="project-hero">
         <div>
           <span className="status-pill">
             <i />
-            {project.stage}
+            {resource.reloading ? "Re-reading…" : project.stage}
           </span>
+          <h3 className="project-name">{name}</h3>
           <p className="project-client">{project.client}</p>
           <p className="project-summary">{project.summary}</p>
         </div>
@@ -211,6 +366,21 @@ function ProjectPanel({ descriptor: input }: ProjectRenderProps) {
           <dd>Studio team</dd>
         </div>
       </dl>
+      <div className="editor-actions">
+        <button
+          onClick={() => {
+            const renamed = `${project.name} (renamed here)`;
+            records.names.set(input.projectId, renamed);
+            setName(renamed);
+            // Published under this panel's own token, so the Portfolio list
+            // re-reads and this panel is not told to re-read what it just did.
+            resource.publish({ key, kind: "changed" });
+          }}
+          type="button"
+        >
+          Rename in this panel
+        </button>
+      </div>
       <div className="brief-card">
         <div className="brief-icon">
           <Icon name="edit" />
@@ -262,12 +432,13 @@ const briefOperationSentences: Readonly<
   saving: "Publishing your changes…",
 };
 
-function BriefPanel({ descriptor: input }: BriefRenderProps) {
-  const savedBriefs = useContext(BriefStoreContext);
+function BriefPanel({ descriptor: input, panel }: BriefRenderProps) {
+  const records = useStudioRecords();
+  const exchange = useResourceExchange();
+  const navigation = ShowcaseCanvas.useNavigation();
   const editorId = useId();
-  if (!savedBriefs) {
-    throw new Error("Showcase briefs require a Workspace-owned store");
-  }
+  const savedBriefs = records.briefs;
+  const key = briefKey(input.projectId, input.briefId);
   // `null` until the brief has been read: the application owns the read, and
   // only tells the extension that one is in progress.
   const [published, setPublished] = useState<string | null>(null);
@@ -280,14 +451,14 @@ function BriefPanel({ descriptor: input }: BriefRenderProps) {
     void (async () => {
       await pause(serviceLatency);
       if (!current) return;
-      const stored = savedBriefs.get(input.briefId) ?? input.initial;
+      const stored = savedBriefs.get(key) ?? input.initial;
       setPublished(stored);
       setDraft(stored);
     })();
     return () => {
       current = false;
     };
-  }, [input.briefId, input.initial, savedBriefs]);
+  }, [input.initial, key, savedBriefs]);
 
   const editor = usePanelEditor({
     dirty: published !== null && draft !== published,
@@ -297,7 +468,7 @@ function BriefPanel({ descriptor: input }: BriefRenderProps) {
     loading: published === null,
     reload: async () => {
       await pause(serviceLatency);
-      const stored = savedBriefs.get(input.briefId) ?? input.initial;
+      const stored = savedBriefs.get(key) ?? input.initial;
       setPublished(stored);
       setDraft(stored);
     },
@@ -306,12 +477,30 @@ function BriefPanel({ descriptor: input }: BriefRenderProps) {
       if (refuseNextSave) {
         throw new Error("The studio service refused the change.");
       }
-      savedBriefs.set(input.briefId, draft);
+      savedBriefs.set(key, draft);
       setPublished(draft);
+      // Everyone else showing this brief re-reads it; this panel does not,
+      // because the invalidation carries its own token.
+      exchange.publish({ key, kind: "changed", source: panel.instanceId });
     },
   });
 
   useShowcaseLifecycle({ ...editor.lifecycle, dirtyLabel: "Unsaved" });
+
+  // The editor already refuses to reload over unsaved work, so the coordinator
+  // composes with it rather than deciding again: an operation part-way through
+  // is as much in the way as a half-written draft.
+  const resource = usePanelResource({
+    dirty: editor.dirty || editor.busy,
+    keys: [key],
+    reload: async () => {
+      const outcome = await editor.reload({ discardChanges: true });
+      if (outcome.status !== "completed") {
+        throw new Error("The brief could not be read again.");
+      }
+    },
+    source: panel.instanceId,
+  });
 
   const words = useMemo(
     () => draft.trim().split(/\s+/).filter(Boolean).length,
@@ -369,6 +558,19 @@ function BriefPanel({ descriptor: input }: BriefRenderProps) {
         </p>
       ) : null}
       {notice ? <p className="editor-notice">{notice}</p> : null}
+      {resource.pending ? (
+        <p className="editor-notice" role="status">
+          {resource.pending.kind === "deleted"
+            ? "The project this brief belongs to was archived elsewhere. Your draft is untouched."
+            : "This brief changed elsewhere while you were working. Your draft is untouched."}
+          <button onClick={() => void resource.apply()} type="button">
+            Take the new version
+          </button>
+          <button onClick={resource.dismiss} type="button">
+            Keep editing
+          </button>
+        </p>
+      ) : null}
       <div className="editor-actions">
         <button
           disabled={editor.busy || !editor.dirty}
@@ -413,6 +615,21 @@ function BriefPanel({ descriptor: input }: BriefRenderProps) {
           Make the next publish fail
         </label>
       </div>
+      <div className="editor-actions">
+        <button
+          className="link-action"
+          onClick={() =>
+            navigation.open(collaboratorPanel, {
+              name: "Ada Lovelace",
+              personId: "ada",
+              role: "Editorial lead",
+            })
+          }
+          type="button"
+        >
+          Open the editorial lead
+        </button>
+      </div>
       <div className="editor-footer">
         <span>{words} words</span>
         <span>Try editing, then use the panel’s Close control.</span>
@@ -421,18 +638,69 @@ function BriefPanel({ descriptor: input }: BriefRenderProps) {
   );
 }
 
+/**
+ * The unrelated Panel. It shows a person, not a project, so nothing published
+ * about a project reaches it however deeply that change propagates.
+ */
+function CollaboratorPanel({
+  descriptor: input,
+  panel,
+}: CollaboratorRenderProps) {
+  const [heard, setHeard] = useState(0);
+  const resource = usePanelResource({
+    keys: [personKey(input.personId)],
+    reload: async () => {
+      await pause(serviceLatency);
+      setHeard((count) => count + 1);
+    },
+    source: panel.instanceId,
+  });
+
+  return (
+    <div className="collaborator-panel">
+      <div className="panel-intro">
+        <span className="eyebrow">{input.role}</span>
+        <p>
+          This panel listens on <code>{personKey(input.personId)}</code> and
+          nothing else. Rename, rewrite, or archive Atlas from the Portfolio
+          panel: the project and its brief will react, and this will not.
+        </p>
+      </div>
+      <dl className="project-meta">
+        <div>
+          <dt>Listening on</dt>
+          <dd>{personKey(input.personId)}</dd>
+        </div>
+        <div>
+          <dt>Re-reads</dt>
+          <dd>{heard}</dd>
+        </div>
+        <div>
+          <dt>Waiting</dt>
+          <dd>{resource.pending ? resource.pending.kind : "nothing"}</dd>
+        </div>
+      </dl>
+    </div>
+  );
+}
+
 const ShowcaseCanvas = createCanvasModule({
   root: portfolio,
-  panels: [projectPanel, briefPanel],
+  panels: [projectPanel, briefPanel, collaboratorPanel],
   renderers: {
     portfolio: PortfolioPanel,
     project: ProjectPanel,
     brief: BriefPanel,
+    collaborator: CollaboratorPanel,
   },
 });
 
-const primaryBriefs = new Map<string, string>();
-const isolatedBriefs = new Map<string, string>();
+const primaryRecords = createStudioRecords();
+const isolatedRecords = createStudioRecords();
+// One exchange per Workspace, so the sandbox below hears nothing the primary
+// Workspace publishes and publishes nothing into it.
+const primaryExchange = createResourceExchange();
+const isolatedExchange = createResourceExchange();
 
 function StackTelemetry() {
   const stack = ShowcaseCanvas.useStack();
@@ -569,30 +837,35 @@ function Showcase() {
               <span>studio.canvas.local / portfolio</span>
               <span className="secure-label">Interactive demo</span>
             </div>
-            <BriefStoreContext.Provider value={primaryBriefs}>
-              <ShowcaseCanvas.Provider>
-                <StackTelemetry />
-                <ShowcaseCanvas.Workspace label="Studio portfolio workspace" />
-                <div className="isolation-lab" id="architecture">
-                  <div className="isolation-copy">
-                    <span className="eyebrow">
-                      <Icon name="layers" /> Nested isolation
-                    </span>
-                    <h3>A workspace inside a workspace.</h3>
-                    <p>
-                      This compact canvas owns an independent engine, stack,
-                      identity, version, and saved draft state. Actions here
-                      never leak into the primary workspace.
-                    </p>
+            <StudioRecordsContext.Provider value={primaryRecords}>
+              <ResourceExchangeProvider exchange={primaryExchange}>
+                <ShowcaseCanvas.Provider>
+                  <StackTelemetry />
+                  <ShowcaseCanvas.Workspace label="Studio portfolio workspace" />
+                  <div className="isolation-lab" id="architecture">
+                    <div className="isolation-copy">
+                      <span className="eyebrow">
+                        <Icon name="layers" /> Nested isolation
+                      </span>
+                      <h3>A workspace inside a workspace.</h3>
+                      <p>
+                        This compact canvas owns an independent engine, stack,
+                        identity, version, saved draft state, and resource
+                        exchange. Actions here never leak into the primary
+                        workspace.
+                      </p>
+                    </div>
+                    <StudioRecordsContext.Provider value={isolatedRecords}>
+                      <ResourceExchangeProvider exchange={isolatedExchange}>
+                        <ShowcaseCanvas.Provider>
+                          <ShowcaseCanvas.Workspace label="Isolated portfolio sandbox" />
+                        </ShowcaseCanvas.Provider>
+                      </ResourceExchangeProvider>
+                    </StudioRecordsContext.Provider>
                   </div>
-                  <BriefStoreContext.Provider value={isolatedBriefs}>
-                    <ShowcaseCanvas.Provider>
-                      <ShowcaseCanvas.Workspace label="Isolated portfolio sandbox" />
-                    </ShowcaseCanvas.Provider>
-                  </BriefStoreContext.Provider>
-                </div>
-              </ShowcaseCanvas.Provider>
-            </BriefStoreContext.Provider>
+                </ShowcaseCanvas.Provider>
+              </ResourceExchangeProvider>
+            </StudioRecordsContext.Provider>
           </div>
         </section>
 

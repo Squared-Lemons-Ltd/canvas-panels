@@ -137,11 +137,11 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createPanelEngine, definePanel, defineRootPanel } from "@squaredlemons/canvas-panels/core";
 import { createPanelEditor, editorGuardMessages, resolveEditorGuard } from "@squaredlemons/canvas-panels/extensions/editor";
+import { createPanelResource, createResourceExchange, resolveResourceDeferral } from "@squaredlemons/canvas-panels/extensions/resources";
 import { createCanvasModule, defineCanvasContext } from "@squaredlemons/canvas-panels/ui";
 
 await Promise.all([
   import("@squaredlemons/canvas-panels/react"),
-  import("@squaredlemons/canvas-panels/extensions/resources"),
   import("@squaredlemons/canvas-panels/overlay"),
   import("@squaredlemons/canvas-panels/testing"),
 ]);
@@ -367,6 +367,72 @@ if (forcedReload.status !== "completed" || record !== "reloaded") {
   throw new Error("packed editor reload did not re-read its record");
 }
 console.log("verified packed editor extension consumer");
+
+const exchange = createResourceExchange();
+const listHeard = [];
+const unrelatedHeard = [];
+exchange.subscribe({ keys: ["projects/*"], notify: ({ key }) => listHeard.push(key) });
+exchange.subscribe({ keys: ["people/ada"], notify: () => unrelatedHeard.push("person") });
+let projectRecord = "Atlas";
+const projectResource = createPanelResource({
+  exchange,
+  keys: ["projects/atlas"],
+  source: "packed-project-panel",
+  reload: async () => { projectRecord = "Atlas, second edition"; },
+});
+projectResource.start();
+let briefRecord = "Confident";
+const briefOptions = {
+  exchange,
+  keys: ["projects/atlas/briefs/direction"],
+  source: "packed-brief-panel",
+  dirty: true,
+  reload: async () => { briefRecord = "Rewritten elsewhere"; },
+};
+const briefResource = createPanelResource(briefOptions);
+briefResource.start();
+
+const announced = exchange.publish({
+  key: "projects/atlas",
+  kind: "changed",
+  nested: true,
+  source: "packed-project-panel",
+});
+if (announced.notified !== 2) {
+  throw new Error("packed exchange did not address the related consumers exactly");
+}
+if (listHeard.length !== 1 || listHeard[0] !== "projects/atlas") {
+  throw new Error("packed wildcard subscription did not hear the change");
+}
+if (unrelatedHeard.length !== 0) throw new Error("packed unrelated consumer was disturbed");
+if (projectRecord !== "Atlas") throw new Error("packed publisher was told to re-read its own work");
+if (briefRecord !== "Confident" || briefResource.getState().pending?.key !== "projects/atlas") {
+  throw new Error("packed dirty consumer did not defer the nested change");
+}
+briefResource.update({ ...briefOptions, dirty: false });
+await Promise.resolve();
+if (briefRecord !== "Rewritten elsewhere" || briefResource.getState().pending !== null) {
+  throw new Error("packed deferred read did not follow the settled edit");
+}
+
+exchange.publish({ key: "projects/atlas", kind: "deleted" });
+if (!projectResource.getState().deleted || projectRecord !== "Atlas") {
+  throw new Error("packed deletion was applied without being asked");
+}
+const applied = await projectResource.apply();
+if (applied.status !== "applied" || projectRecord !== "Atlas, second edition") {
+  throw new Error("packed consumer could not apply what it was holding");
+}
+if (resolveResourceDeferral({
+  dirty: true,
+  failed: false,
+  pending: applied.invalidation,
+  reloadable: true,
+  reloading: false,
+}) !== "hold") {
+  throw new Error("packed resource deferral lost its ordering");
+}
+console.log("verified packed resource extension consumer");
 `,
   );
   await run(
