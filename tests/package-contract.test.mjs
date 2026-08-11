@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
+  collectFiles,
   distributionSubpaths,
   optionalSubpathsReachedFromBaseEntryPoints,
   reachableModules,
@@ -186,6 +187,91 @@ test("overlay definitions and factories exist only on the overlay subpath", asyn
   }
 });
 
+test("the testing tools cost an importer the Panel Engine and nothing else", async () => {
+  const { external, modules } = await reachableModules(
+    join(distribution, "testing/index.js"),
+  );
+
+  // The tools speak every other layer's contracts through types alone, so the
+  // testing subpath stays server-safe and never drags React — or the Canvas —
+  // into a bundle. Only the Declared Breakpoints are needed at runtime.
+  assert.deepEqual(distributionSubpaths(modules, distribution), [
+    "core/index.js",
+    "testing/index.js",
+  ]);
+  assert.deepEqual([...external].sort(), []);
+});
+
+test("the testing tools export a fake or builder for every published seam", async () => {
+  const testing = await import(
+    pathToFileURL(join(distribution, "testing/index.js")).href
+  );
+
+  // Criterion 1's list, as an assertion: deterministic identity and time, and a
+  // fake or builder for guards, restoration, history, focus, responsiveness,
+  // and the public read models.
+  assert.deepEqual(Object.keys(testing).sort(), [
+    "allowTransition",
+    "blockTransition",
+    "buildNavigationDocument",
+    "buildPanelReadModel",
+    "buildPanelStack",
+    "buildPresentation",
+    "buildTransitionStatus",
+    "confirmTransition",
+    "createTestClock",
+    "createTestFocusTarget",
+    "createTestHistory",
+    "createTestIdentities",
+    "createTestLifecycle",
+    "createTestRestore",
+    "createTestViewport",
+  ]);
+});
+
+test("the testing tools bind to no test runner", async () => {
+  const source = await readFile(join(distribution, "testing/index.js"), "utf8");
+
+  // Runner-neutral means exactly this: nothing here can only run under one
+  // runner, and nothing registers a global hook on import.
+  for (const runner of [
+    "node:test",
+    "vitest",
+    "jest",
+    "@jest/globals",
+    "mocha",
+    "@testing-library",
+  ]) {
+    assert.doesNotMatch(
+      source,
+      new RegExp(`["']${runner.replace(/[/@]/g, "\\$&")}`),
+      `the testing subpath must not import ${runner}`,
+    );
+  }
+  for (const global of ["afterEach(", "beforeEach(", "describe(", "expect("]) {
+    assert.ok(
+      !source.includes(global),
+      `the testing subpath must not call ${global}`,
+    );
+  }
+});
+
+test("the declared breakpoint queries are one value, not a copy per entry point", async () => {
+  const [core, ui] = await Promise.all(
+    ["core/index.js", "ui/index.js"].map(
+      (entry) => import(pathToFileURL(join(distribution, entry)).href),
+    ),
+  );
+
+  // The Canvas re-exports what core declares. Two copies could disagree, and
+  // the testing viewport answers against whichever it was given.
+  assert.equal(ui.canvasBreakpointQueries, core.canvasBreakpointQueries);
+  assert.deepEqual(
+    core.canvasBreakpointQueries.map(([breakpoint]) => breakpoint),
+    ["mobile", "tablet", "desktop"],
+  );
+});
+
 test("the editor extension costs an importer nothing but React", async () => {
   const { external, modules } = await reachableModules(
     join(distribution, "extensions/editor.js"),
@@ -224,6 +310,91 @@ test("neither optional extension can reach the other", async () => {
       [],
       `${entry} must not drag in another extension`,
     );
+  }
+});
+
+test("the distribution is ESM ES2022 throughout, with no global polyfills", async () => {
+  const files = await collectFiles(distribution, (name) =>
+    name.endsWith(".js"),
+  );
+  assert.ok(files.length > 0, "the distribution must be built");
+
+  for (const file of files) {
+    const source = await readFile(file, "utf8");
+    const name = relative(distribution, file);
+
+    // CommonJS in an ESM package is a resolution failure waiting to happen.
+    assert.doesNotMatch(source, /\brequire\s*\(/, `${name} uses require()`);
+    assert.doesNotMatch(source, /\bmodule\.exports\b/, `${name} uses CommonJS`);
+    assert.doesNotMatch(source, /\bexports\.\w/, `${name} uses CommonJS`);
+
+    // Down-levelling below ES2022 is what introduces these helpers, and a
+    // polyfill would mutate a global the host owns.
+    for (const helper of [
+      "__awaiter",
+      "__generator",
+      "__extends",
+      "__assign",
+      "regeneratorRuntime",
+      "core-js",
+    ]) {
+      assert.ok(!source.includes(helper), `${name} ships the ${helper} shim`);
+    }
+    assert.doesNotMatch(
+      source,
+      /globalThis\.\w+\s*=|window\.\w+\s*=\s*window\.\w+\s*\|\|/,
+      `${name} assigns to a global`,
+    );
+  }
+});
+
+test("the package exposes no broad barrel and no wildcard subpath", async () => {
+  const canvasPackage = await readJson("packages/canvas-panels/package.json");
+
+  // A root barrel or a wildcard would make every internal module public and
+  // undo the isolation the optional subpaths exist for.
+  assert.equal(canvasPackage.exports["."], undefined);
+  for (const subpath of Object.keys(canvasPackage.exports)) {
+    assert.ok(
+      !subpath.includes("*"),
+      `${subpath} exposes the distribution by wildcard`,
+    );
+  }
+
+  // Nor may an entry point re-export another entry point wholesale: that is the
+  // same barrel by another name.
+  const entryPoints = Object.values(canvasPackage.exports)
+    .filter((target) => typeof target !== "string")
+    .map((target) => target.import.replace(/^\.\/dist\//, ""));
+  assert.equal(entryPoints.length, 9, "every entry point must be scanned");
+  for (const entry of entryPoints) {
+    const source = await readFile(join(distribution, entry), "utf8");
+    assert.doesNotMatch(
+      source,
+      /export\s+\*\s+from/,
+      `${entry} re-exports a whole module`,
+    );
+  }
+});
+
+test("the package declares no runtime dependency, so a consumer installs one React", async () => {
+  const canvasPackage = await readJson("packages/canvas-panels/package.json");
+
+  // React arrives only as a peer. A dependency or a bundled copy is how a
+  // second React reaches a consumer's tree and breaks hooks.
+  assert.equal(canvasPackage.dependencies, undefined);
+  assert.equal(canvasPackage.bundledDependencies, undefined);
+  assert.equal(canvasPackage.bundleDependencies, undefined);
+  assert.equal(canvasPackage.optionalDependencies, undefined);
+  assert.deepEqual(Object.keys(canvasPackage.peerDependencies).sort(), [
+    "next",
+    "react",
+    "react-dom",
+  ]);
+
+  // Install scripts are the other thing a consumer cannot audit before running.
+  for (const hook of ["preinstall", "install", "postinstall", "prepare"]) {
+    assert.equal(canvasPackage.scripts[hook], undefined);
   }
 });
 

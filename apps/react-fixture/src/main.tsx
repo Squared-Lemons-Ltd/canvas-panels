@@ -150,6 +150,27 @@ const projectPanel = definePanel({
   deduplication: "reuse",
   key: (input: ProjectInput) => input.projectId,
   title: (input: ProjectInput) => input.name,
+  // A re-read that finds a new name has to say so through the Panel's own typed
+  // update, or the header keeps the name captured when the Panel was opened
+  // while the body shows the new one.
+  update: {
+    validate: (value: unknown): value is { type: "rename"; name: string } =>
+      typeof value === "object" &&
+      value !== null &&
+      "type" in value &&
+      (value as { type: unknown }).type === "rename" &&
+      "name" in value &&
+      typeof (value as { name: unknown }).name === "string",
+    validateResult: (value: unknown): value is ProjectInput =>
+      typeof value === "object" &&
+      value !== null &&
+      "projectId" in value &&
+      typeof (value as { projectId: unknown }).projectId === "string" &&
+      "name" in value &&
+      typeof (value as { name: unknown }).name === "string",
+    apply: (current, update) => ({ ...current, name: update.name }),
+    navigation: "replace",
+  },
 });
 const briefPanel = definePanel({
   kind: "brief",
@@ -320,7 +341,14 @@ function ProjectPanel({ descriptor: input, panel }: ProjectRenderProps) {
     keys: [key],
     reload: async () => {
       await pause(serviceLatency);
-      setName(records.names.get(input.projectId) ?? project.name);
+      const current = records.names.get(input.projectId) ?? project.name;
+      setName(current);
+      // The Panel's title is derived from its input, so re-reading the record
+      // is only half the job: the header follows the body through the Panel's
+      // own typed update, which normalizes the address rather than pushing.
+      if (current !== input.name) {
+        navigation.update(projectPanel, { type: "rename", name: current });
+      }
     },
     source: panel.instanceId,
   });

@@ -10,7 +10,7 @@
     "showcase:dev": "pnpm --filter @squaredlemons/canvas-panels build && pnpm --filter @canvas-panels/react-fixture exec vite",
     "format:check": "biome format .",
     "lint": "biome lint . && node scripts/check-boundaries.mjs",
-    "test": "pnpm --filter @squaredlemons/canvas-panels build && node --test tests/canvas-accessibility.test.mjs tests/canvas-interaction.test.mjs tests/core-panel-engine.test.mjs tests/dependency-boundaries.test.mjs tests/editor-extension.test.mjs tests/editor-panel.test.mjs tests/next-adapter.test.mjs tests/next-client-sync.test.mjs tests/next-history-navigation.test.mjs tests/next-history.test.mjs tests/overlay-workspace.test.mjs tests/package-contract.test.mjs tests/react-canvas.test.mjs tests/resource-extension.test.mjs tests/resource-panel.test.mjs tests/responsive-canvas.test.mjs",
+    "test": "pnpm --filter @squaredlemons/canvas-panels build && node --test tests/canvas-accessibility.test.mjs tests/canvas-interaction.test.mjs tests/core-panel-engine.test.mjs tests/dependency-boundaries.test.mjs tests/editor-extension.test.mjs tests/editor-panel.test.mjs tests/next-adapter.test.mjs tests/next-client-sync.test.mjs tests/next-history-navigation.test.mjs tests/next-history.test.mjs tests/overlay-workspace.test.mjs tests/package-contract.test.mjs tests/react-canvas.test.mjs tests/resource-extension.test.mjs tests/resource-panel.test.mjs tests/responsive-canvas.test.mjs tests/testing-tools.test.mjs",
     "typecheck": "pnpm --filter @squaredlemons/canvas-panels build && pnpm -r typecheck && pnpm exec tsc -p tests/types/tsconfig.json",
     "pack:check": "node --test tests/packed-consumers.test.mjs"
   },

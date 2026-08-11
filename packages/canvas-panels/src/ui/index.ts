@@ -25,6 +25,7 @@ import {
 } from "react";
 import {
   type CanvasBreakpoint,
+  canvasBreakpointQueries,
   createPanelEngine,
   type DeepReadonly,
   type OpenPanel,
@@ -75,22 +76,11 @@ export type {
   SizingCommand,
 } from "./interaction.js";
 
-/**
- * The media queries that select each declared breakpoint, ordered from the
- * narrowest presentation to the widest. They are part of the Public Contract so
- * applications can align their own layout with the Canvas.
- */
-export const canvasBreakpointQueries: readonly (readonly [
-  CanvasBreakpoint,
-  string,
-])[] = Object.freeze([
-  Object.freeze(["mobile", "(max-width: 47.999rem)"] as const),
-  Object.freeze([
-    "tablet",
-    "(min-width: 48rem) and (max-width: 79.999rem)",
-  ] as const),
-  Object.freeze(["desktop", "(min-width: 80rem)"] as const),
-]);
+// The breakpoint queries are declared beside the breakpoints themselves in
+// `core`, so a server entry point can read them; the Canvas keeps re-exporting
+// them because this is the entry point an application aligning its own layout
+// already imports.
+export { canvasBreakpointQueries } from "../core/index.js";
 
 /**
  * Observes the declared breakpoints and reports presentation changes to the

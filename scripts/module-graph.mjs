@@ -1,5 +1,27 @@
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
+
+/**
+ * Every file beneath a directory, sorted. The artifact checks all ask the same
+ * question of a whole tree — what is in here? — so they ask it the same way.
+ *
+ * @param {string} directory absolute path to walk
+ * @param {(name: string) => boolean} [accept] filter on the file's basename
+ * @returns {Promise<string[]>} absolute paths, sorted
+ */
+export async function collectFiles(directory, accept = () => true) {
+  const files = [];
+  const walk = async (current) => {
+    for (const entry of await readdir(current, { withFileTypes: true })) {
+      const path = join(current, entry.name);
+      if (entry.isDirectory()) await walk(path);
+      else if (accept(entry.name)) files.push(path);
+    }
+  };
+
+  await walk(directory);
+  return files.sort();
+}
 
 const specifierPatterns = [
   /(?:import|export)\s+(?:[^"']*?\s+from\s+)?["']([^"']+)["']/g,
