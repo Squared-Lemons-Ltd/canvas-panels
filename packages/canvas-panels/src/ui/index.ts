@@ -1348,22 +1348,24 @@ export function createCanvasModule<
     const announcedState = useRef<CanvasAnnouncementState | null>(null);
 
     const bounds = sizing ?? canvasPanelSizingBounds;
-    const [panelWidths, setPanelWidths] = useState<ReadonlyMap<string, number>>(
-      () => new Map(),
-    );
+    const [panelWidths, setPanelWidths] = useState<
+      ReadonlyMap<PanelInstanceId, number>
+    >(() => new Map());
     // The width a Panel had before anyone resized it, which is what a reset
     // returns to. Measured rather than assumed, because the natural width comes
     // from the stylesheet and the application may have retokened it.
-    const naturalWidths = useRef(new Map<string, number>());
-    const drag = useRef<Readonly<{
-      panelId: string;
+    const naturalWidths = useRef(new Map<PanelInstanceId, number>());
+    const drag = useRef<{
+      panelId: PanelInstanceId;
       startX: number;
       startWidth: number;
-    }> | null>(null);
+      /** Whether the drag ever actually moved the edge. */
+      moved: boolean;
+    } | null>(null);
     const [resizing, setResizing] = useState(false);
 
     const panelElement = useCallback(
-      (panelId: string) =>
+      (panelId: PanelInstanceId) =>
         application.current?.querySelector<HTMLElement>(
           `[data-canvas-panel-id="${panelId}"]`,
         ) ?? null,
@@ -1375,10 +1377,10 @@ export function createCanvasModule<
     // stylesheet, which only the browser can resolve, so it is read back after
     // layout rather than assumed to be the minimum.
     const [measuredWidths, setMeasuredWidths] = useState<
-      ReadonlyMap<string, number>
+      ReadonlyMap<PanelInstanceId, number>
     >(() => new Map());
     useLayoutEffect(() => {
-      const measured = new Map<string, number>();
+      const measured = new Map<PanelInstanceId, number>();
       for (const panelId of visiblePanelIds) {
         if (panelWidths.has(panelId) || measuredWidths.has(panelId)) continue;
         const width = application.current?.querySelector<HTMLElement>(
@@ -1394,13 +1396,13 @@ export function createCanvasModule<
     }, [visiblePanelIds, panelWidths, measuredWidths]);
 
     const widthOf = useCallback(
-      (panelId: string) =>
+      (panelId: PanelInstanceId) =>
         panelWidths.get(panelId) ?? measuredWidths.get(panelId) ?? bounds.min,
       [bounds.min, measuredWidths, panelWidths],
     );
 
     const applySizing = useCallback(
-      (panelId: string, command: SizingCommand) => {
+      (panelId: PanelInstanceId, command: SizingCommand) => {
         const element = panelElement(panelId);
         const measured = element?.offsetWidth ?? bounds.min;
         if (!naturalWidths.current.has(panelId)) {
@@ -1676,7 +1678,9 @@ export function createCanvasModule<
                   visiblePanelIds.length < 2
                   ? null
                   : createElement("div", {
-                      "aria-label": `Resize ${panel.title}`,
+                      "aria-label": announcementTemplates.resizeLabel({
+                        title: panel.title,
+                      }),
                       "aria-orientation": "vertical",
                       "aria-valuemax": bounds.max,
                       "aria-valuemin": bounds.min,
@@ -1707,13 +1711,14 @@ export function createCanvasModule<
                         if (!element) return;
                         event.preventDefault();
                         event.currentTarget.setPointerCapture(event.pointerId);
-                        drag.current = Object.freeze({
+                        drag.current = {
                           panelId: panel.instanceId,
                           startX: event.clientX,
                           startWidth:
                             panelWidths.get(panel.instanceId) ??
                             element.offsetWidth,
-                        });
+                          moved: false,
+                        };
                         setResizing(true);
                       },
                       onPointerMove: (
@@ -1721,28 +1726,30 @@ export function createCanvasModule<
                       ) => {
                         const active = drag.current;
                         if (active?.panelId !== panel.instanceId) return;
-                        applySizing(panel.instanceId, {
+                        const outcome = applySizing(panel.instanceId, {
                           to:
                             active.startWidth + (event.clientX - active.startX),
                         });
+                        if (outcome.changed) active.moved = true;
                       },
                       onPointerUp: (
                         event: ReactPointerEvent<HTMLDivElement>,
                       ) => {
-                        if (drag.current?.panelId !== panel.instanceId) return;
+                        const active = drag.current;
+                        if (active?.panelId !== panel.instanceId) return;
                         drag.current = null;
                         setResizing(false);
                         event.currentTarget.releasePointerCapture(
                           event.pointerId,
                         );
                         // A drag announces once it settles, never per pointer
-                        // move, which would be unusable.
+                        // move. A press that moved nothing is not a resize and
+                        // must not claim one.
+                        if (!active.moved) return;
                         setAnnouncement(
                           announcementTemplates.resized({
                             title: panel.title,
-                            size: Math.round(
-                              panelWidths.get(panel.instanceId) ?? bounds.min,
-                            ),
+                            size: Math.round(widthOf(panel.instanceId)),
                           }),
                         );
                       },

@@ -158,6 +158,8 @@ export type CanvasAnnouncementTemplates = Readonly<{
   }) => string;
   /** Announced once a resize settles, never while it is still moving. */
   resized: (values: { title: string; size: number }) => string;
+  /** The accessible name of the handle that resizes a Panel. */
+  resizeLabel: (values: { title: string }) => string;
 }>;
 
 const breakpointNames: Readonly<Record<CanvasBreakpoint, string>> =
@@ -183,6 +185,7 @@ export const canvasAnnouncementTemplates: CanvasAnnouncementTemplates =
     presentation: ({ breakpoint, visible, total }) =>
       `${breakpointNames[breakpoint]} layout. Showing ${visible} of ${total} panels.`,
     resized: ({ title, size }) => `${title} resized to ${size} pixels.`,
+    resizeLabel: ({ title }) => `Resize ${title}`,
   });
 
 export type PanelSizingBounds = Readonly<{

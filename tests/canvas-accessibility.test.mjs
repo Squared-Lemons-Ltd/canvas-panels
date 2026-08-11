@@ -578,6 +578,65 @@ test("the resized Panel actually takes the chosen width", () => {
   assert.equal(panel.style.flexBasis, `${bounds.max}px`);
 });
 
+test("a press that moves nothing does not claim a resize", () => {
+  const canvas = renderCanvas({ sizing: bounds });
+  openClassAndLearner(canvas);
+  const [handle] = separators(canvas.container);
+  // jsdom implements neither half of the pointer capture API.
+  handle.setPointerCapture = () => {};
+  handle.releasePointerCapture = () => {};
+  const before = announcer(canvas.container).textContent;
+
+  act(() => {
+    fireEvent.pointerDown(handle, { pointerId: 1, clientX: 100 });
+  });
+  act(() => {
+    fireEvent.pointerUp(handle, { pointerId: 1, clientX: 100 });
+  });
+
+  // Announcing here would report a width the Panel never had.
+  assert.equal(announcer(canvas.container).textContent, before);
+});
+
+test("a drag announces the width it settled on", () => {
+  const canvas = renderCanvas({ sizing: bounds });
+  openClassAndLearner(canvas);
+  const [handle] = separators(canvas.container);
+  handle.setPointerCapture = () => {};
+  handle.releasePointerCapture = () => {};
+
+  act(() => {
+    fireEvent.pointerDown(handle, { pointerId: 1, clientX: 100 });
+  });
+  act(() => {
+    fireEvent.pointerMove(handle, { pointerId: 1, clientX: 400 });
+  });
+  act(() => {
+    fireEvent.pointerUp(handle, { pointerId: 1, clientX: 400 });
+  });
+
+  const settled = Number(handle.getAttribute("aria-valuenow"));
+  assert.equal(
+    announcer(canvas.container).textContent,
+    `Classes resized to ${settled} pixels.`,
+  );
+});
+
+test("the resize handle's name is localizable like every other sentence", () => {
+  const canvas = renderCanvas({
+    announcements: {
+      ...canvasAnnouncementTemplates,
+      resizeLabel: ({ title }) => `Redimensionner ${title}`,
+    },
+  });
+  openClassAndLearner(canvas);
+
+  assert.equal(
+    separators(canvas.container)[0].getAttribute("aria-label"),
+    "Redimensionner Classes",
+  );
+});
+
 test("the separator leaves keys it does not own to the application", () => {
   const canvas = renderCanvas({ sizing: bounds });
   openClassAndLearner(canvas);

@@ -100,6 +100,18 @@ An adapter that synchronizes a Navigation Document with an external navigation m
 
 The one primary Canvas Workspace explicitly authorised to synchronize its Navigation Document with an application URL namespace.
 
+## Panel Region
+
+One visible Panel considered as a landmark a keyboard user moves between. F6 and Shift+F6 cycle the Panel Regions a presentation is currently showing, wrapping at both ends; a retained but hidden Panel is not a Region, because it is not somewhere focus should be able to land. Region cycling is the only key the Canvas claims: normal DOM Tab order is untouched, and no arrow or letter shortcut is registered globally.
+
+## Canvas Announcement
+
+A sentence the Canvas puts into its single polite live region to describe a structural change—a Panel opening or closing, a Branch Replacement, or a change of presentation. Activation, focus, and sizing are deliberately not announced structurally: they are either already conveyed by focus moving or reported by the control that caused them. Every sentence comes from a replaceable template so a Canvas can be localized, and dialog errors bypass the region entirely, using an assertive status instead.
+
+## Panel Separator
+
+The control on a Panel's trailing edge that resizes it, by pointer or by keyboard. One sizing engine serves both, so the two cannot disagree about clamping or about what counts as a change, and a resize is announced only once it settles.
+
 ## Stack Restoration
 
 Moving a Panel Stack to a named set of Panels in one operation, resolving every affected Transition Guard as a single Guarded Transition and committing atomically. Panels the target stack shares with the current one keep their identity and are never guarded, so restoration disturbs only what actually changes. It is how a Navigation Adapter applies a traversal the browser has already made, and is distinct from Branch Replacement, which is driven by opening from an Origin.
