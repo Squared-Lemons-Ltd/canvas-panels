@@ -1,10 +1,14 @@
 import {
   definePanel,
   defineRootPanel,
-  type PanelLifecycle,
 } from "@squaredlemons/canvas-panels/core";
+import {
+  type EditorStatus,
+  usePanelEditor,
+} from "@squaredlemons/canvas-panels/extensions/editor";
 import "@squaredlemons/canvas-panels/styles.css";
 import {
+  type CanvasPanelLifecycle,
   type CanvasPanelRenderProps,
   createCanvasModule,
 } from "@squaredlemons/canvas-panels/ui";
@@ -13,6 +17,7 @@ import {
   createContext,
   StrictMode,
   useContext,
+  useEffect,
   useId,
   useMemo,
   useState,
@@ -237,9 +242,25 @@ function ProjectPanel({ descriptor: input }: ProjectRenderProps) {
   );
 }
 
-function useShowcaseLifecycle(lifecycle: PanelLifecycle) {
+function useShowcaseLifecycle(lifecycle: CanvasPanelLifecycle) {
   ShowcaseCanvas.useLifecycle(lifecycle);
 }
+
+/** Stands in for the round trip a real studio service would make. */
+function pause(milliseconds: number): Promise<void> {
+  return new Promise((settle) => setTimeout(settle, milliseconds));
+}
+
+const serviceLatency = 320;
+
+const briefOperationSentences: Readonly<
+  Record<Exclude<EditorStatus, "idle">, string>
+> = {
+  discarding: "Discarding your changes…",
+  loading: "Reading the brief…",
+  reloading: "Reading the published brief again…",
+  saving: "Publishing your changes…",
+};
 
 function BriefPanel({ descriptor: input }: BriefRenderProps) {
   const savedBriefs = useContext(BriefStoreContext);
@@ -247,52 +268,151 @@ function BriefPanel({ descriptor: input }: BriefRenderProps) {
   if (!savedBriefs) {
     throw new Error("Showcase briefs require a Workspace-owned store");
   }
-  const saved = savedBriefs.get(input.briefId) ?? input.initial;
-  const [draft, setDraft] = useState(saved);
-  const dirty = draft !== saved;
+  // `null` until the brief has been read: the application owns the read, and
+  // only tells the extension that one is in progress.
+  const [published, setPublished] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
+  const [refuseNextSave, setRefuseNextSave] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    let current = true;
+    void (async () => {
+      await pause(serviceLatency);
+      if (!current) return;
+      const stored = savedBriefs.get(input.briefId) ?? input.initial;
+      setPublished(stored);
+      setDraft(stored);
+    })();
+    return () => {
+      current = false;
+    };
+  }, [input.briefId, input.initial, savedBriefs]);
+
+  const editor = usePanelEditor({
+    dirty: published !== null && draft !== published,
+    discard: async () => {
+      setDraft(published ?? input.initial);
+    },
+    loading: published === null,
+    reload: async () => {
+      await pause(serviceLatency);
+      const stored = savedBriefs.get(input.briefId) ?? input.initial;
+      setPublished(stored);
+      setDraft(stored);
+    },
+    save: async () => {
+      await pause(serviceLatency);
+      if (refuseNextSave) {
+        throw new Error("The studio service refused the change.");
+      }
+      savedBriefs.set(input.briefId, draft);
+      setPublished(draft);
+    },
+  });
+
+  useShowcaseLifecycle({ ...editor.lifecycle, dirtyLabel: "Unsaved" });
+
   const words = useMemo(
     () => draft.trim().split(/\s+/).filter(Boolean).length,
     [draft],
   );
-
-  useShowcaseLifecycle({
-    dirty,
-    guard: () =>
-      dirty
-        ? {
-            status: "confirm",
-            message:
-              "This brief has unpublished changes. Choose what should happen before leaving this context.",
-          }
-        : { status: "allow" },
-    save: async () => {
-      savedBriefs.set(input.briefId, draft);
-    },
-    discard: async () => {
-      savedBriefs.set(input.briefId, saved);
-    },
-  });
+  const statusSentence =
+    editor.status === "idle"
+      ? editor.dirty
+        ? "Unsaved changes"
+        : "All changes published"
+      : briefOperationSentences[editor.status];
+  const reloadBrief = async (discardChanges: boolean) => {
+    setNotice(null);
+    const outcome = await editor.reload({ discardChanges });
+    if (outcome.status === "rejected" && outcome.reason === "unsaved-changes") {
+      setNotice(
+        "Reloading would replace your unsaved changes. Discard them, or choose Reload and lose changes.",
+      );
+    }
+  };
 
   return (
     <div className="editor-panel">
       <div className="editor-toolbar">
         <div>
           <span className="eyebrow">{input.projectName}</span>
-          <p>{dirty ? "Unsaved changes" : "All changes saved"}</p>
+          <p>{statusSentence}</p>
         </div>
-        <span className={dirty ? "save-state is-dirty" : "save-state"}>
-          <i /> {dirty ? "Draft" : "Saved"}
+        <span className={editor.dirty ? "save-state is-dirty" : "save-state"}>
+          <i /> {editor.dirty ? "Draft" : "Published"}
         </span>
       </div>
       <label className="editor-label" htmlFor={editorId}>
         Direction statement
       </label>
       <textarea
+        aria-busy={editor.busy || undefined}
+        disabled={editor.status === "loading"}
         id={editorId}
-        onChange={(event) => setDraft(event.target.value)}
+        onChange={(event) => {
+          setNotice(null);
+          setDraft(event.target.value);
+        }}
         spellCheck="true"
         value={draft}
       />
+      {editor.failure ? (
+        <p className="editor-failure" role="alert">
+          {editor.failure.error instanceof Error
+            ? editor.failure.error.message
+            : "The brief could not be published."}{" "}
+          <button onClick={editor.dismissFailure} type="button">
+            Dismiss
+          </button>
+        </p>
+      ) : null}
+      {notice ? <p className="editor-notice">{notice}</p> : null}
+      <div className="editor-actions">
+        <button
+          disabled={editor.busy || !editor.dirty}
+          onClick={() => {
+            setNotice(null);
+            void editor.save();
+          }}
+          type="button"
+        >
+          Publish
+        </button>
+        <button
+          disabled={editor.busy || !editor.dirty}
+          onClick={() => {
+            setNotice(null);
+            void editor.discard();
+          }}
+          type="button"
+        >
+          Discard
+        </button>
+        <button
+          disabled={editor.busy}
+          onClick={() => void reloadBrief(false)}
+          type="button"
+        >
+          Reload
+        </button>
+        <button
+          disabled={editor.busy || !editor.dirty}
+          onClick={() => void reloadBrief(true)}
+          type="button"
+        >
+          Reload and lose changes
+        </button>
+        <label className="editor-toggle">
+          <input
+            checked={refuseNextSave}
+            onChange={(event) => setRefuseNextSave(event.target.checked)}
+            type="checkbox"
+          />
+          Make the next publish fail
+        </label>
+      </div>
       <div className="editor-footer">
         <span>{words} words</span>
         <span>Try editing, then use the panel’s Close control.</span>

@@ -1,6 +1,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import { dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { importSpecifiers } from "./module-graph.mjs";
 
 const defaultSourceRoot = fileURLToPath(
   new URL("../packages/canvas-panels/src", import.meta.url),
@@ -62,22 +63,6 @@ function layerForPackageSubpath(subpath) {
   if (subpath === "extensions/editor") return "editor";
   if (subpath === "extensions/resources") return "resources";
   return subpath.split("/")[0];
-}
-
-function importSpecifiers(source) {
-  const specifiers = [];
-  const patterns = [
-    /(?:import|export)\s+(?:[^"']*?\s+from\s+)?["']([^"']+)["']/g,
-    /import\s*\(\s*["']([^"']+)["']\s*\)/g,
-  ];
-
-  for (const pattern of patterns) {
-    for (const match of source.matchAll(pattern)) {
-      if (match[1]) specifiers.push(match[1]);
-    }
-  }
-
-  return specifiers;
 }
 
 const violations = [];

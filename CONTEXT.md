@@ -140,6 +140,14 @@ The host-owned catalogue of Panel Kinds and the policies required to present and
 
 The application-specific React namespace produced by closing a Root Panel and a set of Panel definitions into one immutable Panel Registry. It exposes typed providers, components, hooks, commands, read models, and testing helpers without requiring callers to repeat registry generics.
 
+## Panel Editor
+
+The optional, package-owned coordinator that turns what an application reports about its own editing—whether the record is loading, whether the draft is dirty, and how to save, discard, or reload it—into the one lifecycle its Panel registers. It owns no form, schema, repository, server action, permission, or domain content: it decides only how application-owned operations meet a Guarded Transition. A write in flight blocks, because a transition must not commit over a half-written record, and it keeps the Panel guarded even once the draft is clean. Reading never blocks, because a read has nothing to lose. Otherwise unsaved work asks a human and a settled editor allows. It is imported from its own subpath, and no base entry point can reach it.
+
+## Editor Operation
+
+One run of a Panel Editor's save, discard, or reload, carrying the abort signal that cancels it and the Guarded Transition that asked for it—or `null` when the application asked directly. Only one runs at a time: an operation the coordinator wants and the application has already started is joined rather than run twice, and anything else waits for it to settle. An operation that was cancelled is not a failure.
+
 ## Context Signal
 
 An optional, application-typed, in-memory value published by a mounted Panel for an application-selected Context Target. Canvas Panels stores and selects the value but does not interpret, serialize, log, announce, or infer it from rendered content.

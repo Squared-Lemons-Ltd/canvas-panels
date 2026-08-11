@@ -1,10 +1,17 @@
+import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import test from "node:test";
-import assert from "node:assert/strict";
+import { fileURLToPath } from "node:url";
+
+import {
+  distributionSubpaths,
+  extensionsReachedFromBaseEntryPoints,
+  reachableModules,
+} from "../scripts/module-graph.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
+const distribution = join(root, "packages/canvas-panels/dist");
 
 async function readJson(path) {
   return JSON.parse(await readFile(join(root, path), "utf8"));
@@ -102,6 +109,50 @@ test("built client entry points retain use-client while server-safe entries stay
     );
     assert.doesNotMatch(source, /^(?:"use client"|'use client');/);
   }
+});
+
+test("the module graph walker follows the package's own imports", async () => {
+  // The isolation checks below assert an absence, so they would pass just as
+  // happily against a walker that had stopped seeing imports at all. This is
+  // the positive control that keeps them honest.
+  const { external, modules } = await reachableModules(
+    join(distribution, "ui/index.js"),
+  );
+
+  assert.deepEqual(distributionSubpaths(modules, distribution), [
+    "core/index.js",
+    "react/index.js",
+    "ui/index.js",
+    "ui/interaction.js",
+  ]);
+  assert.deepEqual([...external].sort(), ["react"]);
+});
+
+test("no base entry point reaches an optional extension", async () => {
+  const reached = await extensionsReachedFromBaseEntryPoints(distribution);
+
+  assert.ok(reached.size > 0, "base entry points must be checked");
+  for (const [entry, extensions] of reached) {
+    assert.deepEqual(
+      extensions,
+      [],
+      `${entry} must not initialize or bundle an extension`,
+    );
+  }
+});
+
+test("the editor extension costs an importer nothing but React", async () => {
+  const { external, modules } = await reachableModules(
+    join(distribution, "extensions/editor.js"),
+  );
+
+  // The extension speaks the Panel Engine's contracts through types alone, so
+  // importing it pulls in no Canvas module at all — and importing the Canvas
+  // can never pull in the extension.
+  assert.deepEqual(distributionSubpaths(modules, distribution), [
+    "extensions/editor.js",
+  ]);
+  assert.deepEqual([...external].sort(), ["react"]);
 });
 
 test("workspace fixtures build as applications through package subpaths only", async () => {

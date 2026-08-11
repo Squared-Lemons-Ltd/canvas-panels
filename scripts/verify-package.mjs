@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { extensionsReachedFromBaseEntryPoints } from "./module-graph.mjs";
 
 const execFileAsync = promisify(execFile);
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -34,6 +35,24 @@ async function run(command, args, cwd) {
 async function writeJson(path, value) {
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+/**
+ * A consumer that never imports an extension must never pay for one, so the
+ * check runs against the installed tarball rather than the built source.
+ */
+async function assertInstalledExtensionsStayOptional(consumerDirectory) {
+  const reached = await extensionsReachedFromBaseEntryPoints(
+    join(consumerDirectory, "node_modules/@squaredlemons/canvas-panels/dist"),
+  );
+
+  for (const [entry, extensions] of reached) {
+    if (extensions.length > 0) {
+      throw new Error(
+        `packed ${entry} initializes an optional extension: ${extensions.join(", ")}`,
+      );
+    }
+  }
 }
 
 async function assertTarballLockfile(consumerDirectory) {
@@ -117,11 +136,11 @@ try {
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createPanelEngine, definePanel, defineRootPanel } from "@squaredlemons/canvas-panels/core";
+import { createPanelEditor, editorGuardMessages, resolveEditorGuard } from "@squaredlemons/canvas-panels/extensions/editor";
 import { createCanvasModule, defineCanvasContext } from "@squaredlemons/canvas-panels/ui";
 
 await Promise.all([
   import("@squaredlemons/canvas-panels/react"),
-  import("@squaredlemons/canvas-panels/extensions/editor"),
   import("@squaredlemons/canvas-panels/extensions/resources"),
   import("@squaredlemons/canvas-panels/overlay"),
   import("@squaredlemons/canvas-panels/testing"),
@@ -307,6 +326,47 @@ if (closedMarkup.includes("Class B")) throw new Error("packed Class Panel remain
 const stylesheet = await readFile(new URL(import.meta.resolve("@squaredlemons/canvas-panels/styles.css")), "utf8");
 if (!stylesheet.includes("@layer canvas-panels")) throw new Error("missing Canvas stylesheet layer");
 console.log("verified packed React Root-to-Class-to-Learner consumer");
+
+const editorClass = engine.open({
+  originId: rootId,
+  panel: classPanel.reference({ classId: "class-c", name: "Class C" }),
+});
+if (editorClass.status !== "opened") throw new Error("packed editor Class did not open");
+const editorTarget = engine.getSnapshot().panels[1].instanceRef;
+let record = "draft";
+const panelEditor = createPanelEditor({
+  dirty: true,
+  save: async ({ kind, transition }) => {
+    if (kind !== "save" || transition === null) throw new Error("packed editor lost its operation context");
+    record = "saved";
+  },
+  discard: async () => { record = "discarded"; },
+  reload: async () => { record = "reloaded"; },
+});
+if (panelEditor.getState().status !== "idle" || panelEditor.getLifecycle().dirty !== true) {
+  throw new Error("packed editor did not report its unsaved work");
+}
+engine.registerLifecycle({ target: editorTarget, lifecycle: panelEditor.getLifecycle() });
+const editorClose = engine.close({ target: editorTarget });
+if (editorClose.status !== "confirmation-required") throw new Error("packed editor did not ask for a decision");
+const editorResolution = await engine.resolveTransition({ decision: "save" });
+if (editorResolution.status !== "committed" || record !== "saved") {
+  throw new Error("packed editor did not save through the Guarded Transition coordinator");
+}
+if (engine.getSnapshot().panels.length !== 1) throw new Error("packed editor Panel remained after saving");
+const blocked = resolveEditorGuard({ dirty: true, status: "saving" });
+if (blocked.status !== "block" || blocked.reason !== editorGuardMessages.saving) {
+  throw new Error("packed editor guard lost its ordering");
+}
+const refusedReload = await panelEditor.reload();
+if (refusedReload.status !== "rejected" || refusedReload.reason !== "unsaved-changes") {
+  throw new Error("packed editor reload overwrote unsaved work");
+}
+const forcedReload = await panelEditor.reload({ discardChanges: true });
+if (forcedReload.status !== "completed" || record !== "reloaded") {
+  throw new Error("packed editor reload did not re-read its record");
+}
+console.log("verified packed editor extension consumer");
 `,
   );
   await run(
@@ -315,6 +375,10 @@ console.log("verified packed React Root-to-Class-to-Learner consumer");
     reactConsumer,
   );
   await assertTarballLockfile(reactConsumer);
+  await assertInstalledExtensionsStayOptional(reactConsumer);
+  process.stdout.write(
+    "verified packed base entry points leave the extensions optional\n",
+  );
   const reactResult = await run(process.execPath, ["probe.mjs"], reactConsumer);
   process.stdout.write(reactResult.stdout);
 

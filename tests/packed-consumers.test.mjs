@@ -1,7 +1,7 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-import test from "node:test";
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
+import test from "node:test";
+import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 const root = new URL("..", import.meta.url);
@@ -22,5 +22,10 @@ test("the packed package installs into clean React and Next consumers", async ()
     stdout,
     /verified packed React Root-to-Class-to-Learner consumer/,
   );
+  assert.match(
+    stdout,
+    /verified packed base entry points leave the extensions optional/,
+  );
+  assert.match(stdout, /verified packed editor extension consumer/);
   assert.match(stdout, /verified packed Next consumer/);
 });

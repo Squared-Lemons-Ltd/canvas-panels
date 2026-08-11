@@ -728,6 +728,60 @@ svg {
   border-color: #71863b;
   box-shadow: 0 0 0 3px rgba(113, 134, 59, 0.13);
 }
+.editor-failure,
+.editor-notice {
+  align-items: center;
+  border-radius: 4px;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 12px;
+  gap: 10px;
+  margin: 12px 0 0;
+  padding: 10px 12px;
+}
+.editor-failure {
+  background: #fff0e8;
+  border: 1px solid #f0c3b1;
+  color: #7d3d27;
+}
+.editor-notice {
+  background: #f4f2e6;
+  border: 1px solid var(--line);
+  color: #595440;
+}
+.editor-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+.editor-actions button,
+.editor-failure button {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--ink);
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 9px;
+  padding: 8px 11px;
+  text-transform: uppercase;
+}
+.editor-actions button:disabled {
+  color: #9aa09b;
+  cursor: not-allowed;
+}
+.editor-toggle {
+  align-items: center;
+  color: #59625d;
+  display: flex;
+  font-family: var(--mono);
+  font-size: 9px;
+  gap: 6px;
+  margin-left: auto;
+  text-transform: uppercase;
+}
 .editor-footer {
   color: #59625d;
   display: flex;
