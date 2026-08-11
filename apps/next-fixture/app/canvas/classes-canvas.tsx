@@ -7,7 +7,7 @@ import {
   useCanvasNavigationSync,
 } from "@squaredlemons/canvas-panels/next";
 import { createCanvasModule } from "@squaredlemons/canvas-panels/ui";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { useState } from "react";
 
 import {
@@ -73,13 +73,14 @@ export function ClassesCanvas({
     seedCanvasNavigation(created, initialState);
     return created;
   });
-  const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
+  // No router is passed: the Canvas writes through the History API so its entry
+  // metadata survives, and Next.js keeps `usePathname`/`useSearchParams` in step
+  // with those writes itself.
   useCanvasNavigationSync({
     engine,
-    router,
     location: {
       pathname,
       search: searchParams.toString(),

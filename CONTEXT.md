@@ -100,6 +100,18 @@ An adapter that synchronizes a Navigation Document with an external navigation m
 
 The one primary Canvas Workspace explicitly authorised to synchronize its Navigation Document with an application URL namespace.
 
+## History Namespace
+
+The URL namespace a single URL-Owning Canvas Workspace claims, named by its Navigation Parameter. The first Workspace to claim a History Namespace owns it; any later Workspace claiming the same one—a secondary Workspace on the page, or one nested inside a Panel—is refused and navigates in memory instead. A refused claim is reported, never thrown.
+
+## Canvas History Entry
+
+The opaque key and index a Navigation Adapter stamps onto a browser history entry to mark it as belonging to a given History Namespace. The key identifies the entry; the index places it in the Workspace's own sequence, which is what makes the direction and distance of a Back or Forward traversal derivable. An entry the Workspace did not stamp is not its own and is left to the application's routing; an entry whose metadata is absent or malformed is treated as unrepairable rather than resolved by guessing a direction.
+
+## Navigation Intent
+
+How a Navigation Adapter should record the transition that produced a snapshot. Meaningful persistent navigation reports `push`; normalization reports `replace`; activation, presentation, and transient UI report `none`.
+
 ## Recovery Panel
 
 A package-owned Transient Panel that explains why navigation state could only be partially restored and offers safe recovery actions.

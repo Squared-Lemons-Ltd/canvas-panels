@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { afterEach } from "node:test";
 
-import { act, render } from "@testing-library/react";
+import { act, cleanup, render } from "@testing-library/react";
 import { JSDOM } from "jsdom";
 import { createElement } from "react";
 
@@ -67,13 +67,30 @@ function documentFor(ids, { restore } = {}) {
   return engine.encodeNavigationDocument();
 }
 
-function createRouter() {
+function createHistory() {
   const calls = [];
+  const listeners = new Set();
+  let state = null;
   return {
     calls,
-    router: {
-      replace: (url) => calls.push({ method: "replace", url }),
-      push: (url) => calls.push({ method: "push", url }),
+    popstate: (event) => {
+      for (const listener of [...listeners]) listener(event);
+    },
+    history: {
+      getState: () => state,
+      push: (next, url) => {
+        state = next;
+        calls.push({ method: "push", url, state: next });
+      },
+      replace: (next, url) => {
+        state = next;
+        calls.push({ method: "replace", url, state: next });
+      },
+      go: (delta) => calls.push({ method: "go", delta }),
+      subscribe: (listener) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
     },
   };
 }
@@ -82,6 +99,14 @@ function Harness(options) {
   useCanvasNavigationSync(options);
   return null;
 }
+
+// Unmounting releases the History Namespace this Workspace claimed. Without it
+// every later test would render a secondary Workspace that writes nothing.
+afterEach(() => {
+  act(() => {
+    cleanup();
+  });
+});
 
 test("seeding an absent navigation state leaves the Canvas at its Root Panel", () => {
   const { engine } = createWorkspace();
@@ -140,13 +165,13 @@ test("seeding a document the registry cannot decode reports the failing Panel", 
 
 test("an unrelated route is delegated without the Canvas claiming the URL", () => {
   const { engine } = createWorkspace();
-  const { router, calls } = createRouter();
+  const { history, calls } = createHistory();
 
   act(() => {
     render(
       createElement(Harness, {
         engine,
-        router,
+        history,
         location: { pathname: "/reports", search: "?tab=overview", hash: "" },
         initialState: { status: "absent" },
       }),
@@ -158,13 +183,13 @@ test("an unrelated route is delegated without the Canvas claiming the URL", () =
 
 test("opening a Panel writes the navigation parameter beside unrelated query state", () => {
   const { engine, section } = createWorkspace();
-  const { router, calls } = createRouter();
+  const { history, calls } = createHistory();
 
   act(() => {
     render(
       createElement(Harness, {
         engine,
-        router,
+        history,
         location: {
           pathname: "/classes",
           search: "?tab=overview",
@@ -181,9 +206,13 @@ test("opening a Panel writes the navigation parameter beside unrelated query sta
     });
   });
 
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].method, "replace");
-  const url = new URL(calls[0].url, "https://canvas-panels.test");
+  // The entry being left is stamped first, so a later Back onto it is
+  // recognisable; the Panel itself is meaningful navigation, so it pushes.
+  assert.deepEqual(
+    calls.map(({ method }) => method),
+    ["replace", "push"],
+  );
+  const url = new URL(calls.at(-1).url, "https://canvas-panels.test");
   assert.equal(url.pathname, "/classes");
   assert.equal(url.hash, "#roster");
   assert.equal(url.searchParams.get("tab"), "overview");
@@ -195,7 +224,7 @@ test("opening a Panel writes the navigation parameter beside unrelated query sta
 
 test("returning to the Root Panel removes the navigation parameter", () => {
   const { engine, section } = createWorkspace();
-  const { router, calls } = createRouter();
+  const { history, calls } = createHistory();
   const opened = engine.open({
     originId: engine.getSnapshot().activePanelId,
     panel: section.reference({ id: "section-a" }),
@@ -205,7 +234,7 @@ test("returning to the Root Panel removes the navigation parameter", () => {
     render(
       createElement(Harness, {
         engine,
-        router,
+        history,
         location: {
           pathname: "/classes",
           search: `?tab=overview&canvas=${encodeNavigationParameter(
@@ -234,7 +263,7 @@ test("returning to the Root Panel removes the navigation parameter", () => {
 
 test("presentation changes alone never rewrite the URL", () => {
   const { engine, section } = createWorkspace();
-  const { router, calls } = createRouter();
+  const { history, calls } = createHistory();
   engine.open({
     originId: engine.getSnapshot().activePanelId,
     panel: section.reference({ id: "section-a" }),
@@ -244,7 +273,7 @@ test("presentation changes alone never rewrite the URL", () => {
     render(
       createElement(Harness, {
         engine,
-        router,
+        history,
         location: {
           pathname: "/classes",
           search: `?canvas=${encodeNavigationParameter(
@@ -272,14 +301,14 @@ test("an inaccessible restored Panel is recovered and the URL is normalized", as
     restore: async () => ({ status: "available" }),
   });
   seedCanvasNavigation(engine, { status: "decoded", document });
-  const { router, calls } = createRouter();
+  const { history, calls } = createHistory();
   const recoveries = [];
 
   await act(async () => {
     render(
       createElement(Harness, {
         engine,
-        router,
+        history,
         location: {
           pathname: "/classes",
           search: `?canvas=${encodeNavigationParameter(document)}`,
@@ -310,14 +339,14 @@ test("a fully available restored stack is left untouched", async () => {
   const { engine } = createWorkspace({ restore });
   const document = documentFor(["section-a", "section-b"], { restore });
   seedCanvasNavigation(engine, { status: "decoded", document });
-  const { router, calls } = createRouter();
+  const { history, calls } = createHistory();
   const recoveries = [];
 
   await act(async () => {
     render(
       createElement(Harness, {
         engine,
-        router,
+        history,
         location: {
           pathname: "/classes",
           search: `?canvas=${encodeNavigationParameter(document)}`,
@@ -336,13 +365,13 @@ test("a fully available restored stack is left untouched", async () => {
 
 test("a malformed navigation parameter is normalized out of the address", () => {
   const { engine } = createWorkspace();
-  const { router, calls } = createRouter();
+  const { history, calls } = createHistory();
 
   act(() => {
     render(
       createElement(Harness, {
         engine,
-        router,
+        history,
         location: {
           pathname: "/classes",
           search: "?tab=overview&canvas=not-a-canvas-value",
@@ -364,13 +393,13 @@ test("a malformed navigation parameter is normalized out of the address", () => 
 
 test("a Canvas resting at its Root Panel does not rewrite the URL repeatedly", () => {
   const { engine, section } = createWorkspace();
-  const { router, calls } = createRouter();
+  const { history, calls } = createHistory();
 
   act(() => {
     render(
       createElement(Harness, {
         engine,
-        router,
+        history,
         location: {
           pathname: "/classes",
           search: "?canvas=not-a-canvas-value",
@@ -411,7 +440,7 @@ test("a Canvas resting at its Root Panel does not rewrite the URL repeatedly", (
 
 test("a Panel Stack too large to encode leaves the address untouched", () => {
   const { engine } = createWorkspace();
-  const { router, calls } = createRouter();
+  const { history, calls } = createHistory();
   const oversizedEngine = {
     ...engine,
     encodeNavigationDocument: () => {
@@ -424,7 +453,7 @@ test("a Panel Stack too large to encode leaves the address untouched", () => {
       render(
         createElement(Harness, {
           engine: oversizedEngine,
-          router,
+          history,
           location: { pathname: "/classes", search: "", hash: "" },
           initialState: { status: "absent" },
         }),
