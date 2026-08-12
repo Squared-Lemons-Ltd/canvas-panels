@@ -1,0 +1,9 @@
+{
+  "today": "2026-08-12",
+  "reportingCurrency": "USD",
+  "exchangeRates": {
+    "USD": 1,
+    "GBP": 1.27,
+    "EUR": 1.09
+  }
+}
