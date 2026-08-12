@@ -224,4 +224,153 @@
     --canvas-action-text-destructive: var(--destructive);
     --canvas-action-border: var(--border);
   }
+
+  /*
+   * The pipeline Canvas fills the height its mount is given, and each Panel
+   * body scrolls inside it, so the document itself never scrolls sideways.
+   */
+  [data-meridian-canvas="mounted"] > [data-canvas-workspace] {
+    --canvas-panel-min-height: 0;
+
+    flex: 1 1 auto;
+    min-block-size: 0;
+  }
+
+  [data-meridian-canvas="mounted"] [data-canvas-application] {
+    flex: 1 1 auto;
+    min-block-size: 0;
+  }
+
+  /*
+   * The board is a four-column funnel rather than a record, so it is the Panel
+   * that takes whatever width is left over: records keep a steady reading
+   * width, and the Canvas is never a column of content with an empty half
+   * beside it. The board's own layout is written in container queries, so it
+   * reflows to whatever width it ends up with — four columns while it is the
+   * whole Canvas, one once two records are open in front of it — rather than
+   * being told the answer twice.
+   */
+  [data-canvas-panel][data-panel-kind="pipeline"] {
+    flex: 1 0 min(26rem, 86vw);
+  }
+
+  /* Narrow presentations stay the package's to decide. */
+  @media (max-width: 79.999rem) {
+    [data-canvas-panel][data-panel-kind="pipeline"],
+    [data-canvas-panel][data-panel-kind="pipeline"][data-active] {
+      flex-basis: 100%;
+    }
+
+    [data-canvas-panel][data-panel-kind="pipeline"][data-canvas-panel-context="previous"] {
+      flex-basis: 35%;
+    }
+  }
+
+  /*
+   * The command palette overlay. Its Workspace is given a height so the result
+   * list scrolls inside the Panel body rather than growing the layer past the
+   * bottom of the window.
+   */
+  [data-canvas-overlay] > [data-canvas-workspace] {
+    --canvas-panel-min-height: 0;
+    /*
+     * The two Panels have to add up to less than the layer, or the Canvas
+     * scrolls sideways inside a dialog and the Close control goes off the edge.
+     */
+    --canvas-panel-width: 19rem;
+    --canvas-panel-active-width: 36rem;
+
+    block-size: min(32rem, 80svh);
+    inline-size: min(100%, 57rem);
+  }
+
+  [data-canvas-overlay] [data-canvas-application] {
+    flex: 1 1 auto;
+    min-block-size: 0;
+  }
+
+  /* The searching half takes whatever the list of scopes does not need. */
+  [data-canvas-overlay] [data-canvas-panel][data-active] {
+    flex-grow: 1;
+  }
+
+  /*
+   * Two surfaces the Canvas paints in system colours rather than in its own
+   * tokens: the overlay layer's Workspace and the Guarded Transition dialog.
+   * `Canvas`/`CanvasText` follow `color-scheme`, so they are readable in both
+   * themes — they are simply not *this* product's colours, which is very
+   * visible when a dialog opens over the Meridian graphite. There is no
+   * `--canvas-*` token for either, so this reaches past the token seam and on
+   * to the attributes. Reported to the package rather than worked around
+   * quietly.
+   */
+  [data-canvas-overlay] > [data-canvas-workspace] {
+    background: var(--card);
+    border: 1px solid var(--border);
+  }
+
+  [data-canvas-transition-dialog] {
+    background: var(--popover);
+    border: 1px solid var(--border);
+    color: var(--popover-foreground);
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  [data-canvas-transition-dialog] h2 {
+    font-size: 1.0625rem;
+    font-weight: 600;
+    line-height: 1.3;
+    margin: 0;
+  }
+
+  [data-canvas-transition-dialog] p {
+    color: var(--muted-foreground);
+    font-size: 0.875rem;
+    margin: 0;
+  }
+
+  [data-canvas-transition-dialog] [role="alert"] {
+    color: var(--destructive);
+  }
+
+  /*
+   * Save, Discard and Stay are the most consequential controls the package
+   * renders, and they are the only ones it ships no styling for — so under
+   * Tailwind's preflight they arrive as bare text with no hit target at all.
+   * WCAG 2.5.8 wants 24px; these are given a full control height.
+   */
+  [data-canvas-transition-actions] button {
+    background: var(--secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    color: var(--secondary-foreground);
+    cursor: pointer;
+    font: inherit;
+    font-weight: 500;
+    min-block-size: 2.25rem;
+    padding-inline: 0.9rem;
+  }
+
+  [data-canvas-transition-actions] button:first-child {
+    background: var(--primary);
+    border-color: transparent;
+    color: var(--primary-foreground);
+  }
+
+  [data-canvas-transition-actions] button:hover:not(:disabled) {
+    background: var(--accent);
+    color: var(--accent-foreground);
+  }
+
+  [data-canvas-transition-actions] button:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+  }
+
+  [data-canvas-transition-actions] button:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
 }
