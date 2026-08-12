@@ -3,7 +3,7 @@
   "private": true,
   "packageManager": "pnpm@9.15.9",
   "engines": {
-    "node": "^22.0.0 || ^24.0.0"
+    "node": "^22.18.0 || ^24.0.0"
   },
   "scripts": {
     "build": "pnpm --filter @squaredlemons/canvas-panels build && pnpm --filter './apps/**' build",
