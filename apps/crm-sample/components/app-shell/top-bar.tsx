@@ -1,8 +1,7 @@
-import { BellIcon, SearchIcon } from "lucide-react";
+import { BellIcon } from "lucide-react";
 
+import { CommandPaletteTrigger } from "@/components/pipeline/command-palette";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import {
   Tooltip,
@@ -24,27 +23,13 @@ export function TopBar() {
           <span className="text-sm font-semibold tracking-tight">Meridian</span>
         </div>
 
-        {/* Only the actions claim the free space, so they stay hard right. */}
+        {/*
+          Only the actions claim the free space, so they stay hard right. The
+          search control opens the command palette Overlay Workspace rather
+          than filtering in place: the results are records to navigate to.
+        */}
         <search className="min-w-0 flex-1 sm:max-w-sm">
-          <Label htmlFor="global-search" className="sr-only">
-            Search accounts, contacts and deals
-          </Label>
-          <div className="relative">
-            <SearchIcon
-              aria-hidden="true"
-              className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
-            />
-            <Input
-              id="global-search"
-              type="search"
-              autoComplete="off"
-              placeholder="Search accounts, contacts, deals…"
-              className="h-9 pr-16 pl-9"
-            />
-            <kbd className="pointer-events-none absolute top-1/2 right-2.5 hidden -translate-y-1/2 rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[0.6875rem] text-muted-foreground sm:block">
-              ⌘K
-            </kbd>
-          </div>
+          <CommandPaletteTrigger />
         </search>
 
         <div className="ml-auto flex shrink-0 items-center gap-1">
