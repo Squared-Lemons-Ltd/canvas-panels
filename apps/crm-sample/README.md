@@ -145,20 +145,24 @@ Both are overridden in `app/globals.css` by reaching past the token seam and on
 to the `[data-canvas-*]` attributes, which the package calls implementation
 detail. Reported rather than papered over silently — see the comments there.
 
-### `data-canvas-panel-id` is not stable across a server render
+### `data-canvas-panel-id` was not stable across a server render — fixed
 
-Panel Instance IDs come from a counter that starts afresh in each process, so
-the id the server renders into `data-canvas-panel-id` is never the id the
-client's engine mints. React reports the mismatch and leaves the server's value
-in the DOM, and every part of the package that finds a Panel by that
-attribute — F6 region cycling, the resize separator, scroll restoration — then
-looks up an element that does not exist.
+Panel Instance IDs used to come from a counter that started afresh in each
+process, so the id the server rendered into `data-canvas-panel-id` was never
+the id the client's engine minted. React reported the mismatch and left the
+server's value in the DOM, and every part of the package that finds a Panel by
+that attribute — F6 region cycling, the resize separator, scroll restoration —
+then looked up an element that did not exist. Measured here: on a hydrated page
+F6 stopped cycling and landed on the first Panel every time, and a Panel's
+separator reported `aria-valuenow="240"` for a Panel that was 542px wide.
 
-Measured here: on a hydrated page F6 stops cycling and lands on the first Panel
-every time, and a Panel's separator reports `aria-valuenow="240"` for a Panel
-that is 542px wide. Reported to the package. This app's own scroll-into-view
-therefore finds Panels by **position in the stack**, which both renders agree
-on; see `useActivePanelInView` in `pipeline-canvas.tsx`.
+Found by this app, reported as “Panel Instance IDs are not hydration-stable,
+breaking every SSR consumer” (#52), and fixed in the package: ids are now
+numbered within their own Panel Engine, so both renders agree. They are unique
+within a Workspace rather than within the document, which matters here because
+the command palette mounts a second Workspace. This app's own scroll-into-view
+therefore still finds Panels by **position in the stack**, which needs no such
+caveat; see `useActivePanelInView` in `canvas-mount.tsx`.
 
 ## The Canvas
 

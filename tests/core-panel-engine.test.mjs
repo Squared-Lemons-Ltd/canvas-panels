@@ -36,7 +36,7 @@ test("the engine starts with one permanent host-defined Root Panel", () => {
   const rootId = snapshot.activePanelId;
 
   assert.equal(snapshot.panels.length, 1);
-  assert.match(rootId, /^canvas-panel-\d+-1$/);
+  assert.equal(rootId, "canvas-panel-1");
   assert.deepEqual(snapshot.panels[0], {
     instanceId: rootId,
     instanceRef: snapshot.panels[0].instanceRef,
@@ -451,7 +451,7 @@ test("stale and invalid Origins return typed rejections without publishing", () 
   assert.equal(engine.getSnapshot(), beforeRejections);
 });
 
-test("Panel Instance IDs distinguish separate engine runtimes", () => {
+test("Panel Instance IDs are numbered within their own engine, and Refs are what tell engines apart", () => {
   const root = defineRootPanel({ kind: "classes", title: "Classes" });
   const classPanel = definePanel({
     kind: "class",
@@ -462,16 +462,44 @@ test("Panel Instance IDs distinguish separate engine runtimes", () => {
   const firstRootId = firstEngine.getSnapshot().activePanelId;
   const secondRootId = secondEngine.getSnapshot().activePanelId;
 
-  assert.notEqual(firstRootId, secondRootId);
+  // Deliberate, and the whole point: an identity that counted engines could
+  // never survive a server render, because a server process creates one engine
+  // per request and a browser creates its first.
+  assert.equal(firstRootId, secondRootId);
+
+  // What it costs. A bare Panel Instance ID names a position in whichever
+  // engine is asked, so one engine's id passed to another is not refused — it
+  // means that engine's own Panel. Everything that can take a Panel Instance
+  // Ref takes one, and a Ref still cannot cross.
+  const openedWithForeignId = secondEngine.open({
+    originId: firstRootId,
+    panel: classPanel.reference({ name: "Class A" }),
+  });
+  assert.equal(openedWithForeignId.status, "opened");
+  assert.equal(firstEngine.getSnapshot().panels.length, 1);
+  assert.deepEqual(
+    firstEngine.close({
+      target: secondEngine.getSnapshot().panels[1].instanceRef,
+    }),
+    {
+      status: "rejected",
+      command: "close",
+      reason: "foreign-workspace",
+      panelId: openedWithForeignId.instanceId,
+    },
+  );
+
+  // An id that names nothing at all is still refused. Spelled as something no
+  // Engine would ever mint, because the format is not part of the Contract.
   assert.deepEqual(
     secondEngine.open({
-      originId: firstRootId,
-      panel: classPanel.reference({ name: "Class A" }),
+      originId: "no-such-panel",
+      panel: classPanel.reference({ name: "Class B" }),
     }),
     {
       status: "rejected",
       reason: "invalid-origin",
-      originId: firstRootId,
+      originId: "no-such-panel",
     },
   );
 });

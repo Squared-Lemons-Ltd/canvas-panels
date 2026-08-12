@@ -4,6 +4,10 @@ declare const panelReferenceBrand: unique symbol;
 declare const workspaceIdBrand: unique symbol;
 declare const stackVersionBrand: unique symbol;
 
+// Counts Engines within one process. A Workspace ID never reaches the DOM, so
+// a value that differs between a server process and a browser costs nothing;
+// it exists to tell one Engine's refs from another's within a single process,
+// which is the only place two Engines can ever meet.
 let nextEngineNumber = 1;
 const referenceDefinitions = new WeakMap<object, object>();
 
@@ -1226,11 +1230,16 @@ export function createPanelEngine<
   panels: Definitions;
   onSubscriberError?: (error: AggregateError) => void;
 }): PanelEngine<ReferenceOf<Definitions[number]>> {
-  const engineNumber = nextEngineNumber++;
-  const workspaceId = `canvas-workspace-${engineNumber}` as WorkspaceId;
+  const workspaceId = `canvas-workspace-${nextEngineNumber++}` as WorkspaceId;
+  // A Panel Instance ID is rendered into the DOM, so it is numbered within its
+  // own Engine and nothing else. An Engine seeded the same way issues the same
+  // identities whichever process it runs in, which is what lets a server render
+  // and the browser that hydrates it agree about which element is which Panel.
+  // Uniqueness beyond one Engine is not claimed and must not be relied upon:
+  // the presentation scopes every lookup to the Workspace that owns it.
   let nextInstanceNumber = 1;
   const nextInstanceId = () =>
-    `canvas-panel-${engineNumber}-${nextInstanceNumber++}` as PanelInstanceId;
+    `canvas-panel-${nextInstanceNumber++}` as PanelInstanceId;
   const instanceId = nextInstanceId();
   const rootInstanceRef = Object.freeze({
     workspaceId,

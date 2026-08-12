@@ -385,6 +385,9 @@ try {
       react: "19.2.8",
       "react-dom": "19.2.8",
     },
+    devDependencies: {
+      jsdom: "26.1.0",
+    },
   });
   await writeFile(
     join(reactConsumer, "probe.mjs"),
@@ -849,6 +852,95 @@ if ((await heldResolution).status !== "committed" || historicalEngine.getSnapsho
 console.log("verified packed testing tools consumer");
 `,
   );
+  // A server render the packed package then has to hydrate. Nothing else in
+  // this suite crosses that boundary, and an identity that disagreed across it
+  // reached a consumer once already: every lookup by `data-canvas-panel-id`
+  // missed, so F6 stopped cycling and separators reported the wrong width.
+  await writeFile(
+    join(reactConsumer, "hydrate-probe.mjs"),
+    `import { act, createElement } from "react";
+import { renderToString } from "react-dom/server";
+import { JSDOM } from "jsdom";
+import { createPanelEngine, definePanel, defineRootPanel } from "@squaredlemons/canvas-panels/core";
+import { createCanvasModule } from "@squaredlemons/canvas-panels/ui";
+
+const root = defineRootPanel({ kind: "classes", title: "Classes" });
+const classPanel = definePanel({ kind: "class", title: ({ name }) => name });
+const learner = definePanel({ kind: "learner", title: ({ name }) => name });
+const Canvas = createCanvasModule({
+  root,
+  panels: [classPanel, learner],
+  renderers: {
+    classes: () => createElement("p", null, "Class list"),
+    class: ({ descriptor }) => createElement("p", null, "Class record: " + descriptor.name),
+    learner: ({ descriptor }) => createElement("p", null, "Learner record: " + descriptor.name),
+  },
+});
+
+// Seeded the way a cold load seeds: the stack a deep link asks for, restored
+// in one go, which is the path a server-rendered Canvas actually takes.
+function seededEngine() {
+  const engine = createPanelEngine({ root, panels: [classPanel, learner] });
+  const restored = engine.restoreStack({
+    references: [
+      classPanel.reference({ name: "Class A" }),
+      learner.reference({ name: "Ada Lovelace" }),
+    ],
+  });
+  if (restored.status === "rejected") throw new Error("packed hydration fixture did not restore its stack");
+  if (engine.getSnapshot().panels.length !== 3) throw new Error("packed hydration fixture restored the wrong stack");
+  return engine;
+}
+
+const tree = (engine) => createElement(
+  Canvas.Provider,
+  { engine },
+  createElement(Canvas.Workspace, { label: "Class and learner records" }),
+);
+
+// This process has served requests before, exactly as a running server has.
+seededEngine();
+seededEngine();
+const serverHtml = renderToString(tree(seededEngine()));
+if (!serverHtml.includes('data-canvas-panel-id')) throw new Error("packed server render carried no Panel identities");
+
+const dom = new JSDOM('<!doctype html><html><body><div id="canvas-root">' + serverHtml + '</div></body></html>', {
+  url: "https://packed-consumer.test/",
+});
+globalThis.window = dom.window;
+globalThis.document = dom.window.document;
+Object.defineProperty(globalThis, "navigator", { configurable: true, value: dom.window.navigator });
+globalThis.HTMLElement = dom.window.HTMLElement;
+globalThis.Node = dom.window.Node;
+globalThis.getComputedStyle = dom.window.getComputedStyle;
+globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+const { hydrateRoot } = await import("react-dom/client");
+
+const clientEngine = seededEngine();
+const logged = [];
+const consoleError = console.error;
+console.error = (...args) => logged.push(args.map(String).join(" "));
+try {
+  await act(async () => {
+    hydrateRoot(dom.window.document.getElementById("canvas-root"), tree(clientEngine));
+  });
+} finally {
+  console.error = consoleError;
+}
+
+const domIds = [...dom.window.document.querySelectorAll("[data-canvas-panel]")]
+  .map((panel) => panel.getAttribute("data-canvas-panel-id"));
+const engineIds = clientEngine.getSnapshot().panels.map(({ instanceId }) => instanceId);
+if (domIds.length !== 3 || domIds.join(",") !== engineIds.join(",")) {
+  throw new Error("packed hydrated DOM identities " + domIds.join(",") + " do not match the client Engine's " + engineIds.join(","));
+}
+const mismatches = logged.filter((message) => /hydrat/i.test(message));
+if (mismatches.length > 0) {
+  throw new Error("packed hydration reported a mismatch: " + mismatches[0]);
+}
+console.log("verified packed server render hydrates with matching Panel identities");
+`,
+  );
   await run(
     "npm",
     ["install", "--ignore-scripts", "--no-audit", "--no-fund"],
@@ -877,6 +969,12 @@ console.log("verified packed testing tools consumer");
   );
   const reactResult = await run(process.execPath, ["probe.mjs"], reactConsumer);
   process.stdout.write(reactResult.stdout);
+  const hydrationResult = await run(
+    process.execPath,
+    ["hydrate-probe.mjs"],
+    reactConsumer,
+  );
+  process.stdout.write(hydrationResult.stdout);
 
   const nextConsumer = join(temporaryRoot, "next-consumer");
   await writeJson(join(nextConsumer, "package.json"), {

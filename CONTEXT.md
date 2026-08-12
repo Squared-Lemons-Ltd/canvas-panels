@@ -30,7 +30,11 @@ A host-defined category that determines how a Panel is rendered and which identi
 
 ## Panel Instance ID
 
-The unique runtime identity of one open Panel instance.
+The runtime identity of one open Panel instance, unique within the Panel Engine that issued it and numbered from one. It is deliberately not unique beyond that Engine: a Canvas Workspace rendered on a server and hydrated in a browser is two Engines, and an identity that counted Engines could never agree across them. Telling one Workspace's Panels from another's is the Panel Instance Ref's job, not the ID's.
+
+## Panel Instance Ref
+
+The handle a Panel Engine issues for one open Panel instance, naming its Canvas Workspace as well as the instance. Commands take a Ref rather than a Panel Instance ID because only a Ref can be checked against the Engine that issued it, so a Ref addressed to another Workspace is refused and a fabricated one is never honoured.
 
 ## Panel Key
 

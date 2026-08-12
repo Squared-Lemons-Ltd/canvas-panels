@@ -65,10 +65,9 @@ type WatchableEngine = Readonly<{
  * Active Panel's element, so this has to find it in the DOM itself.
  *
  * It finds it by *position in the stack*, not by `data-canvas-panel-id`.
- * Instance ids are minted from a counter that starts afresh in every process,
- * so on a server-rendered Canvas the attribute in the DOM is whatever the
- * server's engine happened to be called and never matches the client's. Panel
- * order is the one thing both renders agree on.
+ * Instance ids do survive hydration now, but they are unique only within their
+ * own Workspace, and this app mounts a second one for the command palette.
+ * Position needs no such caveat.
  *
  * It scrolls the Canvas and nothing else. `scrollIntoView` would have been
  * shorter, but it walks every scrollable ancestor, so a Canvas taller than the

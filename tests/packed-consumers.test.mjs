@@ -39,6 +39,10 @@ test("the packed package installs into clean React and Next consumers", async ()
   assert.match(stdout, /verified packed overlay Workspace consumer/);
   assert.match(stdout, /verified packed testing tools consumer/);
   assert.match(stdout, /verified packed Next consumer/);
+  assert.match(
+    stdout,
+    /verified packed server render hydrates with matching Panel identities/,
+  );
 });
 
 test("artifact inspection rejects what must never reach a consumer", async () => {

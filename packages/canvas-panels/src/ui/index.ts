@@ -1083,6 +1083,31 @@ export function createCanvasModule<
     const previousTransition = useRef(snapshot.transition);
     const initiallyFocusedPanel = useRef<PanelInstanceId | null>(null);
     const honouredReplacements = useRef(new Map<PanelInstanceId, number>());
+
+    // A Panel Instance ID is unique within its own Panel Engine and nowhere
+    // else, so every lookup by one is confined to the Panels this Workspace
+    // itself renders — the immediate children of its application element. A
+    // descendant selector would reach into a Workspace nested inside a Panel,
+    // where the same id names an entirely different Panel, and answer with it.
+    const ownPanelElement = useCallback(
+      (panelId: PanelInstanceId, part?: "body") =>
+        application.current?.querySelector<HTMLElement>(
+          `:scope > [data-canvas-panel-id="${panelId}"]${
+            part === "body" ? " > [data-canvas-panel-body]" : ""
+          }`,
+        ) ?? null,
+      [],
+    );
+    // For the same reason, a Panel read back out of the document is only this
+    // Workspace's to reason about when this Workspace rendered it. A node
+    // inside a nested Workspace answers `null` rather than an id that would be
+    // mistaken for one of these Panels.
+    const ownPanelIdOf = useCallback((node: Element | null) => {
+      const panel = node?.closest("[data-canvas-panel]") ?? null;
+      return panel?.parentElement === application.current
+        ? panel.getAttribute("data-canvas-panel-id")
+        : null;
+    }, []);
     const [dirtyPanelIds, setDirtyPanelIds] = useState<
       ReadonlySet<PanelInstanceId>
     >(() => new Set());
@@ -1221,8 +1246,9 @@ export function createCanvasModule<
               ({ fallbackFocus }) => fallbackFocus?.current?.isConnected,
             )?.fallbackFocus?.current
           : null;
-        const fallback =
-          application.current?.querySelector<HTMLElement>("[data-active] h2");
+        const fallback = application.current?.querySelector<HTMLElement>(
+          ":scope > [data-active] h2",
+        );
         (preferred?.isConnected
           ? preferred
           : (registeredFallback ?? fallback)
@@ -1378,11 +1404,7 @@ export function createCanvasModule<
       if (!strandedPanelId || visiblePanelIds.includes(strandedPanelId)) return;
       focusedPanelId.current = null;
       const focused = document.activeElement;
-      const stillInsideStranded =
-        focused instanceof HTMLElement &&
-        focused
-          .closest("[data-canvas-panel]")
-          ?.getAttribute("data-canvas-panel-id") === strandedPanelId;
+      const stillInsideStranded = ownPanelIdOf(focused) === strandedPanelId;
       // Only reclaim focus the Canvas itself just lost: a browser drops it to
       // the body, while an environment without `inert` leaves it in place.
       const stranded =
@@ -1392,7 +1414,7 @@ export function createCanvasModule<
         ? document.getElementById(focusRefugeHeadingId)
         : null;
       (heading ?? application.current)?.focus();
-    }, [visiblePanelIds, focusRefugeHeadingId]);
+    }, [visiblePanelIds, focusRefugeHeadingId, ownPanelIdOf]);
 
     // Retained Panels are hidden with `display: none`, which resets their
     // scroll offset, so each body's offset is recorded as it scrolls and
@@ -1405,12 +1427,10 @@ export function createCanvasModule<
       for (const panelId of revealed) {
         const offset = panelScrollOffsets.current.get(panelId);
         if (offset === undefined) continue;
-        const body = application.current?.querySelector<HTMLElement>(
-          `[data-canvas-panel-id="${panelId}"] > [data-canvas-panel-body]`,
-        );
+        const body = ownPanelElement(panelId, "body");
         if (body && body.scrollTop !== offset) body.scrollTop = offset;
       }
-    }, [visiblePanelIds]);
+    }, [visiblePanelIds, ownPanelElement]);
 
     const rememberFocus = useCallback(() => {
       returnFocus.current =
@@ -1437,13 +1457,7 @@ export function createCanvasModule<
         // never observes — the Canvas moving it itself when a Panel opens, or
         // the browser restoring it — and a stale answer silently sends every
         // F6 back to the first region.
-        const active = document.activeElement;
-        const focusedRegion =
-          active instanceof HTMLElement
-            ? (active
-                .closest("[data-canvas-panel]")
-                ?.getAttribute("data-canvas-panel-id") ?? null)
-            : null;
+        const focusedRegion = ownPanelIdOf(document.activeElement);
         const target = cyclePanelRegion(
           visiblePanelIds,
           focusedRegion,
@@ -1456,7 +1470,7 @@ export function createCanvasModule<
         event.preventDefault();
         heading.focus();
       },
-      [panelPartIdFor, visiblePanelIds],
+      [ownPanelIdOf, panelPartIdFor, visiblePanelIds],
     );
 
     const announcementTemplates = announcements ?? canvasAnnouncementTemplates;
@@ -1497,14 +1511,6 @@ export function createCanvasModule<
     } | null>(null);
     const [resizing, setResizing] = useState(false);
 
-    const panelElement = useCallback(
-      (panelId: PanelInstanceId) =>
-        application.current?.querySelector<HTMLElement>(
-          `[data-canvas-panel-id="${panelId}"]`,
-        ) ?? null,
-      [],
-    );
-
     // A separator has to report the width the Panel really has, from the first
     // render. Until a Panel is measured its natural width comes from the
     // stylesheet, which only the browser can resolve, so it is read back after
@@ -1516,9 +1522,7 @@ export function createCanvasModule<
       const measured = new Map<PanelInstanceId, number>();
       for (const panelId of visiblePanelIds) {
         if (panelWidths.has(panelId) || measuredWidths.has(panelId)) continue;
-        const width = application.current?.querySelector<HTMLElement>(
-          `[data-canvas-panel-id="${panelId}"]`,
-        )?.offsetWidth;
+        const width = ownPanelElement(panelId)?.offsetWidth;
         if (width) measured.set(panelId, width);
       }
       if (measured.size === 0) return;
@@ -1526,7 +1530,7 @@ export function createCanvasModule<
         naturalWidths.current.set(panelId, width);
       }
       setMeasuredWidths((current) => new Map([...current, ...measured]));
-    }, [visiblePanelIds, panelWidths, measuredWidths]);
+    }, [visiblePanelIds, panelWidths, measuredWidths, ownPanelElement]);
 
     const widthOf = useCallback(
       (panelId: PanelInstanceId) =>
@@ -1536,7 +1540,7 @@ export function createCanvasModule<
 
     const applySizing = useCallback(
       (panelId: PanelInstanceId, command: SizingCommand) => {
-        const element = panelElement(panelId);
+        const element = ownPanelElement(panelId);
         const measured = element?.offsetWidth ?? bounds.min;
         if (!naturalWidths.current.has(panelId)) {
           naturalWidths.current.set(panelId, measured);
@@ -1554,7 +1558,7 @@ export function createCanvasModule<
         }
         return outcome;
       },
-      [bounds, panelElement, panelWidths],
+      [bounds, ownPanelElement, panelWidths],
     );
 
     // One region, and it only ever carries a message the move actually earned:
@@ -1842,7 +1846,7 @@ export function createCanvasModule<
                       onPointerDown: (
                         event: ReactPointerEvent<HTMLDivElement>,
                       ) => {
-                        const element = panelElement(panel.instanceId);
+                        const element = ownPanelElement(panel.instanceId);
                         if (!element) return;
                         event.preventDefault();
                         event.currentTarget.setPointerCapture(event.pointerId);

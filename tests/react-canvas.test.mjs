@@ -260,7 +260,10 @@ test("nested Bound Canvas Modules isolate commands, identities, subscriptions, A
     });
   });
   assert.equal(openedReport.status, "opened");
-  assert.notEqual(openedClass.instanceId, openedReport.instanceId);
+  // Two engines number their own Panels, so the same position carries the same
+  // id in both. Isolation is not what the identifier says — it is the Panel
+  // Instance Ref, which the foreign command below is refused for holding.
+  assert.equal(openedClass.instanceId, openedReport.instanceId);
   assert.equal(classesEngine.getSnapshot().version, 1);
   assert.equal(reportsEngine.getSnapshot().version, 1);
   assert.equal(classNotifications, 1);
@@ -284,6 +287,142 @@ test("nested Bound Canvas Modules isolate commands, identities, subscriptions, A
   assert.equal(
     reportsEngine.getSnapshot().activePanelId,
     openedReport.instanceId,
+  );
+  result.unmount();
+});
+
+test("a Workspace rendered inside a Panel keeps its Panel identities to itself", () => {
+  // Two Workspaces number their own Panels, so both stacks below contain a
+  // `canvas-panel-2`, and the nested one appears first in the document. Every
+  // lookup either Workspace makes by that id has to answer with its own Panel.
+  const bounds = Object.freeze({
+    min: 240,
+    max: 960,
+    step: 16,
+    coarseStep: 64,
+  });
+  const reportPanel = definePanel({
+    kind: "report",
+    title: ({ name }) => name,
+  });
+  const reportsRoot = defineRootPanel({ kind: "reports", title: "Reports" });
+  const ReportsCanvas = createCanvasModule({
+    root: reportsRoot,
+    panels: [reportPanel],
+    renderers: {
+      reports: () => createElement("p", null, "Report list"),
+      report: ({ descriptor }) => createElement("p", null, descriptor.name),
+    },
+  });
+  const reportsEngine = createPanelEngine({
+    root: reportsRoot,
+    panels: [reportPanel],
+  });
+
+  const classPanel = definePanel({ kind: "class", title: ({ name }) => name });
+  const classesRoot = defineRootPanel({ kind: "classes", title: "Classes" });
+  const ClassesCanvas = createCanvasModule({
+    root: classesRoot,
+    panels: [classPanel],
+    renderers: {
+      // The nested Workspace lives inside the outer Root Panel, so its Panels
+      // precede every other outer Panel in the document.
+      classes: () =>
+        createElement(
+          ReportsCanvas.Provider,
+          { engine: reportsEngine },
+          createElement(ReportsCanvas.Workspace, {
+            label: "Report records",
+            sizing: bounds,
+          }),
+        ),
+      class: ({ descriptor }) => createElement("p", null, descriptor.name),
+    },
+  });
+  const classesEngine = createPanelEngine({
+    root: classesRoot,
+    panels: [classPanel],
+  });
+  for (const name of ["Class A", "Class B"]) {
+    classesEngine.open({ panel: classPanel.reference({ name }) });
+  }
+  reportsEngine.open({ panel: reportPanel.reference({ name: "Report A" }) });
+
+  const result = render(
+    createElement(
+      ClassesCanvas.Provider,
+      { engine: classesEngine },
+      createElement(ClassesCanvas.Workspace, {
+        label: "Class records",
+        sizing: bounds,
+      }),
+    ),
+  );
+
+  const [outerApplication, innerApplication] = [
+    ...result.container.querySelectorAll("[data-canvas-application]"),
+  ];
+  const ownPanels = (application) =>
+    [...application.children].filter((child) =>
+      child.hasAttribute("data-canvas-panel"),
+    );
+  assert.deepEqual(
+    ownPanels(innerApplication).map((panel) =>
+      panel.getAttribute("data-canvas-panel-id"),
+    ),
+    ownPanels(outerApplication)
+      .map((panel) => panel.getAttribute("data-canvas-panel-id"))
+      .slice(0, 2),
+    "the fixture needs both Workspaces to reuse the same identities",
+  );
+
+  // A width per Panel, so an answer from the wrong Workspace is visible.
+  const widths = new Map();
+  for (const application of [outerApplication, innerApplication]) {
+    for (const panel of ownPanels(application)) {
+      const width = bounds.min + 64 * (widths.size + 1);
+      widths.set(panel, width);
+      Object.defineProperty(panel, "offsetWidth", {
+        configurable: true,
+        value: width,
+      });
+    }
+  }
+  // Panels are measured as the presentation reveals them, so move it away and
+  // back rather than asking for the one already on screen.
+  for (const engine of [classesEngine, reportsEngine]) {
+    act(() => engine.setPresentation({ breakpoint: "mobile" }));
+    act(() => engine.setPresentation({ breakpoint: "desktop" }));
+  }
+
+  for (const separator of result.container.querySelectorAll(
+    "[data-canvas-panel-separator]",
+  )) {
+    assert.equal(
+      Number(separator.getAttribute("aria-valuenow")),
+      widths.get(separator.closest("[data-canvas-panel]")),
+    );
+  }
+
+  // F6 in the outer Workspace, from focus inside the nested one. The nested
+  // Panel's id names an outer Panel too, and reading it as one would send F6
+  // to the Panel after it instead of entering at the outer Workspace's start.
+  const outerHeadings = ownPanels(outerApplication).map((panel) =>
+    panel.querySelector("h2"),
+  );
+  act(() => {
+    ownPanels(innerApplication)[1].querySelector("h2").focus();
+  });
+  act(() => {
+    fireEvent.keyDown(outerApplication.closest("[data-canvas-workspace]"), {
+      key: "F6",
+    });
+  });
+
+  assert.equal(
+    outerHeadings.indexOf(dom.window.document.activeElement),
+    0,
+    "F6 entered the outer Workspace somewhere other than its first region",
   );
   result.unmount();
 });
