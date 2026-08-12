@@ -234,13 +234,44 @@ The **Navigation Parameter** is the transport form: `v<n>.<base64url-canonical-j
 
 ## Theming
 
-The stylesheet is published as a single `@layer canvas-panels`, so every application rule outside that layer wins without needing `!important`. Import it once:
+### The cascade layer
+
+The stylesheet is published as a single cascade layer named **`canvas-panels`**. Every rule the package emits is inside it and nothing else is, so an application rule written outside any layer wins without needing `!important` or higher specificity. Import it once:
 
 ```ts
 import "@squaredlemons/canvas-panels/styles.css";
 ```
 
-Presentation is driven by custom properties, which are the supported theming surface. Override them on any ancestor of the Workspace:
+The layer's name is part of the Public Contract: an application may sort it, and the package will not rename it without a breaking change.
+
+**Where the layer sorts is the application's decision, and an application that uses layers of its own has to state it.** CSS orders layers by first appearance, so with no `@layer` statement the order falls out of import order — which is a decision nobody made, and it is wrong in both directions. Import the package stylesheet last and `canvas-panels` sorts after the application's own layers, so every package rule outranks them; import it first and it sorts below the application's reset, so a preflight reaches into the Canvas and undoes it.
+
+State the order once, in the entry stylesheet, above every `@import` — the first `@layer` statement is what fixes it:
+
+```css
+@layer theme, base, canvas-panels, components, utilities;
+
+@import "tailwindcss";
+@import "@squaredlemons/canvas-panels/styles.css";
+```
+
+That is the recipe for **Tailwind v4**, whose own layers are `theme`, `base`, `components`, and `utilities`. `canvas-panels` belongs after `base`, so Tailwind's preflight cannot reset the Canvas, and before `components` and `utilities`, so an application utility wins: with this statement in place, `class="text-primary"` on the Workspace element beats the package's own `color`.
+
+Without Tailwind the rule is the same one: put `canvas-panels` **above any reset or preflight layer** — the package styles the Canvas and a reset must not land on top of it — and **below the layers holding the application's own component and utility rules**, so that application styling wins. An application with no layers at all needs no statement: unlayered CSS already beats every layered rule.
+
+One rule in the layer is deliberately absolute. The `prefers-reduced-motion` block uses `!important`, and for important declarations the cascade inverts layer order, so it outranks application CSS whether layered or not. That is the only exception; everything else stays overridable as described.
+
+### Custom properties
+
+Presentation is driven by custom properties, which are the supported theming surface. Their defaults are declared on `:root` — never on the Workspace element — so the Workspace *inherits* every token. That is what makes all three overrides work, since a value declared on an element always beats one inherited into it:
+
+| Override written on | Result |
+| --- | --- |
+| nothing | the Workspace inherits the package default from `:root` |
+| any ancestor of the Workspace | wins over the default, however the ancestor rule is layered |
+| the Workspace element itself | wins over both |
+
+Override them on any ancestor of the Workspace:
 
 ```css
 .app-canvas {
@@ -263,7 +294,9 @@ Presentation is driven by custom properties, which are the supported theming sur
 }
 ```
 
-Action, dialog, and separator styling have their own properties in the same family — `--canvas-action-*`, `--canvas-dialog-width`, `--canvas-dialog-padding`.
+Action, dialog, and separator styling have their own properties in the same family — `--canvas-action-*`, `--canvas-dialog-width`, `--canvas-dialog-padding`. Three of them have no default of their own and derive from a more general token instead: `--canvas-action-text` from `--canvas-text-muted`, `--canvas-action-text-hover` from `--canvas-text`, and `--canvas-action-border` from `--canvas-border`. The derivation is resolved on the action itself, so recolouring the general token recolours the actions with it, and setting the specific one takes them out of the arrangement.
+
+An override on an element — an ancestor, or the Workspace itself — wins whatever layer it is written in, because it is nearer to the Workspace than `:root` is. An override written **on `:root` itself** is a different matter: it meets the package's default on the same element, so layer order decides, and a layer sorted before `canvas-panels` loses. That includes Tailwind's `@theme`, which emits into the `theme` layer. Set Canvas tokens in unlayered CSS, in a layer sorted after `canvas-panels`, or on an ancestor element.
 
 Structural state is exposed through data attributes rather than class names, and these are part of the Public Contract:
 
