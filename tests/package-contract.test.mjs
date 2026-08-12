@@ -464,6 +464,234 @@ test("the Next fixture proves deep links across the server and client boundary",
   }
 });
 
+const token = /--canvas-[a-z0-9-]+/.source;
+
+/**
+ * The built stylesheet as flat rules: the selector each declaration block was
+ * written under, its declarations, and the at-rules it was nested inside.
+ *
+ * A regex over the whole file cannot answer *where* a declaration sits, and
+ * where is the entire question here — the same `--canvas-radius: 0.75rem` is a
+ * working default on `:root` and a broken one on the Workspace. Comments and
+ * strings are consumed by the same pass rather than stripped beforehand, so a
+ * brace inside either cannot open or close a block that is not there.
+ */
+function styleRules(css) {
+  const rules = [];
+  const nesting = [];
+  let buffer = "";
+  let quote = null;
+  let commented = false;
+  let previous = "";
+
+  for (const character of css) {
+    const last = previous;
+    previous = character;
+
+    if (commented) {
+      commented = !(last === "*" && character === "/");
+      continue;
+    }
+    if (quote !== null) {
+      if (character === quote && last !== "\\") quote = null;
+      buffer += character;
+      continue;
+    }
+    if (last === "/" && character === "*") {
+      commented = true;
+      buffer = buffer.slice(0, -1);
+      continue;
+    }
+    if (character === '"' || character === "'") {
+      quote = character;
+      buffer += character;
+      continue;
+    }
+    if (character === "{") {
+      // Anything before the last `;` belongs to the block being descended from,
+      // not to the prelude — a rule may declare and then nest.
+      const boundary = buffer.lastIndexOf(";");
+      const enclosing = nesting.at(-1);
+      if (enclosing) enclosing.declarations += buffer.slice(0, boundary + 1);
+      nesting.push({
+        declarations: "",
+        prelude: buffer
+          .slice(boundary + 1)
+          .trim()
+          .replace(/\s+/g, " "),
+      });
+      buffer = "";
+      continue;
+    }
+    if (character === "}") {
+      const closed = nesting.pop();
+      if (closed !== undefined) {
+        closed.declarations += buffer;
+        if (!closed.prelude.startsWith("@")) {
+          rules.push({
+            at: nesting.map(({ prelude }) => prelude),
+            declarations: closed.declarations,
+            selector: closed.prelude,
+          });
+        }
+      }
+      buffer = "";
+      continue;
+    }
+    buffer += character;
+  }
+
+  return rules;
+}
+
+const stylesheet = await readFile(join(distribution, "styles.css"), "utf8");
+const stylesheetRules = styleRules(stylesheet);
+
+test("the stylesheet scanner reads the rules it is about to assert an absence in", () => {
+  // The two tests below both assert that something is *not* in the stylesheet,
+  // and a scanner that had quietly stopped seeing rules would satisfy them
+  // perfectly. This is the positive control that keeps them honest.
+  const body = stylesheetRules.find(
+    ({ selector }) => selector === "[data-canvas-panel-body]",
+  );
+  const narrow = stylesheetRules.filter(({ at }) => at.length > 1);
+
+  assert.ok(body, "the scanner must find an ordinary Panel rule");
+  assert.match(body.declarations, /padding:\s*var\(--canvas-body-padding\);/);
+  assert.deepEqual(body.at, ["@layer canvas-panels"]);
+  assert.ok(narrow.length > 0, "the scanner must descend into media queries");
+  assert.ok(
+    stylesheetRules.some(({ declarations }) => declarations.includes('"/"')),
+    "the scanner must keep a quoted brace-free string intact",
+  );
+});
+
+test("the --canvas-* defaults are inherited, so an ancestor can theme the Canvas", () => {
+  const declaring = stylesheetRules.filter(({ declarations }) =>
+    new RegExp(`${token}\\s*:`).test(declarations),
+  );
+  // Read from the parsed rules rather than the file: the prose in this
+  // stylesheet's comments names these tokens, and a scan of the raw text counts
+  // a sentence about `--canvas-radius` as a second declaration of it.
+  const css = stylesheetRules.map(({ declarations }) => declarations).join("");
+  const declarations = [
+    ...css.matchAll(new RegExp(`(${token})\\s*:`, "g")),
+  ].map(([, name]) => name);
+  const declared = new Set(declarations);
+  const referenced = new Set(
+    [...css.matchAll(new RegExp(`var\\(\\s*(${token})`, "g"))].map(
+      ([, name]) => name,
+    ),
+  );
+
+  assert.ok(declaring.length > 0, "the stylesheet must declare the tokens");
+  assert.ok(referenced.size > 0, "the stylesheet must read the tokens");
+
+  // Case 1 — no override. Every token the stylesheet reads resolves without
+  // one: either it has an inherited default, or it derives from a token that
+  // has, so a Canvas nobody has themed still paints.
+  const derived = new Set(
+    [
+      ...css.matchAll(
+        new RegExp(`var\\(\\s*(${token})\\s*,\\s*var\\(\\s*(${token})`, "g"),
+      ),
+    ]
+      .filter(([, , source]) => declared.has(source))
+      .map(([, name]) => name),
+  );
+  for (const name of referenced) {
+    assert.ok(
+      declared.has(name) || derived.has(name),
+      `${name} is read but never given a default`,
+    );
+  }
+  // Exactly one default each, and no literal copy of one: a second declaration
+  // or a value repeated into a `var()` fallback is a default that can drift from
+  // the documented one unnoticed.
+  assert.deepEqual(
+    declarations,
+    [...declared],
+    "a token must be declared exactly once",
+  );
+  assert.doesNotMatch(
+    css,
+    // The `\s*` lives inside the lookahead: outside it the engine backtracks to
+    // zero whitespace and the assertion passes on the very thing it forbids.
+    new RegExp(`var\\(\\s*${token}\\s*,(?!\\s*var\\()`),
+    "a token default belongs on :root, not in a var() fallback",
+  );
+  // A default may not derive from another token either. A `var()` inside a
+  // custom property is substituted where that property is declared, so a
+  // derivation written on `:root` resolves against the package's own value and
+  // hands every descendant the answer: an application that overrides the token
+  // it derives from — at any level, including on the Workspace element, where
+  // this used to work — would see nothing change. Derivations belong at the
+  // point of use, as `var(--canvas-action-text, var(--canvas-text-muted))`,
+  // where they resolve against what that element inherited.
+  for (const [, name, value] of css.matchAll(
+    new RegExp(`(${token})\\s*:\\s*([^;]+);`, "g"),
+  )) {
+    assert.doesNotMatch(
+      value,
+      new RegExp(`var\\(\\s*${token}`),
+      `${name} derives from another token where it is declared, so it stops tracking it`,
+    );
+  }
+
+  // Cases 2 and 3 — an override on an ancestor, and one on the Workspace
+  // element itself. Both are declarations on an element, and a declared value
+  // always beats a value inherited into it, whatever layer or specificity the
+  // declaration it was inherited from had. So both win if and only if the
+  // package declares its defaults somewhere the Workspace *inherits* them
+  // from — which is `:root` and nothing else. Declaring them on
+  // `[data-canvas-workspace]`, where they used to live, made case 2 impossible:
+  // the Workspace's own declaration outranked every ancestor override the
+  // README documents.
+  assert.deepEqual(
+    [...new Set(declaring.map(({ selector }) => selector))],
+    [":root"],
+    "a --canvas-* default outside :root cannot be overridden from an ancestor",
+  );
+  for (const rule of declaring) {
+    // Inside the layer, so an application's own `:root` override — unlayered,
+    // or in a layer sorted after `canvas-panels` — still wins.
+    assert.deepEqual(rule.at, ["@layer canvas-panels"]);
+  }
+});
+
+test("the stylesheet is one named cascade layer, and says so where a consumer reads", async () => {
+  const readme = await readFile(
+    join(root, "packages/canvas-panels/README.md"),
+    "utf8",
+  );
+  const layers = [...stylesheet.matchAll(/@layer\s+([^{;]+)[{;]/g)].map(
+    ([, names]) => names.trim(),
+  );
+
+  // One layer, named, and nothing outside it. The name is a consumer's only
+  // handle on where the package sorts against its own CSS.
+  assert.deepEqual(layers, ["canvas-panels"]);
+  for (const rule of stylesheetRules) {
+    assert.equal(
+      rule.at[0],
+      "@layer canvas-panels",
+      `${rule.selector} escapes the canvas-panels layer`,
+    );
+  }
+
+  // A layer nobody documents is a layer nobody sorts, and an unsorted layer is
+  // ordered by import order — which puts the package either above every
+  // application utility or below the reset that then wipes the Canvas. The
+  // README has to name it and show where it goes.
+  assert.match(readme, /`canvas-panels`/);
+  assert.ok(
+    readme.includes(
+      "@layer theme, base, canvas-panels, components, utilities;",
+    ),
+    "the README must give the Tailwind v4 layer order",
+  );
+});
+
 test("continuous integration runs every delivery-path gate on Node 22 and 24", async () => {
   const workflow = await readFile(
     join(root, ".github/workflows/ci.yml"),

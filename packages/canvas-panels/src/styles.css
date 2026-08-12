@@ -2,7 +2,10 @@
  * Canvas Panels compiled stylesheet.
  *
  * Everything lives in the `canvas-panels` cascade layer, so any application
- * rule written outside a layer wins without needing higher specificity. The
+ * rule written outside a layer wins without needing higher specificity. Where
+ * that layer sorts against an application's own layers is the application's
+ * decision and has to be stated by it, because with no `@layer` statement the
+ * order falls out of import order instead. See "Theming" in README.md. The
  * stylesheet ships no preflight and no utility classes: it never resets host
  * elements and never needs a consumer Tailwind scan.
  *
@@ -12,7 +15,25 @@
  * supported integration seam.
  */
 @layer canvas-panels {
-  [data-canvas-workspace] {
+  /*
+   * The defaults are declared on `:root` and nowhere else, so the Workspace
+   * inherits every token rather than declaring it.
+   *
+   * That is what makes the documented seam real: a declared value on an
+   * element always beats a value inherited into it, whatever the layer or the
+   * specificity of the declaration it was inherited from. Declaring these on
+   * `[data-canvas-workspace]` — where they used to live — therefore silently
+   * outranked every ancestor override the README promises, and the only way to
+   * theme a Canvas was to write on the Workspace element itself.
+   *
+   * Inherited defaults keep all three cases working: with no override the
+   * Workspace inherits from `:root`; an override on any ancestor is nearer, so
+   * it inherits that instead; and an override on the Workspace element is a
+   * declaration on the element, which beats both. Being inside the layer also
+   * keeps a `:root` override of the application's own — unlayered, or in a
+   * layer sorted after `canvas-panels` — ahead of the default.
+   */
+  :root {
     /* Surfaces */
     --canvas-surface: Canvas;
     --canvas-surface-active: Canvas;
@@ -42,17 +63,30 @@
       CanvasText 10%,
       transparent
     );
-    --canvas-action-text: var(--canvas-text-muted);
-    --canvas-action-text-hover: var(--canvas-text);
+    /*
+     * `--canvas-action-text`, `--canvas-action-text-hover`, and
+     * `--canvas-action-border` are deliberately absent: each derives from
+     * another token, and a derivation cannot be written here.
+     *
+     * A `var()` inside a custom property is substituted where the property is
+     * declared, and descendants inherit the answer. Declared on `:root`,
+     * `--canvas-action-text: var(--canvas-text-muted)` would resolve against
+     * the *package's* muted text and hand the Canvas a value that no longer
+     * knows where it came from — so an application that recoloured
+     * `--canvas-text-muted` would find its action text unchanged. The
+     * derivation is written at the point of use instead, where it resolves
+     * against whatever that element has inherited.
+     */
     --canvas-action-text-destructive: color-mix(in srgb, red 70%, CanvasText);
-    --canvas-action-border: var(--canvas-border);
     --canvas-action-radius: 99px;
     --canvas-action-padding: 0.4rem 0.7rem;
 
     /* Motion */
     --canvas-transition-duration: 300ms;
     --canvas-transition-easing: ease;
+  }
 
+  [data-canvas-workspace] {
     color: var(--canvas-text);
     display: flex;
     flex-direction: column;
@@ -171,9 +205,15 @@
   [data-canvas-panel-header] button,
   [data-canvas-mobile-navigation] button {
     background: var(--canvas-action-surface);
-    border: 1px solid var(--canvas-action-border);
+    /*
+     * A derived default, resolved here rather than on `:root`: an action
+     * borrows the Canvas's border and muted text unless it was given its own.
+     * Both tokens are read on the element that uses them, so a `--canvas-text-
+     * muted` an application set anywhere above still reaches the action.
+     */
+    border: 1px solid var(--canvas-action-border, var(--canvas-border));
     border-radius: var(--canvas-action-radius);
-    color: var(--canvas-action-text);
+    color: var(--canvas-action-text, var(--canvas-text-muted));
     cursor: pointer;
     font: inherit;
     padding: var(--canvas-action-padding);
@@ -194,7 +234,7 @@
   [data-canvas-panel-header] button:hover,
   [data-canvas-mobile-navigation] button:hover {
     background: var(--canvas-action-surface-hover);
-    color: var(--canvas-action-text-hover);
+    color: var(--canvas-action-text-hover, var(--canvas-text));
   }
 
   [data-canvas-panel-header] button[disabled] {
@@ -316,7 +356,13 @@
   }
 
   [data-canvas-transition-backdrop] {
-    background: var(--canvas-surface-overlay, rgb(0 0 0 / 45%));
+    /*
+     * No in-place fallback here or below. Every token has one inherited
+     * default, declared once on `:root`; a second copy written into a `var()`
+     * is a default that can drift from the documented one without anything
+     * noticing.
+     */
+    background: var(--canvas-surface-overlay);
     display: grid;
     inset: 0;
     padding: 1rem;
@@ -327,11 +373,11 @@
 
   [data-canvas-transition-dialog] {
     background: Canvas;
-    border-radius: var(--canvas-radius, 0.75rem);
+    border-radius: var(--canvas-radius);
     box-shadow: 0 1rem 3rem rgb(0 0 0 / 25%);
     color: CanvasText;
-    padding: var(--canvas-dialog-padding, 1.5rem);
-    width: var(--canvas-dialog-width, min(100%, 32rem));
+    padding: var(--canvas-dialog-padding);
+    width: var(--canvas-dialog-width);
   }
 
   [data-canvas-transition-actions] {
@@ -347,8 +393,13 @@
    * that raised it.
    */
   [data-canvas-overlay] {
-    --canvas-surface-overlay: rgb(0 0 0 / 45%);
-
+    /*
+     * No local `--canvas-surface-overlay`: the overlay layer renders outside
+     * the Workspace it presents, which is why one used to be redeclared here,
+     * but the inherited default reaches it exactly the same way — and a
+     * declaration here would have been one more place an application override
+     * silently lost to.
+     */
     background: var(--canvas-surface-overlay);
     display: grid;
     inset: 0;
@@ -376,7 +427,7 @@
 
   [data-canvas-overlay] > [data-canvas-workspace] {
     background: Canvas;
-    border-radius: var(--canvas-radius, 0.75rem);
+    border-radius: var(--canvas-radius);
     box-shadow: 0 1rem 3rem rgb(0 0 0 / 25%);
     max-block-size: 100%;
     max-inline-size: min(100%, 60rem);
