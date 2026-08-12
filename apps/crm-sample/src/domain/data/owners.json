@@ -1,0 +1,42 @@
+[
+  {
+    "id": "owner-nadia-okonjo",
+    "name": "Nadia Okonjo",
+    "initials": "NO",
+    "title": "Senior Account Executive",
+    "region": "north-america",
+    "quota": 1750000
+  },
+  {
+    "id": "owner-priya-raghavan",
+    "name": "Priya Raghavan",
+    "initials": "PR",
+    "title": "Account Executive",
+    "region": "uk-ireland",
+    "quota": 1400000
+  },
+  {
+    "id": "owner-marcus-delacroix",
+    "name": "Marcus Delacroix",
+    "initials": "MD",
+    "title": "Account Executive",
+    "region": "europe",
+    "quota": 1100000
+  },
+  {
+    "id": "owner-hana-fujimoto",
+    "name": "Hana Fujimoto",
+    "initials": "HF",
+    "title": "Account Executive",
+    "region": "apac",
+    "quota": 850000
+  },
+  {
+    "id": "owner-tomas-lindqvist",
+    "name": "Tomás Lindqvist",
+    "initials": "TL",
+    "title": "Strategic Account Director",
+    "region": "global",
+    "quota": 3200000
+  }
+]

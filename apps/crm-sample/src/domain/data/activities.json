@@ -1,0 +1,722 @@
+[
+  {
+    "id": "activity-northwind-rollout-scoping-workshop",
+    "kind": "meeting",
+    "subject": "Rollout scoping workshop with operations",
+    "body": "Two hours with Dale and four DC managers. Agreed the rollout order — Memphis, Reno, then the Ohio cluster. Dale wants a single go-live weekend per site rather than a phased cutover.",
+    "occurredAt": "2026-06-24T15:00:00Z",
+    "ownerId": "owner-nadia-okonjo",
+    "dealId": "deal-northwind-network-rollout",
+    "contactId": "contact-dale-whitcombe"
+  },
+  {
+    "id": "activity-northwind-rollout-security-review",
+    "kind": "note",
+    "subject": "Security review cleared",
+    "body": "Eugene signed off the architecture review. The only condition is SSO through their existing identity provider from day one, which is already in the statement of work.",
+    "occurredAt": "2026-07-16T09:20:00Z",
+    "ownerId": "owner-nadia-okonjo",
+    "dealId": "deal-northwind-network-rollout",
+    "contactId": "contact-eugene-hartsook"
+  },
+  {
+    "id": "activity-northwind-rollout-legal-call",
+    "kind": "call",
+    "subject": "Call with Dale on the MSA redlines",
+    "body": "Legal is holding on the liability cap and the 30-day termination clause. Dale will push for a decision at Thursday's commercial review. Confident, but would not commit to a date.",
+    "occurredAt": "2026-08-06T16:45:00Z",
+    "ownerId": "owner-nadia-okonjo",
+    "dealId": "deal-northwind-network-rollout",
+    "contactId": "contact-dale-whitcombe"
+  },
+  {
+    "id": "activity-northwind-rollout-budget-email",
+    "kind": "email",
+    "subject": "Re: FY27 budget freeze",
+    "body": "Dale confirmed the freeze lifts on 1 September and that the rollout is line item 14 in the approved capital plan. He asked whether we can start onboarding before the paperwork lands.",
+    "occurredAt": "2026-08-11T08:05:00Z",
+    "ownerId": "owner-nadia-okonjo",
+    "dealId": "deal-northwind-network-rollout",
+    "contactId": "contact-dale-whitcombe"
+  },
+  {
+    "id": "activity-northwind-yard-intro-call",
+    "kind": "call",
+    "subject": "Intro call with Marisol on yard visibility",
+    "body": "Marisol has no live view of which trailers are on which dock. She estimates two hours a day of shunting that would not happen with a yard map. No budget of her own.",
+    "occurredAt": "2026-08-03T14:00:00Z",
+    "ownerId": "owner-nadia-okonjo",
+    "dealId": "deal-northwind-yard-telemetry",
+    "contactId": "contact-marisol-tavares"
+  },
+  {
+    "id": "activity-northwind-yard-site-walk-email",
+    "kind": "email",
+    "subject": "Site walk at the Memphis DC",
+    "body": "Offered the 19th or the 26th. Marisol prefers the 26th so the new dock scheduling shift pattern has bedded in. Asked her to include the yard supervisor.",
+    "occurredAt": "2026-08-10T11:30:00Z",
+    "ownerId": "owner-nadia-okonjo",
+    "dealId": "deal-northwind-yard-telemetry",
+    "contactId": "contact-marisol-tavares"
+  },
+  {
+    "id": "activity-northwind-driver-app-note",
+    "kind": "note",
+    "subject": "Driver app raised in passing",
+    "body": "Dale mentioned that the driver app contract renews in March and that he is not happy with it. Nothing more than a signal at this point — logged so it does not get lost.",
+    "occurredAt": "2026-08-07T17:10:00Z",
+    "ownerId": "owner-nadia-okonjo",
+    "dealId": "deal-northwind-driver-app",
+    "contactId": "contact-dale-whitcombe"
+  },
+  {
+    "id": "activity-wrenfield-scheduling-discovery",
+    "kind": "meeting",
+    "subject": "Discovery session with clinical informatics",
+    "body": "Renata walked us through the current scheduling process across three of the acute sites. Consultant rota changes are handled by email and re-keyed by hand, which is where the errors come from.",
+    "occurredAt": "2026-06-30T13:00:00Z",
+    "ownerId": "owner-nadia-okonjo",
+    "dealId": "deal-wrenfield-clinical-scheduling",
+    "contactId": "contact-renata-oyelaran"
+  },
+  {
+    "id": "activity-wrenfield-scheduling-cfo-intro",
+    "kind": "meeting",
+    "subject": "Introduction to Curtis Nwachukwu",
+    "body": "Thirty minutes, mostly Curtis asking about implementation risk rather than price. He wants a named clinical sponsor on any project over $250k, which Renata will need to become or find.",
+    "occurredAt": "2026-07-15T18:00:00Z",
+    "ownerId": "owner-nadia-okonjo",
+    "dealId": "deal-wrenfield-clinical-scheduling",
+    "contactId": "contact-curtis-nwachukwu"
+  },
+  {
+    "id": "activity-wrenfield-scheduling-proposal-sent",
+    "kind": "email",
+    "subject": "Proposal and three-year pricing sent",
+    "body": "Sent the proposal with a phased option — two acute sites in year one, the rest in year two. Renata confirmed receipt and said she would circulate it before governance.",
+    "occurredAt": "2026-07-29T10:15:00Z",
+    "ownerId": "owner-nadia-okonjo",
+    "dealId": "deal-wrenfield-clinical-scheduling",
+    "contactId": "contact-renata-oyelaran"
+  },
+  {
+    "id": "activity-wrenfield-scheduling-questionnaire-note",
+    "kind": "note",
+    "subject": "Security questionnaire outstanding",
+    "body": "Their questionnaire is 214 questions and IT governance will not table the proposal without it. Ours is 80% pre-answered from the library; the gaps are all about their specific EHR integration.",
+    "occurredAt": "2026-08-10T09:00:00Z",
+    "ownerId": "owner-nadia-okonjo",
+    "dealId": "deal-wrenfield-clinical-scheduling",
+    "contactId": "contact-renata-oyelaran"
+  },
+  {
+    "id": "activity-wrenfield-bed-flow-call",
+    "kind": "call",
+    "subject": "Bed-flow requirements call",
+    "body": "Wesley wants to predict discharge readiness 24 hours ahead. He has been keeping his own spreadsheet since January and it is better than anything the trust provides him.",
+    "occurredAt": "2026-07-28T15:30:00Z",
+    "ownerId": "owner-nadia-okonjo",
+    "dealId": "deal-wrenfield-bed-flow",
+    "contactId": "contact-wesley-tam"
+  },
+  {
+    "id": "activity-wrenfield-bed-flow-data-email",
+    "kind": "email",
+    "subject": "Sample data request for the bed-flow model",
+    "body": "Asked for six months of anonymised admissions and discharge timestamps. Wesley has forwarded it to their privacy office, who quote four weeks for a data-sharing agreement.",
+    "occurredAt": "2026-08-05T12:00:00Z",
+    "ownerId": "owner-nadia-okonjo",
+    "dealId": "deal-wrenfield-bed-flow",
+    "contactId": "contact-wesley-tam"
+  },
+  {
+    "id": "activity-wrenfield-outpatient-note",
+    "kind": "note",
+    "subject": "Outpatient expansion flagged by Renata",
+    "body": "Renata raised the outpatient clinics unprompted at the end of our call. She thinks 18 of the 60 are in the FY27 plan but wants to check before we write anything down.",
+    "occurredAt": "2026-08-10T09:05:00Z",
+    "ownerId": "owner-nadia-okonjo",
+    "dealId": "deal-wrenfield-outpatient-expansion",
+    "contactId": "contact-renata-oyelaran"
+  },
+  {
+    "id": "activity-ellerby-grid-partner-intro",
+    "kind": "meeting",
+    "subject": "Partner-led introduction with Ewan",
+    "body": "Our delivery partner brought us in on the back of their network modelling work. Ewan already had a budget line and a regulatory deadline, which is why this has moved as fast as it has.",
+    "occurredAt": "2026-05-19T10:00:00Z",
+    "ownerId": "owner-tomas-lindqvist",
+    "dealId": "deal-ellerby-grid-programme",
+    "contactId": "contact-ewan-mccorquodale"
+  },
+  {
+    "id": "activity-ellerby-grid-uplift-note",
+    "kind": "note",
+    "subject": "Deal desk approved the 4% uplift cap",
+    "body": "Internal. Deal desk approved capping the annual uplift at 4% for the three-year term in exchange for annual prepayment. No further concessions authorised without a new approval.",
+    "occurredAt": "2026-08-05T11:00:00Z",
+    "ownerId": "owner-tomas-lindqvist",
+    "dealId": "deal-ellerby-grid-programme",
+    "contactId": null
+  },
+  {
+    "id": "activity-ellerby-grid-procurement-note",
+    "kind": "note",
+    "subject": "Supplier re-registration started",
+    "body": "Arjun opened the re-registration on the procurement portal on 3 August. Ten working days, so 17 August at the earliest. Nothing we can do to accelerate it.",
+    "occurredAt": "2026-08-03T16:20:00Z",
+    "ownerId": "owner-tomas-lindqvist",
+    "dealId": "deal-ellerby-grid-programme",
+    "contactId": "contact-arjun-belliappa"
+  },
+  {
+    "id": "activity-ellerby-grid-commercial-review",
+    "kind": "meeting",
+    "subject": "Commercial terms review",
+    "body": "Agreed everything: three-year term, 4% uplift cap, annual prepayment, and a 90-day exit for convenience after year two. Ewan said he would sign once procurement clears the registration.",
+    "occurredAt": "2026-08-06T14:00:00Z",
+    "ownerId": "owner-tomas-lindqvist",
+    "dealId": "deal-ellerby-grid-programme",
+    "contactId": "contact-ewan-mccorquodale"
+  },
+  {
+    "id": "activity-ellerby-grid-order-form-email",
+    "kind": "email",
+    "subject": "Chasing the signed order form",
+    "body": "Short note to Ewan confirming the order form matches what we agreed on the 6th and asking him to sign as soon as the portal clears. No response yet.",
+    "occurredAt": "2026-08-11T09:40:00Z",
+    "ownerId": "owner-tomas-lindqvist",
+    "dealId": "deal-ellerby-grid-programme",
+    "contactId": "contact-ewan-mccorquodale"
+  },
+  {
+    "id": "activity-ellerby-outage-demo",
+    "kind": "meeting",
+    "subject": "Outage communications demo",
+    "body": "Demoed the proactive notification flow to Bethan and two of her team leads. The question that stuck was whether we can suppress notifications for planned works, which we can.",
+    "occurredAt": "2026-07-24T13:30:00Z",
+    "ownerId": "owner-priya-raghavan",
+    "dealId": "deal-ellerby-outage-comms",
+    "contactId": "contact-bethan-hollis"
+  },
+  {
+    "id": "activity-ellerby-outage-proposal-email",
+    "kind": "email",
+    "subject": "Add-on proposal sent to Bethan",
+    "body": "Priced as an add-on to the grid programme rather than standalone, which saves them roughly 30%. Flagged that the pricing holds only if both are signed in the same order.",
+    "occurredAt": "2026-08-04T15:00:00Z",
+    "ownerId": "owner-priya-raghavan",
+    "dealId": "deal-ellerby-outage-comms",
+    "contactId": "contact-bethan-hollis"
+  },
+  {
+    "id": "activity-ellerby-water-inbound-note",
+    "kind": "note",
+    "subject": "Inbound enquiry from the metering programme",
+    "body": "Website enquiry naming the smart metering programme. Ewan confirmed it is a different director's budget and offered to make an introduction, which is the fastest route in.",
+    "occurredAt": "2026-08-05T08:30:00Z",
+    "ownerId": "owner-priya-raghavan",
+    "dealId": "deal-ellerby-water-metering",
+    "contactId": "contact-ewan-mccorquodale"
+  },
+  {
+    "id": "activity-verdant-yield-referral-call",
+    "kind": "call",
+    "subject": "Referral call from Orrery Robotics",
+    "body": "Matthias at Orrery introduced us to Lieke. First call was mostly Lieke testing whether we understood arable agronomy, which the pilot data answered better than we could have.",
+    "occurredAt": "2026-05-12T09:00:00Z",
+    "ownerId": "owner-marcus-delacroix",
+    "dealId": "deal-verdant-yield-platform",
+    "contactId": "contact-lieke-vandenberg"
+  },
+  {
+    "id": "activity-verdant-yield-pilot-review",
+    "kind": "meeting",
+    "subject": "Pilot results review",
+    "body": "Pieter's team modelled 11,000 hectares and beat their in-house baseline by six points on yield prediction error. Lieke asked for the methodology write-up to share with her board.",
+    "occurredAt": "2026-06-11T13:00:00Z",
+    "ownerId": "owner-marcus-delacroix",
+    "dealId": "deal-verdant-yield-platform",
+    "contactId": "contact-pieter-mols"
+  },
+  {
+    "id": "activity-verdant-yield-signed-note",
+    "kind": "note",
+    "subject": "Contract signed",
+    "body": "Two-year term signed. Lieke agreed to act as a reference for other agritech prospects and to co-present at the growers' conference in November.",
+    "occurredAt": "2026-06-26T15:45:00Z",
+    "ownerId": "owner-marcus-delacroix",
+    "dealId": "deal-verdant-yield-platform",
+    "contactId": "contact-lieke-vandenberg"
+  },
+  {
+    "id": "activity-verdant-onboarding-note",
+    "kind": "note",
+    "subject": "Onboarding kickoff scheduled",
+    "body": "Account-level note. Onboarding starts 14 July with Pieter's team. Not tied to a deal — this is delivery, but worth having on the account timeline.",
+    "occurredAt": "2026-07-02T09:00:00Z",
+    "ownerId": "owner-marcus-delacroix",
+    "dealId": null,
+    "contactId": "contact-lieke-vandenberg"
+  },
+  {
+    "id": "activity-verdant-sensors-scoping-call",
+    "kind": "call",
+    "subject": "Sensor expansion scoping",
+    "body": "Pieter wants 300 additional sensors across the eastern trial sites. His constraint is the autumn drilling window — anything that arrives after early October is useless until spring.",
+    "occurredAt": "2026-08-01T10:30:00Z",
+    "ownerId": "owner-marcus-delacroix",
+    "dealId": "deal-verdant-field-sensors",
+    "contactId": "contact-pieter-mols"
+  },
+  {
+    "id": "activity-verdant-sensors-quote-email",
+    "kind": "email",
+    "subject": "Indicative pricing for 300 additional sensors",
+    "body": "Sent indicative pricing to Lieke with a caveat on lead time. She replied within the hour saying the number is fine and to sort out the dates with Pieter.",
+    "occurredAt": "2026-08-07T14:10:00Z",
+    "ownerId": "owner-marcus-delacroix",
+    "dealId": "deal-verdant-field-sensors",
+    "contactId": "contact-lieke-vandenberg"
+  },
+  {
+    "id": "activity-stonebridge-reporting-referral-note",
+    "kind": "note",
+    "subject": "Referred by an operating partner",
+    "body": "One of Hugh's operating partners saw the portfolio pack at another firm and asked who built it. Imogen picked up the thread from there.",
+    "occurredAt": "2026-06-17T11:00:00Z",
+    "ownerId": "owner-priya-raghavan",
+    "dealId": "deal-stonebridge-portfolio-reporting",
+    "contactId": "contact-imogen-farrant"
+  },
+  {
+    "id": "activity-stonebridge-reporting-workshop",
+    "kind": "meeting",
+    "subject": "Reporting requirements workshop",
+    "body": "Imogen spends roughly four days a quarter assembling the pack by hand across 22 portfolio companies. Half of that is chasing companies for numbers, which we cannot fix; the other half we can.",
+    "occurredAt": "2026-07-17T09:30:00Z",
+    "ownerId": "owner-priya-raghavan",
+    "dealId": "deal-stonebridge-portfolio-reporting",
+    "contactId": "contact-imogen-farrant"
+  },
+  {
+    "id": "activity-stonebridge-reporting-proposal-email",
+    "kind": "email",
+    "subject": "Proposal sent with two commercial options",
+    "body": "Two options: annual rolling, or three years with a discount and a fixed uplift. Hugh will want the discount and to keep the annual break, so expect a negotiation on term length.",
+    "occurredAt": "2026-08-04T16:00:00Z",
+    "ownerId": "owner-priya-raghavan",
+    "dealId": "deal-stonebridge-portfolio-reporting",
+    "contactId": "contact-hugh-tarrington"
+  },
+  {
+    "id": "activity-stonebridge-diligence-inbound-email",
+    "kind": "email",
+    "subject": "Inbound question about diligence workspaces",
+    "body": "Imogen asked, almost as an afterthought at the end of an unrelated email, whether we do anything for live diligence. Answered briefly and offered a call in September.",
+    "occurredAt": "2026-08-11T13:20:00Z",
+    "ownerId": "owner-priya-raghavan",
+    "dealId": "deal-stonebridge-diligence-workspace",
+    "contactId": "contact-imogen-farrant"
+  },
+  {
+    "id": "activity-fernbrook-api-trial-call",
+    "kind": "call",
+    "subject": "Trial feedback call with Omar",
+    "body": "Omar had the forecast API in production against two client accounts within a fortnight. His only complaint was rate limiting on backfill, which we raised as a product request.",
+    "occurredAt": "2026-06-23T16:00:00Z",
+    "ownerId": "owner-nadia-okonjo",
+    "dealId": "deal-fernbrook-forecast-api",
+    "contactId": "contact-omar-benzarti"
+  },
+  {
+    "id": "activity-fernbrook-api-order-email",
+    "kind": "email",
+    "subject": "Order form countersigned",
+    "body": "Twelve-month licence countersigned. Shauna asked to be invoiced quarterly, which finance approved.",
+    "occurredAt": "2026-07-10T11:05:00Z",
+    "ownerId": "owner-nadia-okonjo",
+    "dealId": "deal-fernbrook-forecast-api",
+    "contactId": "contact-shauna-petrides"
+  },
+  {
+    "id": "activity-fernbrook-benchmarks-scoping-call",
+    "kind": "call",
+    "subject": "Benchmark dataset scoping",
+    "body": "Shauna wants regional benchmarks she can put in front of her own clients. That is a redistribution question rather than a pricing one, and it needs a legal answer before anything else.",
+    "occurredAt": "2026-07-30T15:00:00Z",
+    "ownerId": "owner-nadia-okonjo",
+    "dealId": "deal-fernbrook-retail-benchmarks",
+    "contactId": "contact-shauna-petrides"
+  },
+  {
+    "id": "activity-fernbrook-benchmarks-sample-email",
+    "kind": "email",
+    "subject": "Sample benchmark extract sent",
+    "body": "Sent Omar a two-region sample so he can judge the granularity. He came back the same day asking for store-format splits, which we do not currently publish.",
+    "occurredAt": "2026-08-06T10:20:00Z",
+    "ownerId": "owner-nadia-okonjo",
+    "dealId": "deal-fernbrook-retail-benchmarks",
+    "contactId": "contact-omar-benzarti"
+  },
+  {
+    "id": "activity-saltmarsh-vessel-discovery",
+    "kind": "meeting",
+    "subject": "Fleet scheduling discovery",
+    "body": "Annika runs 14 vessels against a whiteboard and a shared calendar. She was clear about the problem and equally clear that she cannot approve anything on this scale herself.",
+    "occurredAt": "2026-06-19T09:00:00Z",
+    "ownerId": "owner-marcus-delacroix",
+    "dealId": "deal-saltmarsh-vessel-scheduling",
+    "contactId": "contact-annika-solheim"
+  },
+  {
+    "id": "activity-saltmarsh-vessel-coo-email",
+    "kind": "email",
+    "subject": "Request for time with Jesper",
+    "body": "Asked Annika to introduce us to Jesper. She agreed in principle but has not made it happen — she is deep in the summer charter season.",
+    "occurredAt": "2026-07-22T12:00:00Z",
+    "ownerId": "owner-marcus-delacroix",
+    "dealId": "deal-saltmarsh-vessel-scheduling",
+    "contactId": "contact-jesper-noergaard"
+  },
+  {
+    "id": "activity-saltmarsh-vessel-stall-note",
+    "kind": "note",
+    "subject": "Deal has not moved since June",
+    "body": "Fifty-four days in discovery with no decision date. Two options: escalate to Jesper directly and risk irritating Annika, or accept that this lands in next year's budget. Escalating.",
+    "occurredAt": "2026-08-10T08:15:00Z",
+    "ownerId": "owner-marcus-delacroix",
+    "dealId": "deal-saltmarsh-vessel-scheduling",
+    "contactId": "contact-annika-solheim"
+  },
+  {
+    "id": "activity-saltmarsh-subsea-inbound-call",
+    "kind": "call",
+    "subject": "Inbound call about inspection reporting",
+    "body": "Freya rang after seeing the scheduling demo materials circulating internally. Her inspection reports go to clients, so the formatting and audit trail matter more than the analysis.",
+    "occurredAt": "2026-08-06T11:00:00Z",
+    "ownerId": "owner-marcus-delacroix",
+    "dealId": "deal-saltmarsh-subsea-inspection",
+    "contactId": "contact-freya-lindholm"
+  },
+  {
+    "id": "activity-coldbrook-subscriber-discovery",
+    "kind": "meeting",
+    "subject": "Platform migration discovery",
+    "body": "Fionnuala walked us through the subscriber estate. Their incumbent platform is 11 years old and nobody defends it, but the migration cost is the whole argument.",
+    "occurredAt": "2026-05-06T10:00:00Z",
+    "ownerId": "owner-priya-raghavan",
+    "dealId": "deal-coldbrook-subscriber-platform",
+    "contactId": "contact-fionnuala-cregan"
+  },
+  {
+    "id": "activity-coldbrook-subscriber-proposal-email",
+    "kind": "email",
+    "subject": "Migration proposal sent",
+    "body": "Proposal included a phased migration by title to keep the cash cost inside one financial year. Fionnuala said it was the right shape but that the timing was wrong.",
+    "occurredAt": "2026-06-18T14:30:00Z",
+    "ownerId": "owner-priya-raghavan",
+    "dealId": "deal-coldbrook-subscriber-platform",
+    "contactId": "contact-fionnuala-cregan"
+  },
+  {
+    "id": "activity-coldbrook-subscriber-loss-call",
+    "kind": "call",
+    "subject": "Fionnuala confirmed no decision this year",
+    "body": "The board will not fund a platform migration in the same year as the print restructure. She was straight with us about it, which is worth something. Revisit after February results.",
+    "occurredAt": "2026-07-24T15:10:00Z",
+    "ownerId": "owner-priya-raghavan",
+    "dealId": "deal-coldbrook-subscriber-platform",
+    "contactId": "contact-fionnuala-cregan"
+  },
+  {
+    "id": "activity-coldbrook-events-inbound-email",
+    "kind": "email",
+    "subject": "Desmond asked about events CRM",
+    "body": "Desmond emailed directly after hearing about the subscriber conversation. His events business is profitable and he implied he has discretion over his own tooling budget.",
+    "occurredAt": "2026-08-04T09:45:00Z",
+    "ownerId": "owner-priya-raghavan",
+    "dealId": "deal-coldbrook-events-crm",
+    "contactId": "contact-desmond-arkwright"
+  },
+  {
+    "id": "activity-orrery-cell-expo-meeting",
+    "kind": "meeting",
+    "subject": "Met Matthias at the automation expo",
+    "body": "Twenty minutes at the stand. Matthias described unplanned stops on the electronics lines as his single biggest measured problem, and asked for a trial before he would talk numbers.",
+    "occurredAt": "2026-06-03T12:00:00Z",
+    "ownerId": "owner-marcus-delacroix",
+    "dealId": "deal-orrery-cell-monitoring",
+    "contactId": "contact-matthias-kuiper"
+  },
+  {
+    "id": "activity-orrery-cell-line-trial",
+    "kind": "meeting",
+    "subject": "Trial on the Eindhoven line",
+    "body": "Two-week trial on one cell. Unplanned stops fell by roughly a third. Matthias has the figures and is prepared to stand behind them internally.",
+    "occurredAt": "2026-07-09T08:30:00Z",
+    "ownerId": "owner-marcus-delacroix",
+    "dealId": "deal-orrery-cell-monitoring",
+    "contactId": "contact-matthias-kuiper"
+  },
+  {
+    "id": "activity-orrery-cell-proposal-email",
+    "kind": "email",
+    "subject": "Proposal sent to Saskia and Matthias",
+    "body": "Priced for four cells with an option on the remaining six. Copied Saskia directly for the first time — she has not engaged with us at all so far.",
+    "occurredAt": "2026-07-20T16:00:00Z",
+    "ownerId": "owner-marcus-delacroix",
+    "dealId": "deal-orrery-cell-monitoring",
+    "contactId": "contact-saskia-vermeulen"
+  },
+  {
+    "id": "activity-orrery-cell-followup-call",
+    "kind": "call",
+    "subject": "Follow-up on the proposal",
+    "body": "Matthias says Saskia has read it and has questions but has not written them down. Asked him to get them in writing before the 20 August operations review.",
+    "occurredAt": "2026-08-11T10:00:00Z",
+    "ownerId": "owner-marcus-delacroix",
+    "dealId": "deal-orrery-cell-monitoring",
+    "contactId": "contact-matthias-kuiper"
+  },
+  {
+    "id": "activity-orrery-spares-requirements-call",
+    "kind": "call",
+    "subject": "Spares forecasting requirements",
+    "body": "Tobias is carrying €1.4m of slow-moving spares and is measured on it quarterly. He wants a forecast he can defend to finance, not a dashboard.",
+    "occurredAt": "2026-07-27T13:00:00Z",
+    "ownerId": "owner-marcus-delacroix",
+    "dealId": "deal-orrery-spares-forecasting",
+    "contactId": "contact-tobias-reinders"
+  },
+  {
+    "id": "activity-orrery-spares-data-note",
+    "kind": "note",
+    "subject": "Still waiting on the parts history",
+    "body": "Two years of parts movement has been promised twice and not delivered. The bottleneck is their ERP team, not Tobias. Nothing here progresses until the extract lands.",
+    "occurredAt": "2026-08-05T09:00:00Z",
+    "ownerId": "owner-marcus-delacroix",
+    "dealId": "deal-orrery-spares-forecasting",
+    "contactId": "contact-tobias-reinders"
+  },
+  {
+    "id": "activity-vantry-quality-exec-briefing",
+    "kind": "meeting",
+    "subject": "Executive briefing with supplier quality",
+    "body": "Gwen brought eight people. Their supplier corrective-action cycle averages 47 days and their customers have started asking about it, which is the pressure behind this programme.",
+    "occurredAt": "2026-04-28T14:00:00Z",
+    "ownerId": "owner-tomas-lindqvist",
+    "dealId": "deal-vantry-supplier-quality",
+    "contactId": "contact-gwen-abernathy"
+  },
+  {
+    "id": "activity-vantry-quality-export-control-note",
+    "kind": "note",
+    "subject": "Export-control review passed",
+    "body": "Their trade compliance team cleared the architecture on 29 July, subject to no technical data leaving the country of origin. That condition is what makes the Ontario residency question load-bearing.",
+    "occurredAt": "2026-07-29T17:30:00Z",
+    "ownerId": "owner-tomas-lindqvist",
+    "dealId": "deal-vantry-supplier-quality",
+    "contactId": "contact-roland-pashkevich"
+  },
+  {
+    "id": "activity-vantry-quality-residency-call",
+    "kind": "call",
+    "subject": "Data residency for the Ontario plant",
+    "body": "Gwen needs a written commitment that Ontario data stays in Canada. A verbal assurance from us is not enough for her compliance team. Escalated to infrastructure the same afternoon.",
+    "occurredAt": "2026-08-07T15:00:00Z",
+    "ownerId": "owner-tomas-lindqvist",
+    "dealId": "deal-vantry-supplier-quality",
+    "contactId": "contact-gwen-abernathy"
+  },
+  {
+    "id": "activity-vantry-quality-cpo-email",
+    "kind": "email",
+    "subject": "Re: five-year agreement structure",
+    "body": "Roland wants the five-year term broken into an initial three with two optional years at pre-agreed pricing. Workable, but it changes the year-one recognition and needs deal desk.",
+    "occurredAt": "2026-08-12T07:50:00Z",
+    "ownerId": "owner-tomas-lindqvist",
+    "dealId": "deal-vantry-supplier-quality",
+    "contactId": "contact-roland-pashkevich"
+  },
+  {
+    "id": "activity-vantry-mro-workshop",
+    "kind": "meeting",
+    "subject": "MRO analytics scoping workshop",
+    "body": "Yasmin wants the pilot narrow enough to run without a steering committee. Settled on one fleet type and two maintenance bases as the scope.",
+    "occurredAt": "2026-07-01T13:00:00Z",
+    "ownerId": "owner-tomas-lindqvist",
+    "dealId": "deal-vantry-mro-analytics",
+    "contactId": "contact-yasmin-arroyo"
+  },
+  {
+    "id": "activity-vantry-mro-proposal-email",
+    "kind": "email",
+    "subject": "Pilot proposal sent to Yasmin",
+    "body": "Six-month pilot priced separately from the supplier quality programme, deliberately, so neither holds up the other. Yasmin confirmed she has the discretionary budget for a pilot at this size.",
+    "occurredAt": "2026-07-31T11:15:00Z",
+    "ownerId": "owner-tomas-lindqvist",
+    "dealId": "deal-vantry-mro-analytics",
+    "contactId": "contact-yasmin-arroyo"
+  },
+  {
+    "id": "activity-vantry-tooling-intro-call",
+    "kind": "call",
+    "subject": "Introductory call with Devon",
+    "body": "Gwen passed Devon our details. They lose around 90 tools a year across three plants and currently track them on laminated cards. No budget identified.",
+    "occurredAt": "2026-08-08T16:30:00Z",
+    "ownerId": "owner-nadia-okonjo",
+    "dealId": "deal-vantry-tooling-traceability",
+    "contactId": "contact-devon-mkhize"
+  },
+  {
+    "id": "activity-meadowlark-cold-chain-pilot-review",
+    "kind": "meeting",
+    "subject": "Cold-chain pilot review",
+    "body": "Lucia ran the pilot on eight trailers for three weeks. Two temperature excursions caught in transit that would previously have been found at the depot.",
+    "occurredAt": "2026-05-07T14:00:00Z",
+    "ownerId": "owner-nadia-okonjo",
+    "dealId": "deal-meadowlark-cold-chain",
+    "contactId": "contact-lucia-okamoto"
+  },
+  {
+    "id": "activity-meadowlark-cold-chain-signed-note",
+    "kind": "note",
+    "subject": "Signed for three sites",
+    "body": "Brandt signed for three sites on 29 May. April's spoilage incident cost them more than the contract does, so the business case never needed defending.",
+    "occurredAt": "2026-05-29T16:00:00Z",
+    "ownerId": "owner-nadia-okonjo",
+    "dealId": "deal-meadowlark-cold-chain",
+    "contactId": "contact-brandt-ferreira"
+  },
+  {
+    "id": "activity-meadowlark-oee-walkthrough",
+    "kind": "meeting",
+    "subject": "Line walkthrough at Ridgefield",
+    "body": "Walked three lines with Lucia. She has timed 14 changeovers by hand and the spread is 22 to 71 minutes for the same product pair. That variance is the entire pitch.",
+    "occurredAt": "2026-08-02T13:00:00Z",
+    "ownerId": "owner-nadia-okonjo",
+    "dealId": "deal-meadowlark-line-oee",
+    "contactId": "contact-lucia-okamoto"
+  },
+  {
+    "id": "activity-meadowlark-oee-business-case-email",
+    "kind": "email",
+    "subject": "Draft business case for OEE tracking",
+    "body": "Sent Brandt a one-page case built on Lucia's changeover figures. He replied asking whether the cold-chain contract can be amended rather than adding a second agreement.",
+    "occurredAt": "2026-08-09T10:40:00Z",
+    "ownerId": "owner-nadia-okonjo",
+    "dealId": "deal-meadowlark-line-oee",
+    "contactId": "contact-brandt-ferreira"
+  },
+  {
+    "id": "activity-meadowlark-quality-intro-call",
+    "kind": "call",
+    "subject": "Introduction to Hollis in quality assurance",
+    "body": "Account-level introduction, no deal attached. Hollis owns their audit evidence and would be a stakeholder in anything we do at the plants, so worth knowing early.",
+    "occurredAt": "2026-07-14T15:00:00Z",
+    "ownerId": "owner-nadia-okonjo",
+    "dealId": null,
+    "contactId": "contact-hollis-tenpenny"
+  },
+  {
+    "id": "activity-harrowgate-store-ops-forum-meeting",
+    "kind": "meeting",
+    "subject": "Met Nerys at the retail operations forum",
+    "body": "Nerys sought us out after the panel. Her 240 stores each run their own compliance checklist and she has no way to see completion centrally.",
+    "occurredAt": "2026-06-11T11:00:00Z",
+    "ownerId": "owner-priya-raghavan",
+    "dealId": "deal-harrowgate-store-ops",
+    "contactId": "contact-nerys-gallacher"
+  },
+  {
+    "id": "activity-harrowgate-nerys-checkin-call",
+    "kind": "call",
+    "subject": "Quarterly check-in with Nerys",
+    "body": "Relationship call rather than a deal call. Useful context: Simeon has told the operations function he will not read two business cases from them this year.",
+    "occurredAt": "2026-07-06T10:00:00Z",
+    "ownerId": "owner-priya-raghavan",
+    "dealId": null,
+    "contactId": "contact-nerys-gallacher"
+  },
+  {
+    "id": "activity-harrowgate-store-ops-discovery",
+    "kind": "meeting",
+    "subject": "Store operations discovery",
+    "body": "Half a day with Nerys and two regional managers. The compliance checklist is the visible problem; the real one is that nobody trusts the completion figures they already have.",
+    "occurredAt": "2026-07-31T09:00:00Z",
+    "ownerId": "owner-priya-raghavan",
+    "dealId": "deal-harrowgate-store-ops",
+    "contactId": "contact-nerys-gallacher"
+  },
+  {
+    "id": "activity-harrowgate-store-ops-coo-note",
+    "kind": "note",
+    "subject": "Simeon wants a single business case",
+    "body": "Confirmed with Nerys: store operations and returns must arrive as one paper or neither gets read. Restructuring the proposal accordingly rather than arguing the point.",
+    "occurredAt": "2026-08-11T15:30:00Z",
+    "ownerId": "owner-priya-raghavan",
+    "dealId": "deal-harrowgate-store-ops",
+    "contactId": "contact-simeon-abbotsford"
+  },
+  {
+    "id": "activity-harrowgate-returns-inbound-email",
+    "kind": "email",
+    "subject": "Returns analytics enquiry",
+    "body": "Tallulah enquired through the website. Returns run at 18% on garden furniture and she has no analysis of why.",
+    "occurredAt": "2026-04-21T09:30:00Z",
+    "ownerId": "owner-priya-raghavan",
+    "dealId": "deal-harrowgate-returns-analytics",
+    "contactId": "contact-tallulah-brisbane"
+  },
+  {
+    "id": "activity-harrowgate-returns-closed-note",
+    "kind": "note",
+    "subject": "Closed as no decision — sponsor left",
+    "body": "The sponsor left in May and nobody picked this up. Tallulah still wants it but cannot fund it. Folding the requirement into the store operations case rather than keeping it open.",
+    "occurredAt": "2026-06-12T14:00:00Z",
+    "ownerId": "owner-priya-raghavan",
+    "dealId": "deal-harrowgate-returns-analytics",
+    "contactId": "contact-tallulah-brisbane"
+  },
+  {
+    "id": "activity-quandong-planner-partner-intro-call",
+    "kind": "call",
+    "subject": "Partner introduction to Jarrah",
+    "body": "Our regional partner made the introduction. Quandong would embed our forecasting inside their planner rather than resell it, so this eventually becomes a rev-share conversation.",
+    "occurredAt": "2026-08-09T02:30:00Z",
+    "ownerId": "owner-hana-fujimoto",
+    "dealId": "deal-quandong-maintenance-planner",
+    "contactId": "contact-jarrah-mullaney"
+  },
+  {
+    "id": "activity-quandong-planner-api-email",
+    "kind": "email",
+    "subject": "Integration questions from Inés",
+    "body": "Inés asked five specific questions about rate limits, webhook retries, and backfill. Answered four; the retry semantics need a product answer.",
+    "occurredAt": "2026-08-11T04:15:00Z",
+    "ownerId": "owner-hana-fujimoto",
+    "dealId": "deal-quandong-maintenance-planner",
+    "contactId": "contact-ines-caballero"
+  },
+  {
+    "id": "activity-tussock-ridge-quality-intro-call",
+    "kind": "call",
+    "subject": "Milk quality traceability intro",
+    "body": "Margot knows exactly where the traceability gaps are — collection to intake is a paper record. She also has no budget and no route to one on her own.",
+    "occurredAt": "2026-08-03T21:00:00Z",
+    "ownerId": "owner-hana-fujimoto",
+    "dealId": "deal-tussock-ridge-milk-quality",
+    "contactId": "contact-margot-cheyne"
+  },
+  {
+    "id": "activity-tussock-ridge-gm-email",
+    "kind": "email",
+    "subject": "Request for a meeting with Hemi",
+    "body": "Asked Margot to introduce us to Hemi before the October member vote. Capital decisions go to the members, so the timeline is fixed regardless of what we do.",
+    "occurredAt": "2026-08-10T22:30:00Z",
+    "ownerId": "owner-hana-fujimoto",
+    "dealId": "deal-tussock-ridge-milk-quality",
+    "contactId": "contact-hemi-rawiri"
+  }
+]
