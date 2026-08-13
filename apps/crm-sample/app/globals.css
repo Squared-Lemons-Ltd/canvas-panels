@@ -303,6 +303,30 @@
   [data-meridian-canvas="mounted"] [data-canvas-application] {
     flex: 1 1 auto;
     min-block-size: 0;
+
+    /*
+     * A seam between Panels, so a stack reads as several surfaces rather than
+     * one wide one divided by hairlines.
+     *
+     * `--canvas-panel-gap` is the package's own token and needs no reaching
+     * past the theming seam. What it does need is somewhere to show: the Canvas
+     * paints the surface behind the Panels in `--canvas-surface` too, so a gap
+     * between two Panels the same colour as the thing behind them is a gap
+     * nobody can see. Recessing the Canvas to the page colour is what turns the
+     * token into a gutter.
+     */
+    --canvas-panel-gap: 0.5rem;
+
+    background: var(--background);
+  }
+
+  /*
+   * With a gutter doing the separating, each Panel's trailing hairline is one
+   * line too many — and on the deepest Panel it had nothing beyond it to
+   * separate, so it read as an edge drawn in the middle of the Canvas.
+   */
+  [data-meridian-canvas="mounted"] [data-canvas-panel] {
+    border-inline-end: none;
   }
 
   /*
