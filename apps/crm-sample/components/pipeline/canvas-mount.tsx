@@ -26,10 +26,12 @@ import { usePathname, useSearchParams } from "next/navigation";
 import type { RefObject } from "react";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
-
+import { EventChannel } from "./event-channel";
 import { pipelinePanels, pipelineRoot, referenceFor } from "./panels";
 import { PipelineCanvas } from "./pipeline-canvas";
 import { registerPipelineNavigator } from "./pipeline-navigator";
+import { TetherLayer } from "./tether-layer";
+import { CanvasTrail } from "./trail";
 
 /**
  * One Resource Exchange for the pipeline. Every Panel showing a deal, an
@@ -202,7 +204,12 @@ export function CanvasMount({
           id="canvas-mount"
           ref={container}
         >
-          <PipelineCanvas.Workspace label="Meridian pipeline" />
+          <CanvasTrail />
+          <div className="relative flex min-h-0 flex-1 flex-col">
+            <PipelineCanvas.Workspace label="Meridian pipeline" />
+            <TetherLayer />
+          </div>
+          <EventChannel />
         </section>
       </PipelineCanvas.Provider>
     </ResourceExchangeProvider>

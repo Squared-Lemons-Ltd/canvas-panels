@@ -167,16 +167,35 @@ export function MetaList({
   );
 }
 
+/**
+ * How the tether layer finds the row a Panel was opened from.
+ *
+ * Every control that opens a record carries that record's id, and nothing else
+ * has to be arranged: the tether layer knows which record the next Panel shows,
+ * so naming the record on the control is enough for it to find the one line on
+ * the page that produced the Panel beside it.
+ *
+ * The lit state is written back onto the same element as an attribute, and is
+ * important because it has to survive the row's own hover — a reader pointing
+ * at the row they came from must not see the connection weaken under the
+ * cursor.
+ */
+export const litRow =
+  "data-[meridian-tethered]:border-primary! data-[meridian-tethered]:bg-primary/10!";
+
 /** A row that opens another record. The whole row is the control. */
 export function RecordRow({
   label,
   primary,
+  recordId,
   secondary,
   trailing,
   onSelect,
 }: Readonly<{
   label: string;
   primary: ReactNode;
+  /** The record this row opens, for the tether layer to find it by. */
+  recordId: string;
   secondary?: ReactNode;
   trailing?: ReactNode;
   onSelect: () => void;
@@ -184,7 +203,11 @@ export function RecordRow({
   return (
     <button
       aria-label={label}
-      className="flex w-full items-center gap-3 rounded-lg border border-border bg-card px-3 py-2.5 text-left transition-colors hover:border-primary/60 hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+      className={cn(
+        "flex w-full items-center gap-3 rounded-lg border border-border bg-card px-3 py-2.5 text-left transition-colors hover:border-primary/60 hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none",
+        litRow,
+      )}
+      data-meridian-record={recordId}
       onClick={onSelect}
       type="button"
     >
@@ -228,7 +251,11 @@ export function DealCard({
   return (
     <button
       aria-label={`${deal.title}, ${company?.name ?? "unknown account"}, ${formatMoney(value)}, ${deal.daysInStage} days in ${pipelineStageLabels[deal.stage]}`}
-      className="group flex w-full flex-col gap-2 rounded-lg border border-border bg-card p-3 text-left transition-colors hover:border-primary/60 hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+      className={cn(
+        "group flex w-full flex-col gap-2 rounded-lg border border-border bg-card p-3 text-left transition-colors hover:border-primary/60 hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none",
+        litRow,
+      )}
+      data-meridian-record={deal.id}
       onClick={onSelect}
       type="button"
     >

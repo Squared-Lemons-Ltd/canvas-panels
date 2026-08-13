@@ -196,6 +196,62 @@
 }
 
 /*
+ * The trail.
+ *
+ * Two moments, and only two. A station arriving grows out of the step that
+ * produced it, so the eye is already on the connector when the new name
+ * appears. A station leaving collapses along the same axis — which is the only
+ * way Branch Replacement is ever visible: remove three Panels instantly and it
+ * reads as a redraw, remove them over a quarter of a second and it reads as
+ * the trail being cut back to where the reader stepped off it.
+ *
+ * Both run from an already-visible default, so a reader who arrives on a deep
+ * link sees a finished trail rather than one assembling itself.
+ */
+@layer components {
+  @keyframes meridian-station-arrive {
+    from {
+      opacity: 0;
+      transform: translateX(-0.5rem);
+      clip-path: inset(0 100% 0 0);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+      clip-path: inset(0 0 0 0);
+    }
+  }
+
+  @keyframes meridian-station-retire {
+    from {
+      opacity: 1;
+      max-inline-size: 22rem;
+    }
+    to {
+      opacity: 0;
+      max-inline-size: 0;
+    }
+  }
+
+  [data-meridian-trail] > ol > li {
+    animation: meridian-station-arrive 260ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  [data-meridian-station-retiring] {
+    overflow: hidden;
+    pointer-events: none;
+    animation: meridian-station-retire 260ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    [data-meridian-trail] > ol > li,
+    [data-meridian-station-retiring] {
+      animation-duration: 1ms;
+    }
+  }
+}
+
+/*
  * Canvas Panels theming.
  *
  * The package declares its `--canvas-*` tokens *on the Workspace element* in
@@ -263,6 +319,209 @@
 
     [data-canvas-panel][data-panel-kind="pipeline"][data-canvas-panel-context="previous"] {
       flex-basis: 35%;
+    }
+  }
+
+  /*
+   * Spines.
+   *
+   * A Panel Stack is a path somebody walked, and a path has depth: the Active
+   * Panel is where the reader is, the Panel before it is the context that
+   * explains how they got there, and everything further back is somewhere they
+   * have been. Drawn as equally-weighted cards none of that is legible — a wide
+   * screen holds the whole trail at once, so nothing on the Canvas says which
+   * way is back, and the framework's one structural idea reads as an ordinary
+   * master-detail layout.
+   *
+   * So every visible Panel that is neither of those two compresses to a narrow
+   * spine carrying its title, and the width it gives up goes to the Panel being
+   * read. The Root Panel is not exempt: the board is the widest thing on the
+   * Canvas, and collapsing it once the reader is two Panels deep is the point of
+   * the whole device rather than a case to be worked around.
+   *
+   * A spine is a *visual* compression and only that. Every collapsed Panel keeps
+   * its region, its accessible name, its focusable heading, its Close control
+   * and its entire body in the accessibility tree, so a screen reader still
+   * reads it end to end — and `:focus-within` is written into the condition
+   * itself, so a Panel a keyboard has reached into stops being a spine and no
+   * control is ever operated out of sight.
+   *
+   * Desktop only. Below the Declared Breakpoint the package already shows one
+   * Panel and a sliver of the one before it, which is the same idea arrived at
+   * by a different route, and is its decision to make.
+   */
+  @media (min-width: 80rem) {
+    /*
+     * A ceiling that can never bind — a Panel is never wider than the Canvas it
+     * sits in — declared so that the clamp a spine applies has a length to
+     * animate *from*. Arriving from `none` it would take effect in a single
+     * frame and the collapse the reader is meant to follow would never be drawn.
+     *
+     * The clamp is needed at all because a Panel the reader has dragged carries
+     * its width in a `style` attribute, which no rule of ours can outrank; a
+     * spine that quietly refused to collapse would be the one Panel that
+     * disproves the whole device.
+     */
+    [data-meridian-canvas="mounted"] [data-canvas-panel] {
+      max-inline-size: 100%;
+      transition:
+        flex-basis var(--canvas-transition-duration)
+        var(--canvas-transition-easing),
+        max-inline-size var(--canvas-transition-duration)
+        var(--canvas-transition-easing);
+    }
+
+    /*
+     * Restating what the package says about a drag in progress, because the
+     * `transition` above replaces its declaration wholesale and this layer wins:
+     * left out, a resize would ease along behind the pointer instead of tracking
+     * it.
+     */
+    [data-meridian-canvas="mounted"]
+      [data-canvas-resizing]
+      [data-canvas-panel] {
+      transition: none;
+    }
+
+    /*
+     * The body vanishes at once and returns over the Canvas's own duration.
+     * Fading it *out* would put a strip of reflowing content over the spine for
+     * the length of the collapse; fading it *in* covers the reflow the expansion
+     * causes, because the content lands while it is still transparent.
+     */
+    [data-meridian-canvas="mounted"] [data-canvas-panel-body] {
+      transition: opacity var(--canvas-transition-duration)
+        var(--canvas-transition-easing);
+    }
+
+    [data-meridian-canvas="mounted"]
+      [data-canvas-panel][data-canvas-panel-context="previous"]:not(
+        :has(+ [data-active])
+      ):not(:focus-within) {
+      /*
+       * Wide enough for a line of the Canvas's own type to stand up in with air
+       * either side. Narrower and a row of spines reads as a rendering fault
+       * rather than as a stack of Panels seen edge-on.
+       */
+      --meridian-spine-width: 2.75rem;
+
+      flex: 0 0 var(--meridian-spine-width);
+      max-inline-size: var(--meridian-spine-width);
+      /* The body below is deliberately wider than this; nothing may escape. */
+      overflow: clip;
+
+      /*
+       * The header becomes the whole spine, so the title has the Panel's full
+       * height to stand in. `vertical-rl` turned through half a circle, rather
+       * than `sideways-lr`, which says the same thing in one declaration and is
+       * not yet safe to rely on.
+       */
+      & [data-canvas-panel-header] {
+        border-block-end: 0;
+        flex: 1 1 auto;
+        flex-direction: column;
+        justify-content: center;
+        padding-block: 0.75rem;
+        padding-inline: 0;
+      }
+
+      & [data-canvas-panel-header] h2 {
+        /* Quieter, because a spine is a Panel the reader is not standing on. */
+        color: var(--muted-foreground);
+        /*
+         * Flex will not shrink a box below its content unless it is told it
+         * may, and the package's ellipsis needs it to: a title longer than the
+         * Panel is tall would otherwise run off both ends of the spine.
+         */
+        min-block-size: 0;
+        transform: rotate(180deg);
+        writing-mode: vertical-rl;
+      }
+
+      /*
+       * A spine has no room for the Close control or for a Panel's actions —
+       * but hiding them is a visual decision and must not become a functional
+       * one. Clipped this way they keep their place in the accessibility tree
+       * and in the tab order, and reaching one puts focus inside the Panel,
+       * which is precisely what stops it being a spine.
+       */
+      & [data-canvas-panel-header] button,
+      & [data-canvas-dirty-label] {
+        block-size: 1px;
+        clip-path: inset(50%);
+        inline-size: 1px;
+        overflow: hidden;
+        padding: 0;
+        position: absolute;
+        white-space: nowrap;
+      }
+
+      /*
+       * What survives of the dirty label on screen. A Panel holding edits the
+       * reader has not committed must not collapse into something that looks
+       * settled; the label itself is still read out, and this is the sighted
+       * reader's half of it.
+       */
+      &:has([data-canvas-dirty-label]) [data-canvas-panel-header]::after {
+        background: var(--primary);
+        block-size: 0.375rem;
+        border-radius: 50%;
+        content: "";
+        flex: 0 0 auto;
+        inline-size: 0.375rem;
+      }
+
+      /*
+       * The body is lifted out of the Panel's flow rather than squeezed into it,
+       * at the width and height it already had. Reflowed into a 44px column it
+       * would lose the reader's place in a Panel they had scrolled, and every
+       * step along the trail would relayout the entire contents of every Panel
+       * behind it. Clipped, transparent and deaf to the pointer, it is still
+       * there: this is a Panel made narrow, not a Panel emptied.
+       */
+      & [data-canvas-panel-body] {
+        inline-size: var(--canvas-panel-width);
+        inset-block: var(--canvas-header-min-height) 0;
+        inset-inline-start: 0;
+        opacity: 0;
+        pointer-events: none;
+        position: absolute;
+        transition: none;
+      }
+
+      /*
+       * The clamp above has taken this Panel's width out of the reader's hands
+       * until it opens again, and a control that can no longer move anything is
+       * worse than one that is not offered. It returns — to the pointer and to
+       * the tab order both — the moment the Panel does.
+       */
+      & [data-canvas-panel-separator] {
+        display: none;
+      }
+    }
+
+    /*
+     * Where the freed width goes. An Active Panel at the third position or later
+     * has neither the Root Panel beside it nor one Panel between them, which is
+     * exactly the condition under which the board has become a spine — so that
+     * is when the Panel being read takes the width the board gave up, rather
+     * than leaving it as a gap at the end of the Canvas. Until then the board
+     * keeps it, for the reason given above.
+     */
+    [data-meridian-canvas="mounted"]
+      [data-canvas-application]:has(> [data-active]:nth-child(n + 3))
+      > [data-active] {
+      flex-grow: 1;
+      /*
+       * But only up to a width a record can still be read at. On a wide screen
+       * the board giving up its width leaves enough for a Panel measured in
+       * thousands of pixels, and these renderers lay a record out in two fixed
+       * columns — so an uncapped Active Panel puts a field label half a metre
+       * from its value. What is left over is simply Canvas: the reader is on a
+       * surface that continues past the window, and the next Panel opens into
+       * that space rather than into a gap that had to be filled.
+       */
+      max-inline-size: 58rem;
     }
   }
 
