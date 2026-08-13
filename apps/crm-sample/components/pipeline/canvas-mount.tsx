@@ -26,10 +26,11 @@ import { usePathname, useSearchParams } from "next/navigation";
 import type { RefObject } from "react";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
-
+import { EventChannel } from "./event-channel";
 import { pipelinePanels, pipelineRoot, referenceFor } from "./panels";
 import { PipelineCanvas } from "./pipeline-canvas";
 import { registerPipelineNavigator } from "./pipeline-navigator";
+import { TetherLayer } from "./tether-layer";
 import { CanvasTrail } from "./trail";
 
 /**
@@ -204,7 +205,11 @@ export function CanvasMount({
           ref={container}
         >
           <CanvasTrail />
-          <PipelineCanvas.Workspace label="Meridian pipeline" />
+          <div className="relative flex min-h-0 flex-1 flex-col">
+            <PipelineCanvas.Workspace label="Meridian pipeline" />
+            <TetherLayer />
+          </div>
+          <EventChannel />
         </section>
       </PipelineCanvas.Provider>
     </ResourceExchangeProvider>
