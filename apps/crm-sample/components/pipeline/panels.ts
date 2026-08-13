@@ -22,6 +22,8 @@ import {
 } from "@squaredlemons/canvas-panels/next/server";
 
 import {
+  contactsForCompany,
+  dealsForCompany,
   getCompany,
   getContact,
   getDeal,
@@ -175,6 +177,64 @@ export function referenceFor(record: RecordRef) {
       return contactPanel.reference({ contactId: record.id });
   }
 }
+
+/**
+ * The stack the demo opens on when the address names none of its own.
+ *
+ * The Canvas is a surface for a path through the data, and a reader who lands
+ * on a single Panel has been shown a list. Three Panels is no better: a board
+ * and two records is the master-detail layout every CRM already has, and it is
+ * the depth at which nothing this framework does is visible yet. So the demo
+ * opens part-way along a real trail — deal, its account, another deal on that
+ * account, the person behind it, and their other deal — with the board itself
+ * collapsed to the first spine, one click from being read again.
+ *
+ * Derived from the dataset rather than written as ids, so a record that is
+ * renamed or removed cannot leave the front page pointing at nothing.
+ */
+const openingTrail: readonly RecordRef[] = (() => {
+  const account = [...dataset.companies.values()].find(
+    (company) =>
+      dealsForCompany(dataset, company.id).length >= 3 &&
+      contactsForCompany(dataset, company.id).length >= 1,
+  );
+  if (!account) return [];
+  const deals = dealsForCompany(dataset, account.id);
+  const people = contactsForCompany(dataset, account.id);
+  const [first, second, third] = deals;
+  const [person] = people;
+  if (!first || !second || !third || !person) return [];
+  return Object.freeze([
+    { kind: "deal", id: first.id },
+    { kind: "company", id: account.id },
+    { kind: "deal", id: second.id },
+    { kind: "contact", id: person.id },
+    { kind: "deal", id: third.id },
+  ] as const);
+})();
+
+/**
+ * That trail as a Navigation Document, built by the package rather than
+ * hand-written: a throwaway engine walks the path and encodes what it produced,
+ * so the opening stack is expressed in exactly the form a deep link would be.
+ */
+export const openingTrailDocument: string | null = (() => {
+  if (openingTrail.length === 0) return null;
+  const engine = createPanelEngine({
+    root: pipelineRoot,
+    panels: pipelinePanels,
+  });
+  for (const record of openingTrail) {
+    const deepest = engine.getSnapshot().panels.at(-1);
+    if (!deepest) return null;
+    const opened = engine.open({
+      originId: deepest.instanceId,
+      panel: referenceFor(record),
+    });
+    if (opened.status !== "opened" && opened.status !== "reused") return null;
+  }
+  return engine.encodeNavigationDocument();
+})();
 
 /**
  * The address that opens one record on a cold load.
