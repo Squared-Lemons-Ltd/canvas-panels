@@ -546,9 +546,17 @@
      * than leaving it as a gap at the end of the Canvas. Until then the board
      * keeps it, for the reason given above.
      */
+    /*
+     * `:not([style*="flex-basis"])` is what hands the Panel back to the reader.
+     * The package writes a dragged width as an inline `flex-basis`, and a Panel
+     * still told to grow simply swallows it again — the separator moved, the
+     * announced size changed, and the Panel stayed exactly where it was, which
+     * is a worse offer than no handle at all. Filling the slack is only the
+     * default for a Panel nobody has sized.
+     */
     [data-meridian-canvas="mounted"]
       [data-canvas-application]:has(> [data-active]:nth-child(n + 3))
-      > [data-active] {
+      > [data-active]:not([style*="flex-basis"]) {
       flex-grow: 1;
       /*
        * But only up to a width a record can still be read at. On a wide screen

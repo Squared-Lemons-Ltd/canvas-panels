@@ -430,8 +430,9 @@ test("each resizable Panel exposes a labelled ARIA separator", () => {
   openClassAndLearner(canvas);
 
   const handles = separators(canvas.container);
-  // Three visible Panels, and the last has nothing to its right to resize.
-  assert.equal(handles.length, 2);
+  // Three visible Panels, each sizing itself — including the deepest, which is
+  // the one the reader is most often in.
+  assert.equal(handles.length, 3);
   for (const handle of handles) {
     assert.equal(handle.getAttribute("role"), "separator");
     assert.equal(handle.getAttribute("aria-orientation"), "vertical");

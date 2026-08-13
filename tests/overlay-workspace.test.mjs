@@ -345,12 +345,20 @@ test("a modal overlay traps focus and hands it back to where it came from", asyn
   // main Canvas, which is inert behind it.
   const layer = rendered.container.querySelector("[data-canvas-overlay]");
   const main = rendered.container.querySelector("[data-canvas-overlay-main]");
-  const footer = rendered.getByRole("button", { name: "Help footer" });
-  act(() => footer.focus());
-  fireEvent.keyDown(footer, { key: "Tab" });
+  // Taken from the layer rather than named, because what sits last in it is
+  // not this test's business: a Panel Separator on the deepest Panel put an
+  // extra tab stop after the footer, and a test that assumed the footer was
+  // the end started reporting a broken trap when the trap was working.
+  const tabbable = [
+    ...layer.querySelectorAll("button, a[href], input, [tabindex='0']"),
+  ].filter((element) => !element.closest("[hidden], [inert]"));
+  const last = tabbable.at(-1);
+  assert.ok(last, "the layer needs something to tab off the end of");
+  act(() => last.focus());
+  fireEvent.keyDown(last, { key: "Tab" });
   assert.equal(layer.contains(document.activeElement), true);
   assert.equal(main.contains(document.activeElement), false);
-  assert.equal(document.activeElement === footer, false);
+  assert.equal(document.activeElement === last, false);
 
   // And backwards off the front of it.
   fireEvent.keyDown(layer, { key: "Tab", shiftKey: true });

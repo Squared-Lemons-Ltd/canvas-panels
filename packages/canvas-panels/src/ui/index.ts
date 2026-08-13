@@ -1809,12 +1809,16 @@ export function createCanvasModule<
                     }),
                   ),
                 ),
-                // The last visible Panel has nothing to its right to resize
-                // against, and a presentation showing one Panel has nothing to
-                // divide at all.
-                !visible ||
-                  visiblePanelIds.at(-1) === panel.instanceId ||
-                  visiblePanelIds.length < 2
+                // A separator sizes the Panel it belongs to, not the gap after
+                // it — so the deepest visible Panel has a width worth setting
+                // like any other, and the Canvas simply reaches further or less
+                // far to its right. Withholding one there left the Panel the
+                // reader is most often in the only one they could not size.
+                //
+                // A presentation showing a single Panel still offers nothing:
+                // that Panel is the Canvas, and dragging its edge would resize
+                // the surface rather than divide anything on it.
+                !visible || visiblePanelIds.length < 2
                   ? null
                   : createElement("div", {
                       "aria-label": announcementTemplates.resizeLabel({
