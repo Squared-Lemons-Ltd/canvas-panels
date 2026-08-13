@@ -30,6 +30,7 @@ import { toast } from "sonner";
 import { pipelinePanels, pipelineRoot, referenceFor } from "./panels";
 import { PipelineCanvas } from "./pipeline-canvas";
 import { registerPipelineNavigator } from "./pipeline-navigator";
+import { CanvasTrail } from "./trail";
 
 /**
  * One Resource Exchange for the pipeline. Every Panel showing a deal, an
@@ -202,6 +203,7 @@ export function CanvasMount({
           id="canvas-mount"
           ref={container}
         >
+          <CanvasTrail />
           <PipelineCanvas.Workspace label="Meridian pipeline" />
         </section>
       </PipelineCanvas.Provider>
