@@ -87,6 +87,7 @@ import {
   DealCard,
   expectedClose,
   HealthBadge,
+  litRow,
   MetaList,
   MissingRecord,
   OwnerChip,
@@ -336,6 +337,11 @@ function BoardPanel() {
               const summary = forecast.find((entry) => entry.stage === stage);
               return (
                 <Button
+                  className={litRow}
+                  // A stage Panel's descriptor is the stage itself, so the
+                  // stage is what the trail calls its record — the tether needs
+                  // no special case for the one Panel that is not a record.
+                  data-meridian-record={stage}
                   key={stage}
                   onClick={() => navigation.open(stagePanel, { stage })}
                   size="sm"
@@ -599,6 +605,7 @@ function DealPanel({
                 navigation.open(companyPanel, { companyId: company.id })
               }
               primary={company.name}
+              recordId={company.id}
               secondary={`${company.industry} · ${regionLabels[company.region]}`}
               trailing="Account"
             />
@@ -610,6 +617,7 @@ function DealPanel({
                 navigation.open(contactPanel, { contactId: contact.id })
               }
               primary={contact.name}
+              recordId={contact.id}
               secondary={contact.title}
               trailing="Primary contact"
             />
@@ -711,6 +719,7 @@ function CompanyPanel({
               label={`Open the deal ${deal.title}`}
               onSelect={() => navigation.open(dealPanel, { dealId: deal.id })}
               primary={deal.title}
+              recordId={deal.id}
               secondary={`${pipelineStageLabels[deal.stage]} · ${deal.daysInStage} days in stage`}
               trailing={formatMoney(dealValue(dataset, deal), {
                 compact: true,
@@ -733,6 +742,7 @@ function CompanyPanel({
                 navigation.open(contactPanel, { contactId: contact.id })
               }
               primary={contact.name}
+              recordId={contact.id}
               secondary={contact.title}
               trailing={
                 contact.isEconomicBuyer
@@ -834,6 +844,7 @@ function ContactPanel({
                 label={`Open the deal ${deal.title}`}
                 onSelect={() => navigation.open(dealPanel, { dealId: deal.id })}
                 primary={deal.title}
+                recordId={deal.id}
                 secondary={`${pipelineStageLabels[deal.stage]} · closes ${formatRelativeDate(deal.expectedCloseDate)}`}
                 trailing={formatMoney(dealValue(dataset, deal), {
                   compact: true,
@@ -852,6 +863,7 @@ function ContactPanel({
               navigation.open(companyPanel, { companyId: company.id })
             }
             primary={company.name}
+            recordId={company.id}
             secondary={`${company.industry} · ${regionLabels[company.region]}`}
             trailing="Account"
           />
