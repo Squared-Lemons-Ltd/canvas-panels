@@ -402,10 +402,22 @@
         var(--canvas-transition-easing);
     }
 
+    /*
+     * Only Panels the reader has already gone past collapse — `:has(~ …)` is
+     * what says "the Active Panel is somewhere after me".
+     *
+     * The Canvas grows rightwards, so a spine means *behind you*. The Panel
+     * Kind's own attribute cannot say that on its own: the package marks every
+     * visible Panel that is not the Active one as `previous`, on both sides of
+     * it. Collapsing on that alone meant stepping back to an earlier Panel
+     * folded away everything to the right of it as well — the reader asked to
+     * look at where they had been and the rest of their trail shut behind them,
+     * which is not what going back means anywhere else.
+     */
     [data-meridian-canvas="mounted"]
-      [data-canvas-panel][data-canvas-panel-context="previous"]:not(
-        :has(+ [data-active])
-      ):not(:focus-within) {
+      [data-canvas-panel][data-canvas-panel-context="previous"]:has(
+        ~ [data-active]
+      ):not(:has(+ [data-active])):not(:focus-within) {
       /*
        * Wide enough for a line of the Canvas's own type to stand up in with air
        * either side. Narrower and a row of spines reads as a rendering fault
