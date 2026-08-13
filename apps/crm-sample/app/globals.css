@@ -284,8 +284,16 @@
   /*
    * The pipeline Canvas fills the height its mount is given, and each Panel
    * body scrolls inside it, so the document itself never scrolls sideways.
+   *
+   * Deliberately *not* a direct-child selector. The Workspace sits inside a
+   * positioned wrapper that the tether overlay is drawn into, and while a `>`
+   * held, adding that wrapper silently stopped this rule matching: the
+   * Workspace kept `min-block-size: auto`, grew past its parent to the height
+   * of the tallest Panel, and every Panel body then had no height to scroll
+   * within. Nothing looked broken — the content was simply cut off at the
+   * bottom of the Canvas with no way to reach it.
    */
-  [data-meridian-canvas="mounted"] > [data-canvas-workspace] {
+  [data-meridian-canvas="mounted"] [data-canvas-workspace] {
     --canvas-panel-min-height: 0;
 
     flex: 1 1 auto;
