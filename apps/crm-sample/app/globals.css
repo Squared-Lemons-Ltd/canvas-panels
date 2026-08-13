@@ -414,7 +414,25 @@
      * look at where they had been and the rest of their trail shut behind them,
      * which is not what going back means anywhere else.
      */
-    [data-meridian-canvas="mounted"]
+    /*
+     * The Panel immediately behind the Active one is kept open for context —
+     * but only while the reader is at the front of their trail. Step back to an
+     * earlier Panel and that exemption moves with the Active Panel, which
+     * un-collapses whatever now sits behind it: the board went from a 44px
+     * spine to nine hundred, everything to the right of it was shoved along by
+     * the difference, and the whole Canvas read as though it had thrown the
+     * reader back to the start. Nobody asked for a layout, only for a look at
+     * where they had been.
+     *
+     * So behind the reader is uniformly a spine whenever they are standing
+     * anywhere but the end of the trail, and the Canvas only ever grows to the
+     * right of wherever they are.
+     */
+    [data-canvas-application]:not(:has(> [data-active]:last-child))
+      [data-canvas-panel][data-canvas-panel-context="previous"]:has(
+        ~ [data-active]
+      ):not(:focus-within),
+    [data-canvas-application]:has(> [data-active]:last-child)
       [data-canvas-panel][data-canvas-panel-context="previous"]:has(
         ~ [data-active]
       ):not(:has(+ [data-active])):not(:focus-within) {
