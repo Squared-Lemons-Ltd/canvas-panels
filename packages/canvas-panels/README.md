@@ -312,6 +312,7 @@ Structural state is exposed through data attributes rather than class names, and
 | `data-canvas-panel-header`, `data-canvas-panel-body` | within a Panel | its two regions |
 | `data-canvas-panel-separator` | the Panel Separator | the resize control |
 | `data-canvas-panel-close` | the close control | present on a closable Panel's own close button |
+| `data-canvas-action` | each Canvas Action | the `id` the application gave that Action |
 | `data-canvas-resizing` | the Workspace | present while a resize is in progress |
 | `data-canvas-overlay`, `data-canvas-overlay-modality` | the overlay layer | an Overlay Workspace and its modality |
 

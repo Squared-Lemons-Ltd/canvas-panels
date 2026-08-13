@@ -129,14 +129,48 @@ function useLiveDataset(): MeridianDataset {
   );
 }
 
-function copyDeepLink(record: RecordRef, label: string): void {
+/**
+ * Hand a record's address to wherever the reader wants to put it.
+ *
+ * A Panel Stack is expressible as a URL, and the whole point of that is that
+ * somebody else can open it — so the control offers the platform's own share
+ * sheet where there is one, and copies to the clipboard where there is not.
+ * Both paths end at the same address; only the destination differs.
+ *
+ * Dismissing the share sheet is a decision, not a failure. It arrives as an
+ * `AbortError`, and reporting it would tell a reader something went wrong at
+ * the exact moment they said they had changed their mind.
+ */
+async function shareDeepLink(record: RecordRef, label: string): Promise<void> {
   const path = pipelineDeepLink(record);
   const address =
     typeof window === "undefined" ? path : `${window.location.origin}${path}`;
-  void navigator.clipboard?.writeText(address).then(
-    () => toast.success("Link copied", { description: label }),
-    () => toast.error("Could not copy the link", { description: address }),
-  );
+  const payload = { title: label, url: address };
+
+  if (
+    typeof navigator.share === "function" &&
+    (navigator.canShare?.(payload) ?? true)
+  ) {
+    try {
+      await navigator.share(payload);
+      return;
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      // Anything else and the sheet failed rather than being dismissed, which
+      // the clipboard below can still make good.
+    }
+  }
+
+  if (!navigator.clipboard) {
+    toast.error("Could not share the link", { description: address });
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(address);
+    toast.success("Link copied", { description: label });
+  } catch {
+    toast.error("Could not share the link", { description: address });
+  }
 }
 
 /**
@@ -478,10 +512,10 @@ function DealPanel({
   return (
     <div className="flex flex-col">
       <PipelineCanvas.Action
-        id="copy-deal-link"
-        label="Copy link"
+        id="share-deal-link"
+        label="Share"
         onSelect={() =>
-          copyDeepLink({ kind: "deal", id: record.id }, record.title)
+          void shareDeepLink({ kind: "deal", id: record.id }, record.title)
         }
       />
       <PanelHero
@@ -674,10 +708,10 @@ function CompanyPanel({
   return (
     <div className="flex flex-col">
       <PipelineCanvas.Action
-        id="copy-company-link"
-        label="Copy link"
+        id="share-company-link"
+        label="Share"
         onSelect={() =>
-          copyDeepLink({ kind: "company", id: company.id }, company.name)
+          void shareDeepLink({ kind: "company", id: company.id }, company.name)
         }
       />
       <PanelHero
@@ -804,10 +838,10 @@ function ContactPanel({
   return (
     <div className="flex flex-col">
       <PipelineCanvas.Action
-        id="copy-contact-link"
-        label="Copy link"
+        id="share-contact-link"
+        label="Share"
         onSelect={() =>
-          copyDeepLink({ kind: "contact", id: contact.id }, contact.name)
+          void shareDeepLink({ kind: "contact", id: contact.id }, contact.name)
         }
       />
       <PanelHero

@@ -1753,6 +1753,12 @@ export function createCanvasModule<
                       "button",
                       {
                         "aria-label": action.label,
+                        // The id the application already gave this Action,
+                        // which until now the Canvas spent only as a React key.
+                        // Without it an application cannot tell its own Actions
+                        // apart in the DOM, so styling one means matching the
+                        // English in its label.
+                        "data-canvas-action": action.id,
                         "data-destructive": action.destructive ? "" : undefined,
                         disabled: action.disabled,
                         key: action.id,

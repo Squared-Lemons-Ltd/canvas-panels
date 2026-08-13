@@ -345,13 +345,28 @@
    * 1.75rem square: WCAG 2.5.8 asks for a 24px pointer target, and an icon
    * button trimmed to the size of its glyph is the classic way to fail it.
    */
-  [data-meridian-canvas="mounted"] [data-canvas-panel-close] {
+  [data-meridian-canvas="mounted"] [data-canvas-panel-close],
+  [data-meridian-canvas="mounted"] [data-canvas-action^="share-"] {
     display: grid;
     place-items: center;
     inline-size: 1.75rem;
     block-size: 1.75rem;
     padding: 0;
     font-size: 0;
+  }
+
+  /*
+   * The share mark, drawn at the same weight as the cross beside it. Two icons
+   * in one header at two stroke widths read as two icon sets.
+   */
+  [data-meridian-canvas="mounted"] [data-canvas-action^="share-"]::before {
+    content: "";
+    inline-size: 0.875rem;
+    block-size: 0.875rem;
+    background: currentColor;
+    mask:
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23000' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 10.5V2.5'/%3E%3Cpath d='M5 5.5l3-3 3 3'/%3E%3Cpath d='M3 9.5v3A1.5 1.5 0 0 0 4.5 14h7a1.5 1.5 0 0 0 1.5-1.5v-3'/%3E%3C/svg%3E")
+      center / contain no-repeat;
   }
 
   [data-meridian-canvas="mounted"] [data-canvas-panel-close]::before {
