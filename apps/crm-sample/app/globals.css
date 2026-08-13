@@ -330,6 +330,41 @@
   }
 
   /*
+   * The close control as a mark rather than a word.
+   *
+   * Only the *visible* label goes: the Panel's close button carries its whole
+   * accessible name in `aria-label` ("Close Northwind Logistics"), so a screen
+   * reader hears exactly what it heard before and the word is free to leave.
+   * `font-size: 0` is what removes it without removing the element, which
+   * `display: none` on the text would not survive.
+   *
+   * The cross is an authored SVG carried as a mask and painted in
+   * `currentColor`, so it inherits the button's own hover and focus colours
+   * instead of keeping a palette of its own.
+   *
+   * 1.75rem square: WCAG 2.5.8 asks for a 24px pointer target, and an icon
+   * button trimmed to the size of its glyph is the classic way to fail it.
+   */
+  [data-meridian-canvas="mounted"] [data-canvas-panel-close] {
+    display: grid;
+    place-items: center;
+    inline-size: 1.75rem;
+    block-size: 1.75rem;
+    padding: 0;
+    font-size: 0;
+  }
+
+  [data-meridian-canvas="mounted"] [data-canvas-panel-close]::before {
+    content: "";
+    inline-size: 0.875rem;
+    block-size: 0.875rem;
+    background: currentColor;
+    mask:
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23000' stroke-width='1.75' stroke-linecap='round'%3E%3Cpath d='M4 4l8 8M12 4l-8 8'/%3E%3C/svg%3E")
+      center / contain no-repeat;
+  }
+
+  /*
    * Which Panel is the Active one, said on the Panel rather than only on the
    * rail above it. Keyboard movement, the Panel a record opens in front of, and
    * everything the Canvas announces are all about the Active Panel, and until

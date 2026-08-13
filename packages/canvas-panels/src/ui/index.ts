@@ -1,15 +1,15 @@
 "use client";
 
-import { Component } from "react";
 import type {
   ComponentType,
   KeyboardEvent as ReactKeyboardEvent,
-  PointerEvent as ReactPointerEvent,
   ReactNode,
+  PointerEvent as ReactPointerEvent,
   RefObject,
   UIEvent,
 } from "react";
 import {
+  Component,
   createContext,
   createElement,
   Fragment,
@@ -54,6 +54,21 @@ import {
   sizingCommandForKey,
 } from "./interaction.js";
 
+// The breakpoint queries are declared beside the breakpoints themselves in
+// `core`, so a server entry point can read them; the Canvas keeps re-exporting
+// them because this is the entry point an application aligning its own layout
+// already imports.
+export { canvasBreakpointQueries } from "../core/index.js";
+export type {
+  CanvasAnnouncementPanel,
+  CanvasAnnouncementState,
+  CanvasAnnouncementTemplates,
+  PanelRegionDirection,
+  PanelSizing,
+  PanelSizingBounds,
+  PanelSizingOutcome,
+  SizingCommand,
+} from "./interaction.js";
 // The interaction grammar is part of the Canvas's public surface: announcement
 // templates have to be replaceable to localize, and the sizing engine is what
 // an application reuses if it renders its own separator.
@@ -65,22 +80,6 @@ export {
   resizePanel,
   sizingCommandForKey,
 } from "./interaction.js";
-export type {
-  CanvasAnnouncementPanel,
-  CanvasAnnouncementState,
-  CanvasAnnouncementTemplates,
-  PanelRegionDirection,
-  PanelSizing,
-  PanelSizingBounds,
-  PanelSizingOutcome,
-  SizingCommand,
-} from "./interaction.js";
-
-// The breakpoint queries are declared beside the breakpoints themselves in
-// `core`, so a server entry point can read them; the Canvas keeps re-exporting
-// them because this is the entry point an application aligning its own layout
-// already imports.
-export { canvasBreakpointQueries } from "../core/index.js";
 
 /**
  * Observes the declared breakpoints and reports presentation changes to the
@@ -1769,6 +1768,12 @@ export function createCanvasModule<
                         "button",
                         {
                           "aria-label": `Close ${panel.title}`,
+                          // Named so an application can restyle the one control
+                          // in a Panel's chrome it is most likely to want as an
+                          // icon. The word is the visible label only — the
+                          // accessible name is the `aria-label` above — so
+                          // replacing it costs a screen reader nothing.
+                          "data-canvas-panel-close": "",
                           onClick: () => {
                             rememberFocus();
                             close(panel.instanceRef);
