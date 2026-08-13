@@ -512,6 +512,16 @@
       [data-canvas-application]:has(> [data-active]:nth-child(n + 3))
       > [data-active] {
       flex-grow: 1;
+      /*
+       * But only up to a width a record can still be read at. On a wide screen
+       * the board giving up its width leaves enough for a Panel measured in
+       * thousands of pixels, and these renderers lay a record out in two fixed
+       * columns — so an uncapped Active Panel puts a field label half a metre
+       * from its value. What is left over is simply Canvas: the reader is on a
+       * surface that continues past the window, and the next Panel opens into
+       * that space rather than into a gap that had to be filled.
+       */
+      max-inline-size: 58rem;
     }
   }
 

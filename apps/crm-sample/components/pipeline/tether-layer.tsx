@@ -150,6 +150,23 @@ function measurePair(
   layer: DOMRect,
   canvas: DOMRect,
 ): Tether | null {
+  // A row inside a Panel that has collapsed to a spine still has a box: the
+  // presentation hides the body by lifting it out of flow and fading it, which
+  // is what keeps the reader's scroll position, and geometry survives both.
+  // Drawing from it produces a line out of a strip 44px wide that shows none of
+  // the content it claims to come from. Ask whether the row can actually be
+  // seen rather than whether it can be measured.
+  if (
+    typeof pair.source.checkVisibility === "function" &&
+    !pair.source.checkVisibility({
+      contentVisibilityAuto: true,
+      opacityProperty: true,
+      visibilityProperty: true,
+    })
+  ) {
+    return null;
+  }
+
   const sourceBox = pair.source.getBoundingClientRect();
   const openedBox = pair.opened.getBoundingClientRect();
   if (sourceBox.width === 0 || openedBox.width === 0) return null;
@@ -179,8 +196,36 @@ function measurePair(
     (headerBox ? headerBox.top + headerBox.height / 2 : openedBox.top + 24) -
       layer.top,
   );
+  // How far the line would have to travel across the origin Panel before it
+  // could leave. A row in a record Panel spans the full width, so it ends at
+  // the trailing edge and the tether crosses nothing; a card in the first
+  // column of the board is three columns deep, and a line from it is drawn
+  // straight over every card between — which reads as a scratch across the
+  // page rather than as a connection, and buys nothing the lit card has not
+  // already said. Past that, light the source and draw no line.
+  const originBox = pair.origin.getBoundingClientRect();
+  if (originBox.right - sourceBox.right > 96) return null;
+
   const start = round(sourceY - layer.top);
-  const reach = Math.max(20, (targetX - sourceX) * 0.55);
+  const climb = Math.abs(targetY - start);
+
+  // A line spanning most of the Canvas connects two things the reader cannot
+  // look at together, and drawn across everything between them it costs more
+  // than it says. The lit row already carries the provenance on its own, so
+  // past that distance the honest thing is to light the row and draw nothing.
+  if (climb > canvas.height * 0.55) return null;
+
+  // Both control points leave their end horizontally, which is what makes the
+  // curve read as a connection rather than a diagonal drawn over the content.
+  // Adjacent Panels leave almost no horizontal gap, though, and an unclamped
+  // reach then throws the second control point back behind the first and the
+  // curve loops over itself. It can bulge, and it must not double back.
+  // Half the gap puts the two control points on the same vertical line, which
+  // is the widest S the pair can carry without either point passing the other.
+  // The floor keeps a tangent on the ends when two Panels are touching and the
+  // gap is nearly nothing; overshooting by that much cannot loop visibly.
+  const gap = targetX - sourceX;
+  const reach = Math.max(24, gap * 0.5);
 
   return {
     key: pair.key,
