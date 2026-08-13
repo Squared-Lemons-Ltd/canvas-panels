@@ -330,6 +330,27 @@
   }
 
   /*
+   * Which Panel is the Active one, said on the Panel rather than only on the
+   * rail above it. Keyboard movement, the Panel a record opens in front of, and
+   * everything the Canvas announces are all about the Active Panel, and until
+   * now the only place a reader could see which one that was is a strip they
+   * may not be looking at.
+   *
+   * The header carries it rather than the whole Panel: tinting a Panel's body
+   * would put a wash under every field a reader is trying to read, and the
+   * header is the one band already given over to saying what this Panel is.
+   * `--accent` is the tint the palette already keeps for exactly this, so the
+   * Active Panel and its lit station on the rail are the same violet.
+   */
+  [data-meridian-canvas="mounted"]
+    [data-canvas-panel][data-active]
+    > [data-canvas-panel-header] {
+    background: var(--accent);
+    transition: background var(--canvas-transition-duration)
+      var(--canvas-transition-easing);
+  }
+
+  /*
    * The board is a four-column funnel rather than a record, so it is the Panel
    * that takes whatever width is left over: records keep a steady reading
    * width, and the Canvas is never a column of content with an empty half
