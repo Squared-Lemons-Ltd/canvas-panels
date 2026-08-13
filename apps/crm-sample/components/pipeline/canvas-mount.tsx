@@ -30,6 +30,7 @@ import { EventChannel } from "./event-channel";
 import { pipelinePanels, pipelineRoot, referenceFor } from "./panels";
 import { PipelineCanvas } from "./pipeline-canvas";
 import { registerPipelineNavigator } from "./pipeline-navigator";
+import { SpineActivation } from "./spine-activation";
 import { TetherLayer } from "./tether-layer";
 import { CanvasTrail } from "./trail";
 
@@ -205,6 +206,7 @@ export function CanvasMount({
           ref={container}
         >
           <CanvasTrail />
+          <SpineActivation />
           <div className="relative flex min-h-0 flex-1 flex-col">
             <PipelineCanvas.Workspace label="Meridian pipeline" />
             <TetherLayer />

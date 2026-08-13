@@ -492,6 +492,13 @@
       max-inline-size: var(--meridian-spine-width);
       /* The body below is deliberately wider than this; nothing may escape. */
       overflow: clip;
+      /*
+       * A spine is a whole Panel reduced to a control, and it is worth saying
+       * so before the reader tries it. `spine-activation.tsx` is what makes the
+       * click land; this declaration and that file have to arrive together, or
+       * one of them is lying about what the other does.
+       */
+      cursor: pointer;
 
       /*
        * The header becomes the whole spine, so the title has the Panel's full
