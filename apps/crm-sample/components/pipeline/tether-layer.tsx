@@ -42,6 +42,31 @@ import { type TrailStation, useTrail } from "./trail";
 const recordAttribute = "data-meridian-record";
 const litAttribute = "data-meridian-tethered";
 
+/**
+ * The arrival, as keyframes rather than as state.
+ *
+ * They live here rather than in the global stylesheet because they are this
+ * layer's own motion and nothing else can use them; a reader of this file
+ * should not have to go looking in another to find out what it animates.
+ */
+const drawKeyframes =
+  "meridian-tether-draw 320ms cubic-bezier(0.16, 1, 0.3, 1)";
+const headKeyframes =
+  "meridian-tether-head 200ms cubic-bezier(0.16, 1, 0.3, 1) 160ms";
+const tetherMotion = `
+@keyframes meridian-tether-draw {
+  from { stroke-dashoffset: 1; }
+  to { stroke-dashoffset: 0; }
+}
+@keyframes meridian-tether-head {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-meridian-tethers] * { animation-duration: 1ms !important; }
+}
+`;
+
 /** Where a tether starts and where it lands, in the overlay's own coordinates. */
 type Tether = Readonly<{
   key: string;
@@ -180,31 +205,25 @@ function TetherPath({
   animate,
   tether,
 }: Readonly<{ animate: boolean; tether: Tether }>) {
-  const [drawn, setDrawn] = useState(!animate);
-  useEffect(() => {
-    if (drawn) return;
-    const frame = requestAnimationFrame(() => setDrawn(true));
-    return () => cancelAnimationFrame(frame);
-  }, [drawn]);
-
-  // `pathLength` normalises the curve to 1 so the dash that hides it needs no
-  // measurement of its own — the length changes on every scroll, and a dash
-  // array computed from it would have to be recomputed with it.
+  // The drawn line is the *default*, and the arrival is a keyframe that starts
+  // from hidden and ends where the default already was. Reversing those two —
+  // rendering the line hidden and flipping it on in an effect — makes the line
+  // itself conditional on an animation frame ever arriving, and in a tab the
+  // browser is not painting it never does: the tethers were measured, styled,
+  // present in the DOM and completely invisible. Nothing a reader has to see
+  // may wait on rAF.
   const line = {
     d: tether.path,
     fill: "none",
+    // `pathLength` normalises the curve to 1 so the dash that hides it needs no
+    // measurement of its own — the length changes on every scroll, and a dash
+    // array computed from it would have to be recomputed with it.
     pathLength: 1,
     stroke: "currentColor",
     strokeDasharray: 1,
-    strokeDashoffset: drawn ? 0 : 1,
+    strokeDashoffset: 0,
     strokeLinecap: "round" as const,
-    ...(animate
-      ? {
-          style: {
-            transition: "stroke-dashoffset 320ms cubic-bezier(0.16, 1, 0.3, 1)",
-          },
-        }
-      : {}),
+    ...(animate ? { style: { animation: `${drawKeyframes} both` } } : {}),
   };
 
   return (
@@ -237,14 +256,7 @@ function TetherPath({
         strokeLinecap="round"
         strokeLinejoin="round"
         strokeWidth={1.75}
-        {...(animate
-          ? {
-              style: {
-                opacity: drawn ? 1 : 0,
-                transition: "opacity 200ms cubic-bezier(0.16, 1, 0.3, 1) 160ms",
-              },
-            }
-          : {})}
+        {...(animate ? { style: { animation: `${headKeyframes} both` } } : {})}
       />
     </g>
   );
@@ -377,6 +389,9 @@ export function TetherLayer() {
       data-meridian-tethers=""
       ref={layer}
     >
+      {/* biome-ignore lint/security/noDangerouslySetInnerHtml: a fixed keyframe
+          block owned by this file, with nothing interpolated into it. */}
+      <style dangerouslySetInnerHTML={{ __html: tetherMotion }} />
       <svg
         aria-hidden="true"
         className="absolute inset-0 size-full"
