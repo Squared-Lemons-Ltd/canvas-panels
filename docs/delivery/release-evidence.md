@@ -52,7 +52,7 @@ The first release: the package's whole history to date, versioned out of thirtee
 | Provenance | Not available. The repository is private, so npm cannot attest; `publishConfig.provenance` is `false` by decision, not by omission. |
 | Access | `restricted`, scope `@squaredlemons` |
 | dist-tag | `latest` |
-| Source commit | *stamped when the release is cut* |
+| Source commit | `8f9d282fe207a64d1d519652605c020e315c6196` |
 | Workflow run | Not applicable — see "Publication status" below |
 | Toolchain | Node 22.20.0, npm 11.12.1, pnpm 9.15.9 |
 | Gate | `pnpm gate` passed: 424 contract tests, 3 packed-consumer tests, 0 failures |
