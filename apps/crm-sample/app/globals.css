@@ -5,7 +5,17 @@
  * import, because the first `@layer` statement in the final stylesheet is what
  * fixes the order. See "Composing Canvas Panels with Tailwind" in README.md.
  */
-@layer theme, base, canvas-panels, components, utilities;
+/*
+ * `skin` is this application's own layer, and it is deliberately last.
+ *
+ * A Canvas skin restyles the *content* of a Panel as well as its chrome, and
+ * that content is built out of Tailwind utilities — which are in `utilities`,
+ * and would otherwise outrank anything a skin had to say about a card's radius
+ * or a label's case. Everything skin-related that has to beat a utility lives
+ * in `skin`; everything that only has to beat the package lives in `components`
+ * alongside the rest of the Canvas theming.
+ */
+@layer theme, base, canvas-panels, components, utilities, skin;
 
 @import "tailwindcss";
 @import "tw-animate-css";
@@ -251,6 +261,537 @@
   }
 }
 
+/* ========================================================================== *
+ *  Canvas skins
+ *
+ *  A skin is how the Canvas is dressed. It is not the colour theme: light and
+ *  dark belong to the application and every skin below works in both, through
+ *  the same `light-dark()` the palette uses.
+ *
+ *  The contract is one flat set of custom properties declared on `:root`. Two
+ *  things read them, and they are the two halves of a themed Canvas:
+ *
+ *    1. the package's own `--canvas-*` tokens, mapped once in `components`;
+ *    2. this application's Panel *content*, in the `skin` layer at the bottom
+ *       of this file, through the `data-meridian-*` hooks its presentational
+ *       parts publish.
+ *
+ *  Publishing hooks for its own parts is the application doing exactly what the
+ *  package does for its chrome — and it is what lets one skin block restyle the
+ *  Pipeline and the account book at once, because both surfaces spell a hero, a
+ *  section, a fact table and a tile the same way.
+ *
+ *  Structure is not here. Which Panel grows, what collapses to a spine, where
+ *  the Canvas snaps: those belong to the page, further down.
+ * ========================================================================== */
+
+/*
+ * The palette, aliased once under names no skin ever remaps.
+ *
+ * A skin re-points the application's own tokens *inside* a Canvas — `--card`,
+ * `--border`, `--primary` and the rest — so that every Tailwind utility a Panel
+ * renderer already uses re-tints with it and nothing has to be rewritten in
+ * terms of `--skin-*`. That leaves the default skin, which wants to say "the
+ * product's own card colour", nowhere to read it from: `--skin-surface:
+ * var(--card)` resolved inside a Canvas would find the Canvas's own override
+ * and chase itself.
+ *
+ * These aliases are the way out. A custom property's `var()` is substituted
+ * where it is *declared*, so each one computes to the `:root` value once and is
+ * inherited as that value however the token above it is later re-pointed.
+ */
+:root {
+  --src-background: var(--background);
+  --src-card: var(--card);
+  --src-card-foreground: var(--card-foreground);
+  --src-muted: var(--muted);
+  --src-muted-foreground: var(--muted-foreground);
+  --src-border: var(--border);
+  --src-input: var(--input);
+  --src-primary: var(--primary);
+  --src-primary-foreground: var(--primary-foreground);
+  --src-accent: var(--accent);
+}
+
+/* Meridian — the default, and the product's own look. */
+:root {
+  --skin-surface: var(--src-card);
+  --skin-surface-active: var(--src-card);
+  --skin-bed: var(--src-background);
+  --skin-bed-flat: var(--src-background);
+  --skin-ink: var(--src-card-foreground);
+  --skin-ink-muted: var(--src-muted-foreground);
+  --skin-rule: var(--src-border);
+  --skin-input: var(--src-input);
+  --skin-muted: var(--src-muted);
+  --skin-accent: var(--src-primary);
+  --skin-accent-ink: var(--src-primary-foreground);
+  --skin-accent-soft: var(--src-accent);
+
+  --skin-header-fill: transparent;
+  --skin-header-fill-active: var(--accent);
+  --skin-header-ink: var(--card-foreground);
+  --skin-header-height: 3rem;
+  --skin-header-pad: 1rem;
+  /* How the Active Panel's header is marked, as a box-shadow. */
+  --skin-active-edge: none;
+
+  --skin-radius: var(--radius-lg);
+  /*
+   * The package rounds the Workspace, not the Panels — a Panel is square by
+   * default because a flush Canvas is the shape most applications want. A skin
+   * that separates its Panels with a gutter has to round them itself, and one
+   * that butts them together must not.
+   */
+  --skin-panel-radius: var(--radius-lg);
+  --skin-radius-tile: var(--radius-md);
+  --skin-header-action-ink: var(--skin-ink-muted);
+
+  /*
+   * A Panel's box, in three parts, because skins want three different things
+   * from it. `border` is the whole outline a detached Panel needs; `edge` is
+   * the single trailing rule that divides two flush Panels; `last-edge` is what
+   * the Panel at the end of the row keeps, which for a flush skin is nothing —
+   * a rule with nothing beyond it to divide reads as an edge drawn in the
+   * middle of the Canvas.
+   */
+  --skin-panel-border: none;
+  --skin-panel-last-edge: none;
+
+  /*
+   * The Panel header's controls. Borderless by default, because that is what
+   * an icon button looks like everywhere else in this product; a skin that
+   * wants a boxed one says so.
+   */
+  --skin-action-border: transparent;
+  --skin-action-size: 1.75rem;
+  --skin-action-glyph: 0.875rem;
+  --skin-gap: 0.5rem;
+  --skin-panel-width: 22rem;
+  --skin-panel-active-width: 32rem;
+  /* The rule on a Panel's trailing edge; `none` where a gutter separates. */
+  --skin-panel-edge: none;
+  --skin-panel-shadow: none;
+  --skin-panel-blur: none;
+
+  /*
+   * How far the Panels are held off the edges of the Canvas.
+   *
+   * Zero for a skin whose Panels are the surface — a flush column browser wants
+   * its columns running the full height, and a gutter skin with square edges
+   * has nothing to protect. A skin that lifts its Panels off the bed needs it
+   * for two reasons: a card that runs into the frame is not lying on anything,
+   * and a drop shadow with no room under it is clipped to a dark line.
+   */
+  --skin-canvas-inset-block: 0;
+  --skin-canvas-inset-inline: 0;
+
+  /*
+   * The type scale, re-pointed the same way the palette is. Tailwind's size
+   * utilities read `--text-*`, so a skin that overrides them inside a Canvas
+   * rescales every `text-sm` and `text-xs` a renderer already wrote. The
+   * line-height companions are ratios and follow on their own.
+   */
+  --skin-text-xs: 0.75rem;
+  --skin-text-sm: 0.875rem;
+  --skin-text-base: 1rem;
+  --skin-text-lg: 1.125rem;
+
+  --skin-font: var(--font-sans);
+  --skin-font-heading: var(--font-sans);
+  --skin-font-figure: var(--font-sans);
+
+  --skin-eyebrow-transform: uppercase;
+  --skin-eyebrow-tracking: 0.08em;
+  --skin-eyebrow-size: 0.75rem;
+  --skin-section-transform: none;
+  --skin-section-tracking: 0;
+  --skin-section-size: 0.875rem;
+  --skin-section-ink: var(--skin-ink);
+  --skin-title-tracking: -0.01em;
+  --skin-panel-title-size: inherit;
+  --skin-panel-title-tracking: 0;
+  --skin-panel-title-transform: none;
+
+  --skin-pad-inline: 1.25rem;
+  --skin-pad-block: 1rem;
+
+  --skin-tile-fill: var(--card);
+  --skin-tile-fill-hover: var(--accent);
+  --skin-tile-rule: var(--border);
+  --skin-tile-shadow: none;
+}
+
+/* Ledger — a book of business. Flush, ruled, small caps, figures in mono. */
+:root[data-canvas-skin="ledger"] {
+  --skin-header-fill: var(--muted);
+  --skin-header-fill-active: var(--accent);
+  --skin-header-height: 2.25rem;
+  --skin-header-pad: 0.75rem;
+  --skin-active-edge: inset 0 2px 0 0 var(--skin-accent);
+
+  --skin-radius: 0;
+  --skin-panel-radius: 0;
+  --skin-radius-tile: 2px;
+  --skin-gap: 0;
+  --skin-panel-width: 20rem;
+  --skin-panel-active-width: 24rem;
+  --skin-panel-edge: 1px solid var(--skin-rule);
+
+  --skin-font-figure: var(--font-mono);
+
+  --skin-eyebrow-tracking: 0.14em;
+  --skin-eyebrow-size: 0.6875rem;
+  --skin-section-transform: uppercase;
+  --skin-section-tracking: 0.14em;
+  --skin-section-size: 0.6875rem;
+  --skin-section-ink: var(--skin-ink-muted);
+  --skin-panel-title-size: 0.6875rem;
+  --skin-panel-title-tracking: 0.12em;
+  --skin-panel-title-transform: uppercase;
+
+  --skin-pad-inline: 1rem;
+  --skin-pad-block: 0.875rem;
+
+  --skin-tile-fill: transparent;
+  --skin-tile-fill-hover: color-mix(in srgb, var(--accent) 55%, transparent);
+  --skin-tile-rule: color-mix(in srgb, var(--border) 75%, transparent);
+}
+
+/* Terminal — a line printer that learned to scroll sideways. */
+:root[data-canvas-skin="terminal"] {
+  --skin-surface: light-dark(oklch(1 0 0), oklch(0.17 0.02 155));
+  --skin-surface-active: light-dark(oklch(1 0 0), oklch(0.19 0.025 155));
+  --skin-bed: light-dark(oklch(0.9 0.004 155), oklch(0.115 0.015 155));
+  --skin-ink: light-dark(oklch(0.16 0.02 155), oklch(0.92 0.06 150));
+  --skin-ink-muted: light-dark(oklch(0.42 0.03 155), oklch(0.7 0.07 150));
+  --skin-rule: light-dark(oklch(0.16 0.02 155), oklch(0.42 0.09 150));
+  --skin-accent: light-dark(oklch(0.42 0.14 152), oklch(0.83 0.18 148));
+  --skin-accent-ink: light-dark(oklch(0.99 0.01 152), oklch(0.14 0.03 150));
+  --skin-accent-soft: light-dark(
+    oklch(0.42 0.14 152 / 0.14),
+    oklch(0.83 0.18 148 / 0.16)
+  );
+
+  --skin-header-fill: var(--skin-accent);
+  --skin-header-fill-active: var(--skin-accent);
+  --skin-header-ink: var(--skin-accent-ink);
+  --skin-header-height: 2rem;
+  --skin-header-pad: 0.625rem;
+  --skin-active-edge: inset 0 0 0 2px var(--skin-ink);
+
+  --skin-radius: 0;
+  --skin-panel-radius: 0;
+  --skin-radius-tile: 0;
+  --skin-header-action-ink: var(--skin-accent-ink);
+  --skin-gap: 0;
+  --skin-panel-width: 21rem;
+  --skin-panel-active-width: 27rem;
+  --skin-panel-edge: 1px solid var(--skin-rule);
+
+  --skin-font: var(--font-mono);
+  --skin-font-heading: var(--font-mono);
+  --skin-font-figure: var(--font-mono);
+
+  --skin-eyebrow-tracking: 0.2em;
+  --skin-eyebrow-size: 0.625rem;
+  --skin-section-transform: uppercase;
+  --skin-section-tracking: 0.18em;
+  --skin-section-size: 0.625rem;
+  --skin-section-ink: var(--skin-ink-muted);
+  --skin-title-tracking: 0.02em;
+  --skin-panel-title-size: 0.6875rem;
+  --skin-panel-title-tracking: 0.2em;
+  --skin-panel-title-transform: uppercase;
+  --skin-muted: color-mix(in srgb, var(--skin-accent) 12%, var(--skin-surface));
+  --skin-bed-flat: light-dark(oklch(0.9 0.004 155), oklch(0.115 0.015 155));
+  --skin-input: var(--skin-ink);
+
+  --skin-pad-inline: 0.875rem;
+  --skin-pad-block: 0.75rem;
+
+  --skin-tile-fill: transparent;
+  --skin-tile-fill-hover: var(--skin-accent-soft);
+  --skin-tile-rule: var(--skin-rule);
+}
+
+/* Paper — editorial. Warm stock, serif, generous measure, nothing filled. */
+:root[data-canvas-skin="paper"] {
+  --skin-surface: light-dark(oklch(0.975 0.014 84), oklch(0.225 0.012 62));
+  --skin-surface-active: light-dark(
+    oklch(0.99 0.012 84),
+    oklch(0.245 0.013 62)
+  );
+  --skin-bed: light-dark(oklch(0.915 0.018 82), oklch(0.175 0.01 62));
+  --skin-ink: light-dark(oklch(0.24 0.02 55), oklch(0.94 0.012 80));
+  --skin-ink-muted: light-dark(oklch(0.47 0.022 58), oklch(0.73 0.016 76));
+  --skin-rule: light-dark(oklch(0.84 0.022 78), oklch(0.35 0.016 66));
+  --skin-accent: light-dark(oklch(0.46 0.16 27), oklch(0.74 0.14 38));
+  --skin-accent-ink: light-dark(oklch(0.99 0.01 27), oklch(0.18 0.03 38));
+  --skin-accent-soft: light-dark(
+    oklch(0.46 0.16 27 / 0.1),
+    oklch(0.74 0.14 38 / 0.14)
+  );
+
+  --skin-header-fill: transparent;
+  --skin-header-fill-active: transparent;
+  --skin-header-ink: var(--skin-ink);
+  --skin-header-height: 3rem;
+  --skin-header-pad: 1.5rem;
+  --skin-active-edge: inset 0 3px 0 -1px var(--skin-accent);
+
+  --skin-radius: 0;
+  --skin-panel-radius: 0;
+  --skin-radius-tile: 0;
+  --skin-gap: 0;
+  --skin-panel-width: 24rem;
+  --skin-panel-active-width: 34rem;
+  --skin-panel-edge: 1px solid var(--skin-rule);
+
+  --skin-font:
+    ui-serif, "Iowan Old Style", Georgia, Cambria, "Times New Roman", serif;
+  --skin-font-heading:
+    ui-serif, "Iowan Old Style", Georgia, Cambria, "Times New Roman", serif;
+  --skin-font-figure:
+    ui-serif, "Iowan Old Style", Georgia, Cambria, "Times New Roman", serif;
+
+  --skin-eyebrow-tracking: 0.18em;
+  --skin-eyebrow-size: 0.6875rem;
+  --skin-section-transform: uppercase;
+  --skin-section-tracking: 0.16em;
+  --skin-section-size: 0.6875rem;
+  --skin-section-ink: var(--skin-ink-muted);
+  --skin-title-tracking: -0.015em;
+  --skin-panel-title-size: 0.9375rem;
+  --skin-panel-title-tracking: 0.01em;
+  --skin-panel-title-transform: none;
+  --skin-muted: color-mix(in srgb, var(--skin-ink) 7%, var(--skin-surface));
+  --skin-bed-flat: light-dark(oklch(0.915 0.018 82), oklch(0.175 0.01 62));
+  --skin-input: color-mix(in srgb, var(--skin-ink) 55%, var(--skin-surface));
+
+  --skin-pad-inline: 1.5rem;
+  --skin-pad-block: 1.25rem;
+
+  --skin-tile-fill: transparent;
+  --skin-tile-fill-hover: var(--skin-accent-soft);
+  --skin-tile-rule: var(--skin-rule);
+}
+
+/* Glass — translucent Panels over a lit bed. */
+:root[data-canvas-skin="glass"] {
+  --skin-surface: color-mix(in srgb, var(--src-card) 40%, transparent);
+  --skin-surface-active: color-mix(in srgb, var(--src-card) 55%, transparent);
+  --skin-bed: light-dark(
+    linear-gradient(140deg, oklch(0.95 0.04 268), oklch(0.9 0.07 316)),
+    linear-gradient(140deg, oklch(0.24 0.06 274), oklch(0.19 0.07 322))
+  );
+  --skin-rule: color-mix(in srgb, var(--src-card-foreground) 18%, transparent);
+
+  --skin-header-fill: color-mix(in srgb, var(--src-card) 30%, transparent);
+  --skin-header-fill-active: color-mix(
+    in srgb,
+    var(--primary) 20%,
+    transparent
+  );
+  --skin-active-edge: inset 0 0 0 1px
+    color-mix(in srgb, var(--primary) 55%, transparent);
+
+  --skin-radius: 1rem;
+  --skin-panel-radius: 1rem;
+  --skin-radius-tile: 0.75rem;
+  --skin-panel-border: 1px solid var(--skin-rule);
+  --skin-panel-edge: 1px solid var(--skin-rule);
+  --skin-panel-last-edge: 1px solid var(--skin-rule);
+  --skin-gap: 0.75rem;
+  --skin-panel-width: 22rem;
+  --skin-panel-active-width: 30rem;
+  --skin-panel-shadow: 0 18px 40px -22px
+    color-mix(in srgb, oklch(0 0 0) 70%, transparent);
+  --skin-panel-blur: blur(18px) saturate(1.4);
+  --skin-canvas-inset-block: 0.75rem;
+  --skin-canvas-inset-inline: 0.75rem;
+
+  --skin-eyebrow-tracking: 0.12em;
+  --skin-muted: color-mix(in srgb, var(--src-card) 28%, transparent);
+  --skin-bed-flat: light-dark(oklch(0.94 0.04 280), oklch(0.22 0.06 292));
+  --skin-input: color-mix(in srgb, var(--src-card-foreground) 45%, transparent);
+
+  --skin-tile-fill: color-mix(in srgb, var(--src-card) 42%, transparent);
+  --skin-tile-fill-hover: color-mix(
+    in srgb,
+    var(--src-primary) 26%,
+    transparent
+  );
+  --skin-tile-rule: color-mix(
+    in srgb,
+    var(--src-card-foreground) 14%,
+    transparent
+  );
+  --skin-tile-shadow: inset 0 1px 0 0
+    color-mix(in srgb, oklch(1 0 0) 22%, transparent);
+}
+
+/*
+ * Compact — the same Canvas with the air taken out.
+ *
+ * Nothing here is a colour. Half the padding, a third off the header, a tighter
+ * type scale and no radius at all: the whole skin is geometry, and it is the
+ * one a reader who works in this surface all day would pick.
+ */
+:root[data-canvas-skin="compact"] {
+  --skin-header-fill: var(--skin-muted);
+  --skin-header-height: 1.75rem;
+  --skin-header-pad: 0.5rem;
+  --skin-active-edge: inset 0 2px 0 0 var(--skin-accent);
+
+  --skin-radius: 0;
+  --skin-panel-radius: 0;
+  --skin-radius-tile: 2px;
+  --skin-gap: 0;
+  --skin-panel-width: 17rem;
+  --skin-panel-active-width: 22rem;
+  --skin-panel-edge: 1px solid var(--skin-rule);
+
+  --skin-action-size: 1.5rem;
+  --skin-action-glyph: 0.75rem;
+
+  --skin-eyebrow-size: 0.625rem;
+  --skin-eyebrow-tracking: 0.1em;
+  --skin-section-size: 0.75rem;
+  --skin-panel-title-size: 0.8125rem;
+
+  --skin-pad-inline: 0.625rem;
+  --skin-pad-block: 0.5rem;
+
+  --skin-text-xs: 0.6875rem;
+  --skin-text-sm: 0.8125rem;
+  --skin-text-base: 0.9375rem;
+  --skin-text-lg: 1.0625rem;
+
+  --skin-tile-fill: transparent;
+  --skin-tile-rule: color-mix(in srgb, var(--src-border) 70%, transparent);
+}
+
+/*
+ * Float — the opposite extreme, and the one that shows what `--canvas-panel-gap`
+ * is for.
+ *
+ * A wide gutter, a big radius and a real drop shadow turn a row of Panels into
+ * a row of cards lying on a surface rather than a wall divided into columns.
+ * The bed is tinted a shade under the Panels so the shadow has something to
+ * fall on: a shadow over a bed the same colour as the card is a smudge.
+ */
+:root[data-canvas-skin="float"] {
+  --skin-bed: light-dark(oklch(0.94 0.006 265), oklch(0.135 0.012 265));
+  --skin-bed-flat: light-dark(oklch(0.94 0.006 265), oklch(0.135 0.012 265));
+
+  --skin-header-fill: transparent;
+  --skin-header-fill-active: var(--skin-accent-soft);
+  --skin-header-height: 3.5rem;
+  --skin-header-pad: 1.5rem;
+
+  --skin-radius: 1.25rem;
+  --skin-panel-radius: 1.25rem;
+  --skin-radius-tile: 1rem;
+  --skin-gap: 1.5rem;
+  --skin-panel-width: 24rem;
+  --skin-panel-active-width: 34rem;
+  --skin-panel-border: 1px solid var(--skin-rule);
+  --skin-panel-edge: 1px solid var(--skin-rule);
+  --skin-panel-last-edge: 1px solid var(--skin-rule);
+  --skin-panel-shadow:
+    0 1px 2px color-mix(in srgb, oklch(0 0 0) 8%, transparent),
+    0 14px 32px -10px color-mix(in srgb, oklch(0 0 0) 26%, transparent);
+  --skin-canvas-inset-block: 1.25rem;
+  --skin-canvas-inset-inline: 1.25rem;
+
+  --skin-eyebrow-tracking: 0.1em;
+
+  --skin-pad-inline: 2rem;
+  --skin-pad-block: 1.5rem;
+
+  --skin-text-xs: 0.8125rem;
+  --skin-text-sm: 0.9375rem;
+  --skin-text-base: 1.0625rem;
+  --skin-text-lg: 1.25rem;
+
+  --skin-tile-fill: var(--skin-surface);
+  --skin-tile-rule: var(--skin-rule);
+  --skin-tile-shadow: 0 1px 2px color-mix(in srgb, oklch(0 0 0) 7%, transparent);
+}
+
+/*
+ * Brutalist — every soft edge in the package turned off at once.
+ *
+ * Two-pixel rules, an offset shadow with no blur at all, a header rail in solid
+ * ink, and a bed in a colour nobody would call tasteful. It earns its place in
+ * the set by being the furthest a `--canvas-*` token can be pushed: if the
+ * Canvas survives this it will survive a brand.
+ */
+:root[data-canvas-skin="brutalist"] {
+  --skin-surface: light-dark(oklch(0.99 0 0), oklch(0.17 0 0));
+  --skin-surface-active: light-dark(oklch(1 0 0), oklch(0.2 0 0));
+  --skin-bed: light-dark(oklch(0.92 0.14 96), oklch(0.24 0.06 96));
+  --skin-bed-flat: light-dark(oklch(0.92 0.14 96), oklch(0.24 0.06 96));
+  --skin-ink: light-dark(oklch(0.15 0 0), oklch(0.97 0 0));
+  --skin-ink-muted: light-dark(oklch(0.4 0 0), oklch(0.75 0 0));
+  --skin-rule: light-dark(oklch(0.15 0 0), oklch(0.97 0 0));
+  --skin-input: var(--skin-rule);
+  --skin-muted: light-dark(oklch(0.94 0.03 96), oklch(0.24 0.02 96));
+  --skin-accent: light-dark(oklch(0.55 0.24 27), oklch(0.75 0.2 55));
+  --skin-accent-ink: light-dark(oklch(1 0 0), oklch(0.15 0 0));
+  --skin-accent-soft: light-dark(
+    oklch(0.55 0.24 27 / 0.16),
+    oklch(0.75 0.2 55 / 0.2)
+  );
+
+  --skin-header-fill: var(--skin-ink);
+  --skin-header-fill-active: var(--skin-accent);
+  --skin-header-ink: var(--skin-surface);
+  --skin-header-action-ink: var(--skin-surface);
+  --skin-action-border: var(--skin-surface);
+  --skin-header-height: 2.75rem;
+  --skin-header-pad: 1rem;
+  --skin-active-edge: none;
+
+  --skin-radius: 0;
+  --skin-panel-radius: 0;
+  --skin-radius-tile: 0;
+  --skin-gap: 1rem;
+  --skin-panel-width: 22rem;
+  --skin-panel-active-width: 30rem;
+  --skin-panel-border: 2px solid var(--skin-rule);
+  --skin-panel-edge: 2px solid var(--skin-rule);
+  --skin-panel-last-edge: 2px solid var(--skin-rule);
+  --skin-panel-shadow: 6px 6px 0 0 var(--skin-rule);
+  /* Room for the offset shadow, which falls down and to the right. */
+  --skin-canvas-inset-block: 0.75rem;
+  --skin-canvas-inset-inline: 0.75rem;
+
+  --skin-eyebrow-tracking: 0.12em;
+  --skin-section-transform: uppercase;
+  --skin-section-tracking: 0.1em;
+  --skin-section-size: 0.75rem;
+  --skin-section-ink: var(--skin-ink);
+  --skin-title-tracking: -0.03em;
+  --skin-panel-title-size: 0.9375rem;
+  --skin-panel-title-tracking: 0.06em;
+  --skin-panel-title-transform: uppercase;
+
+  --skin-pad-inline: 1.25rem;
+  --skin-pad-block: 1rem;
+
+  --skin-text-xs: 0.75rem;
+  --skin-text-sm: 0.9375rem;
+  --skin-text-base: 1.0625rem;
+  --skin-text-lg: 1.25rem;
+
+  --skin-tile-fill: var(--skin-surface);
+  --skin-tile-fill-hover: var(--skin-accent-soft);
+  --skin-tile-rule: var(--skin-rule);
+  --skin-tile-shadow: 3px 3px 0 0 var(--skin-rule);
+}
+
 /*
  * Canvas Panels theming.
  *
@@ -261,24 +802,250 @@
  * `components` layer is enough to win, because the layer statement at the top
  * of this file puts `canvas-panels` below `components`.
  *
+ * This is the whole seam between the skin contract above and the package: one
+ * rule, no conditionals. Every skin reaches the Canvas through it.
+ *
  * `--canvas-surface-overlay` is deliberately left alone: the package's scrim is
  * translucent by design, and it is the one token the package's own
  * forced-colours block replaces.
  */
 @layer components {
   [data-canvas-workspace] {
-    --canvas-surface: var(--card);
-    --canvas-surface-active: var(--card);
-    --canvas-border: var(--border);
-    --canvas-text: var(--card-foreground);
-    --canvas-text-muted: var(--muted-foreground);
-    --canvas-radius: var(--radius-lg);
-    --canvas-action-radius: var(--radius-md);
-    --canvas-action-surface-hover: var(--accent);
-    --canvas-action-text: var(--muted-foreground);
-    --canvas-action-text-hover: var(--foreground);
+    --canvas-surface: var(--skin-surface);
+    --canvas-surface-active: var(--skin-surface-active);
+    --canvas-border: var(--skin-rule);
+    --canvas-text: var(--skin-ink);
+    --canvas-text-muted: var(--skin-ink-muted);
+    --canvas-radius: var(--skin-radius);
+    --canvas-panel-gap: var(--skin-gap);
+    --canvas-panel-width: var(--skin-panel-width);
+    --canvas-panel-active-width: var(--skin-panel-active-width);
+    --canvas-header-min-height: var(--skin-header-height);
+    --canvas-header-padding-inline: var(--skin-header-pad);
+    --canvas-action-radius: var(--skin-radius-tile);
+    --canvas-action-surface-hover: var(--skin-accent-soft);
+    --canvas-action-text: var(--skin-ink-muted);
+    --canvas-action-text-hover: var(--skin-ink);
     --canvas-action-text-destructive: var(--destructive);
-    --canvas-action-border: var(--border);
+    --canvas-action-border: var(--skin-action-border);
+  }
+
+  /*
+   * The other half of the seam: the application's own palette, re-pointed for
+   * the width of a Canvas.
+   *
+   * Panel renderers are built out of ordinary Tailwind utilities — `bg-card`,
+   * `text-muted-foreground`, `border-border`, `bg-primary/18`. Rewriting every
+   * one of them in terms of `--skin-*` would be a second styling system to keep
+   * in step with the first. Re-pointing the tokens those utilities already read
+   * costs nineteen declarations and makes every one of them skin-aware at once,
+   * including the ones inside components this application did not write.
+   *
+   * It stops at the edge of the Canvas. The sidebar, the top bar and the page
+   * around it keep the product's palette whatever skin is on, which is the
+   * thing worth demonstrating: a Canvas Workspace can be dressed to the house
+   * style of whatever it is dropped into without the house being redecorated.
+   */
+  [data-meridian-canvas="mounted"],
+  [data-meridian-book="mounted"],
+  [data-canvas-overlay] {
+    --background: var(--skin-bed-flat);
+    --card: var(--skin-surface);
+    --card-foreground: var(--skin-ink);
+    --popover: var(--skin-surface);
+    --popover-foreground: var(--skin-ink);
+    --foreground: var(--skin-ink);
+    --muted: var(--skin-muted);
+    --muted-foreground: var(--skin-ink-muted);
+    --secondary: var(--skin-muted);
+    --secondary-foreground: var(--skin-ink);
+    --border: var(--skin-rule);
+    /*
+     * Not folded into `--border`. This is the visible boundary of a form
+     * control, which WCAG 1.4.11 holds to 3:1 against the page — a skin may
+     * restyle it but may not quieten it to a hairline, so each one states its
+     * own.
+     */
+    --input: var(--skin-input);
+    --primary: var(--skin-accent);
+    --primary-foreground: var(--skin-accent-ink);
+    --accent: var(--skin-accent-soft);
+    --accent-foreground: var(--skin-ink);
+    --ring: var(--skin-accent);
+
+    --text-xs: var(--skin-text-xs);
+    --text-sm: var(--skin-text-sm);
+    --text-base: var(--skin-text-base);
+    --text-lg: var(--skin-text-lg);
+
+    background: var(--skin-bed);
+    border-color: var(--skin-rule);
+    color: var(--skin-ink);
+    font-family: var(--skin-font);
+  }
+
+  /*
+   * The Panel header's controls.
+   *
+   * These are the *package's* buttons rather than this application's: Close and
+   * every Canvas Action are rendered by the Workspace, so there is no shadcn
+   * `Button` to reach for here and no markup of ours to change. What there is,
+   * is the `--canvas-action-*` family, which is the package's supported way of
+   * saying what an action looks like — and pointing it at the values shadcn's
+   * ghost icon button uses is what stops these reading as boxed mini-buttons
+   * and starts them reading like every other icon button in the product.
+   *
+   * Only the *visible* label goes. The button carries its whole accessible name
+   * in `aria-label` ("Close Northwind Logistics"), so a screen reader hears
+   * exactly what it heard before and the word is free to leave. `font-size: 0`
+   * removes it without removing the element, which `display: none` on the text
+   * would not survive.
+   *
+   * 1.75rem square: WCAG 2.5.8 asks for a 24px pointer target, and an icon
+   * button trimmed to the size of its glyph is the classic way to fail it.
+   */
+  [data-canvas-panel-close],
+  [data-canvas-action^="share-"] {
+    display: grid;
+    place-items: center;
+    /*
+     * `flex: 0 0 auto` is load-bearing. These are flex items in the header, so
+     * they shrink like everything else in it — and in a narrow column, with a
+     * title beside them that has already ellipsised, they were the next thing
+     * to give. Measured at 16px against the 28px they ask for, which is both
+     * lopsided and under the 24px WCAG 2.5.8 wants of a pointer target.
+     */
+    flex: 0 0 auto;
+    inline-size: var(--skin-action-size);
+    block-size: var(--skin-action-size);
+    padding: 0;
+    font-size: 0;
+  }
+
+  /*
+   * The marks. Authored SVG carried as a mask and painted in `currentColor`, so
+   * each inherits the button's own hover and focus colours instead of keeping a
+   * palette of its own. Both are drawn at the same stroke width: two icons in
+   * one header at two weights read as two icon sets.
+   */
+  [data-canvas-panel-close]::before,
+  [data-canvas-action^="share-"]::before {
+    content: "";
+    inline-size: var(--skin-action-glyph);
+    block-size: var(--skin-action-glyph);
+    background: currentColor;
+  }
+
+  [data-canvas-panel-close]::before {
+    mask:
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23000' stroke-width='1.75' stroke-linecap='round'%3E%3Cpath d='M4 4l8 8M12 4l-8 8'/%3E%3C/svg%3E")
+      center / contain no-repeat;
+  }
+
+  [data-canvas-action^="share-"]::before {
+    mask:
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23000' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6.5 9.5a3 3 0 0 0 4.24 0l2-2a3 3 0 0 0-4.24-4.24l-.7.7'/%3E%3Cpath d='M9.5 6.5a3 3 0 0 0-4.24 0l-2 2a3 3 0 0 0 4.24 4.24l.7-.7'/%3E%3C/svg%3E")
+      center / contain no-repeat;
+  }
+
+  /*
+   * The package styles the separator's focus ring and not these, so under
+   * Tailwind's preflight they fall back to the browser's. Matching the ring the
+   * rest of the application uses is the difference between a control that looks
+   * deliberate and one that looks unfinished.
+   */
+  [data-canvas-panel-header] button:focus-visible {
+    outline: 2px solid var(--skin-accent);
+    outline-offset: 2px;
+  }
+
+  /*
+   * A header the skin has filled needs its controls repainted with it. The
+   * package derives an action's colour from `--canvas-text-muted`, which is
+   * right against an unfilled header and unreadable against an inverted one.
+   */
+  [data-canvas-panel-header] button {
+    color: var(--skin-header-action-ink);
+  }
+
+  /*
+   * The bed the Panels sit on, for every Canvas in the application.
+   *
+   * `--canvas-panel-gap` is the package's own token and needs no reaching past
+   * the theming seam. What it does need is somewhere to show: the Canvas paints
+   * behind the Panels in `--canvas-surface` too, so a gap between two Panels
+   * the same colour as the thing behind them is a gap nobody can see. Recessing
+   * the bed is what turns the token into a gutter — and under a skin with no
+   * gutter, it is what the space past the last Panel is drawn in.
+   */
+  /*
+   * A Panel body must be the containing block for what it contains.
+   *
+   * The package makes each Panel `position: relative` and gives its body
+   * `overflow-y: auto`. An absolutely positioned descendant of that body is
+   * therefore laid out against the *Panel*, not the body — so the body's
+   * overflow never clips it, and it lands at its static position somewhere down
+   * inside the scrolled content, adding its own height to the Panel's scroll
+   * box and then to the Canvas's.
+   *
+   * Which sounds theoretical until you notice that Tailwind's `sr-only` is
+   * `position: absolute`. Every "Select <account>" and "Open the record" label
+   * in the account book's table is one, so a fourteen-row table quietly gave
+   * the Canvas 323px of vertical overflow — and because `overflow-x: auto` on
+   * the application computes `overflow-y: auto` alongside it, the whole Canvas
+   * became vertically scrollable. Scrolling it carried the Panel *headers* off
+   * the top of the frame and left a band of bare bed under the Panels.
+   *
+   * One declaration fixes it: contained by the body, those labels are clipped
+   * by the scroll they already sit in and contribute nothing beyond it.
+   */
+  [data-canvas-panel-body] {
+    position: relative;
+  }
+
+  [data-canvas-application] {
+    /*
+     * And the Canvas itself never scrolls vertically. It is a horizontal
+     * surface; vertical scrolling belongs to each Panel body, which owns its
+     * own and keeps its header in place while it happens. `overflow-x: auto`
+     * alone cannot say that — the other axis computes to `auto` with it — so it
+     * has to be said.
+     */
+    overflow-y: hidden;
+    background: var(--skin-bed);
+    padding-block: var(--skin-canvas-inset-block);
+    padding-inline: var(--skin-canvas-inset-inline);
+    /*
+     * The Canvas scrolls sideways, and a scroll that stops with a Panel jammed
+     * against the padding has undone the inset at exactly the moment it matters.
+     * Matching the two keeps the last column as far off the frame as the first.
+     */
+    scroll-padding-inline: var(--skin-canvas-inset-inline);
+  }
+
+  /*
+   * A registered visual title, placed *before* the heading rather than after
+   * it.
+   *
+   * The package renders both: the `h2` carries the accessible name and is the
+   * element the Canvas gives focus to, and this `aria-hidden` span carries
+   * whatever the application wants seen. In source order the span comes second,
+   * which would put an ornament meant to precede a name after it — `order` is
+   * the whole fix, and it costs nothing because the header is already a flex
+   * row.
+   */
+  [data-canvas-visual-title] {
+    display: inline-flex;
+    align-items: center;
+    order: -1;
+  }
+
+  /* The Panel's own title, in the skin's voice rather than the application's. */
+  [data-canvas-panel-header] h2 {
+    font-family: var(--skin-font-heading);
+    font-size: var(--skin-panel-title-size);
+    letter-spacing: var(--skin-panel-title-tracking);
+    text-transform: var(--skin-panel-title-transform);
   }
 
   /*
@@ -303,99 +1070,43 @@
   [data-meridian-canvas="mounted"] [data-canvas-application] {
     flex: 1 1 auto;
     min-block-size: 0;
-
-    /*
-     * A seam between Panels, so a stack reads as several surfaces rather than
-     * one wide one divided by hairlines.
-     *
-     * `--canvas-panel-gap` is the package's own token and needs no reaching
-     * past the theming seam. What it does need is somewhere to show: the Canvas
-     * paints the surface behind the Panels in `--canvas-surface` too, so a gap
-     * between two Panels the same colour as the thing behind them is a gap
-     * nobody can see. Recessing the Canvas to the page colour is what turns the
-     * token into a gutter.
-     */
-    --canvas-panel-gap: 0.5rem;
-
-    background: var(--background);
   }
 
   /*
-   * With a gutter doing the separating, each Panel's trailing hairline is one
-   * line too many — and on the deepest Panel it had nothing beyond it to
-   * separate, so it read as an edge drawn in the middle of the Canvas.
+   * A Panel's trailing rule, decided by the skin rather than by the page. With
+   * a gutter doing the separating it is one line too many, and on the deepest
+   * Panel it has nothing beyond it to separate; flush, it is the only thing
+   * dividing two Panels.
    */
-  [data-meridian-canvas="mounted"] [data-canvas-panel] {
-    border-inline-end: none;
+  [data-canvas-panel] {
+    /* Order matters: the shorthand first, then the one edge that differs. */
+    border: var(--skin-panel-border);
+    border-inline-end: var(--skin-panel-edge);
+    border-radius: var(--skin-panel-radius);
+    box-shadow: var(--skin-panel-shadow);
+  }
+
+  [data-canvas-panel]:last-child {
+    border-inline-end: var(--skin-panel-last-edge);
   }
 
   /*
-   * The close control as a mark rather than a word.
-   *
-   * Only the *visible* label goes: the Panel's close button carries its whole
-   * accessible name in `aria-label` ("Close Northwind Logistics"), so a screen
-   * reader hears exactly what it heard before and the word is free to leave.
-   * `font-size: 0` is what removes it without removing the element, which
-   * `display: none` on the text would not survive.
-   *
-   * The cross is an authored SVG carried as a mask and painted in
-   * `currentColor`, so it inherits the button's own hover and focus colours
-   * instead of keeping a palette of its own.
-   *
-   * 1.75rem square: WCAG 2.5.8 asks for a 24px pointer target, and an icon
-   * button trimmed to the size of its glyph is the classic way to fail it.
+   * Only Glass declares a blur, and only Glass pays for one: a `none` filter
+   * still promotes the element to its own layer in some engines, so the
+   * declaration is written by the skin that wants it rather than defaulted here.
    */
-  [data-meridian-canvas="mounted"] [data-canvas-panel-close],
-  [data-meridian-canvas="mounted"] [data-canvas-action^="share-"] {
-    display: grid;
-    place-items: center;
-    inline-size: 1.75rem;
-    block-size: 1.75rem;
-    padding: 0;
-    font-size: 0;
+  :root[data-canvas-skin="glass"] [data-canvas-panel] {
+    backdrop-filter: var(--skin-panel-blur);
   }
 
-  /*
-   * The share mark, drawn at the same weight as the cross beside it. Two icons
-   * in one header at two stroke widths read as two icon sets.
-   */
-  [data-meridian-canvas="mounted"] [data-canvas-action^="share-"]::before {
-    content: "";
-    inline-size: 0.875rem;
-    block-size: 0.875rem;
-    background: currentColor;
-    mask:
-      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23000' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 10.5V2.5'/%3E%3Cpath d='M5 5.5l3-3 3 3'/%3E%3Cpath d='M3 9.5v3A1.5 1.5 0 0 0 4.5 14h7a1.5 1.5 0 0 0 1.5-1.5v-3'/%3E%3C/svg%3E")
-      center / contain no-repeat;
+  [data-canvas-panel-header] {
+    background: var(--skin-header-fill);
+    color: var(--skin-header-ink, var(--skin-ink));
   }
 
-  [data-meridian-canvas="mounted"] [data-canvas-panel-close]::before {
-    content: "";
-    inline-size: 0.875rem;
-    block-size: 0.875rem;
-    background: currentColor;
-    mask:
-      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23000' stroke-width='1.75' stroke-linecap='round'%3E%3Cpath d='M4 4l8 8M12 4l-8 8'/%3E%3C/svg%3E")
-      center / contain no-repeat;
-  }
-
-  /*
-   * Which Panel is the Active one, said on the Panel rather than only on the
-   * rail above it. Keyboard movement, the Panel a record opens in front of, and
-   * everything the Canvas announces are all about the Active Panel, and until
-   * now the only place a reader could see which one that was is a strip they
-   * may not be looking at.
-   *
-   * The header carries it rather than the whole Panel: tinting a Panel's body
-   * would put a wash under every field a reader is trying to read, and the
-   * header is the one band already given over to saying what this Panel is.
-   * `--accent` is the tint the palette already keeps for exactly this, so the
-   * Active Panel and its lit station on the rail are the same violet.
-   */
-  [data-meridian-canvas="mounted"]
-    [data-canvas-panel][data-active]
-    > [data-canvas-panel-header] {
-    background: var(--accent);
+  [data-canvas-panel][data-active] > [data-canvas-panel-header] {
+    background: var(--skin-header-fill-active);
+    box-shadow: var(--skin-active-edge);
     transition: background var(--canvas-transition-duration)
       var(--canvas-transition-easing);
   }
@@ -523,11 +1234,20 @@
      * anywhere but the end of the trail, and the Canvas only ever grows to the
      * right of wherever they are.
      */
-    [data-canvas-application]:not(:has(> [data-active]:last-child))
+    /*
+     * Scoped to the pipeline's own mount. Spines are the Pipeline's device for
+     * showing depth along a trail, and they are wrong for every other Canvas in
+     * this application: the account book's columns are all equally where the
+     * reader is, and the command palette has two Panels and no depth at all.
+     * Left unscoped these selectors reached both.
+     */
+    [data-meridian-canvas="mounted"]
+      [data-canvas-application]:not(:has(> [data-active]:last-child))
       [data-canvas-panel][data-canvas-panel-context="previous"]:has(
         ~ [data-active]
       ):not(:focus-within),
-    [data-canvas-application]:has(> [data-active]:last-child)
+    [data-meridian-canvas="mounted"]
+      [data-canvas-application]:has(> [data-active]:last-child)
       [data-canvas-panel][data-canvas-panel-context="previous"]:has(
         ~ [data-active]
       ):not(:has(+ [data-active])):not(:focus-within) {
@@ -566,8 +1286,13 @@
       }
 
       & [data-canvas-panel-header] h2 {
-        /* Quieter, because a spine is a Panel the reader is not standing on. */
-        color: var(--muted-foreground);
+        /*
+         * Quieter, because a spine is a Panel the reader is not standing on —
+         * but quiet against whatever the *skin* has put behind it. A skin that
+         * fills the header rail leaves muted body ink unreadable on it, so this
+         * follows the same token the header's own controls do.
+         */
+        color: var(--skin-header-action-ink, var(--muted-foreground));
         /*
          * Flex will not shrink a box below its content unless it is told it
          * may, and the package's ellipsis needs it to: a title longer than the
@@ -603,7 +1328,7 @@
        * reader's half of it.
        */
       &:has([data-canvas-dirty-label]) [data-canvas-panel-header]::after {
-        background: var(--primary);
+        background: var(--skin-header-action-ink, var(--primary));
         block-size: 0.375rem;
         border-radius: 50%;
         content: "";
@@ -779,5 +1504,403 @@
   [data-canvas-transition-actions] button:focus-visible {
     outline: 2px solid var(--ring);
     outline-offset: 2px;
+  }
+}
+
+/*
+ * The account book.
+ *
+ * The same package, the same Workspace element, the same data attributes — and
+ * a surface that looks nothing like the Pipeline. Everything below is either a
+ * `--canvas-*` token or one of the documented structural attributes; nothing
+ * reaches into the package's markup for anything it has not published.
+ *
+ * The Pipeline is a trail of cards floating in a gutter, with the Panels behind
+ * the reader folded into spines. The book is a column browser: flush columns of
+ * even weight, hairline-ruled, square, each one landing on its own edge as the
+ * Canvas scrolls. Neither is the package's opinion. Both are this stylesheet's.
+ */
+@layer components {
+  [data-meridian-book="mounted"] [data-canvas-workspace] {
+    --canvas-panel-min-height: 0;
+    /* Each column pads its own blocks, so the body adds nothing. */
+    --canvas-body-padding: 0;
+
+    flex: 1 1 auto;
+    min-block-size: 0;
+  }
+
+  [data-meridian-book="mounted"] [data-canvas-application] {
+    flex: 1 1 auto;
+    min-block-size: 0;
+    /*
+     * A column browser comes to rest on a column edge rather than half way
+     * through one. `proximity` rather than `mandatory`, because the reader must
+     * still be able to sit between two columns while comparing them.
+     */
+    scroll-snap-type: x proximity;
+  }
+
+  [data-meridian-book="mounted"] [data-canvas-panel] {
+    scroll-snap-align: end;
+  }
+
+  /*
+   * The table is the column that does not move, and it is the one that takes
+   * the slack.
+   *
+   * A record column is a fact table read top to bottom, and widening one past
+   * its reading measure only puts a label further from its value. The table is
+   * the opposite: every pixel it is given goes into account names that were
+   * being truncated. So it grows into whatever the records leave over, up to a
+   * width beyond which the row itself stops being scannable, and shrinks back
+   * to its basis as columns open in front of it.
+   */
+  [data-meridian-book="mounted"] [data-canvas-panel][data-panel-kind="book"] {
+    flex: 1 1 min(31rem, 92vw);
+    max-inline-size: 44rem;
+  }
+
+  /*
+   * The reader's own resizing has to survive all of that. The package writes a
+   * dragged width as an inline `flex-basis`, which no rule here can outrank —
+   * but `flex-grow` is a separate declaration, and a Panel still told to grow
+   * would simply swallow the drag back. Filling the slack is the default only
+   * for a column nobody has sized.
+   */
+  [data-meridian-book="mounted"]
+  [data-canvas-panel][data-panel-kind="book"][style*="flex-basis"] {
+    flex-grow: 0;
+    max-inline-size: none;
+  }
+
+  @media (max-width: 63.999rem) {
+    [data-meridian-book="mounted"] [data-canvas-panel][data-panel-kind="book"] {
+      flex-basis: 100%;
+    }
+  }
+
+  /*
+   * A column holding an unapplied change keeps saying so. The package renders
+   * the dirty label; this only stops it shouting on a rail of small caps.
+   */
+  /* biome-ignore lint/style/noDescendingSpecificity: the higher-specificity rule it is compared against is the Pipeline's spine, scoped to `[data-meridian-canvas]` and to a wide viewport. The two can never match the same element. */
+  [data-meridian-book="mounted"] [data-canvas-dirty-label] {
+    border-radius: 3px;
+    background: var(--warning);
+    color: var(--warning-foreground);
+    padding-inline: 0.3rem;
+    font-size: 0.625rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+}
+
+/* ========================================================================== *
+ *  The skin layer.
+ *
+ *  Everything a skin has to say about Panel *content* rather than Panel chrome.
+ *  It is last in the layer order because this content is built out of Tailwind
+ *  utilities, and a utility outranks every earlier layer — a skin that wanted a
+ *  card to lose its radius would otherwise be arguing with `rounded-lg` and
+ *  losing.
+ *
+ *  Every selector here is one of the `data-meridian-*` hooks the two surfaces'
+ *  presentational parts publish. Both spell a hero, a section, a fact table and
+ *  a tile the same way, which is what lets one block dress the Pipeline and the
+ *  account book at once — the application publishing a styling contract for its
+ *  own parts, exactly as the package does for its chrome.
+ * ========================================================================== */
+@layer skin {
+  [data-meridian-hero],
+  [data-meridian-section] {
+    border-color: var(--skin-rule);
+    padding-block: var(--skin-pad-block);
+    padding-inline: var(--skin-pad-inline);
+  }
+
+  [data-meridian-eyebrow] {
+    color: var(--skin-ink-muted);
+    font-family: var(--skin-font-heading);
+    font-size: var(--skin-eyebrow-size);
+    letter-spacing: var(--skin-eyebrow-tracking);
+    text-transform: var(--skin-eyebrow-transform);
+  }
+
+  [data-meridian-title] {
+    font-family: var(--skin-font-heading);
+    letter-spacing: var(--skin-title-tracking);
+  }
+
+  [data-meridian-section-title] {
+    color: var(--skin-section-ink);
+    font-family: var(--skin-font-heading);
+    font-size: var(--skin-section-size);
+    letter-spacing: var(--skin-section-tracking);
+    text-transform: var(--skin-section-transform);
+  }
+
+  /*
+   * A tile is anything a reader clicks to open a record: a deal card on the
+   * board, a row in a related list, a line in the buying group. The two
+   * surfaces draw them differently and both defer to the skin for the three
+   * things that decide whether they read as cards or as ruled lines.
+   */
+  [data-meridian-tile] {
+    background: var(--skin-tile-fill);
+    border-color: var(--skin-tile-rule);
+    border-radius: var(--skin-radius-tile);
+    box-shadow: var(--skin-tile-shadow);
+  }
+
+  [data-meridian-tile]:hover {
+    background: var(--skin-tile-fill-hover);
+    border-color: var(--skin-accent);
+  }
+
+  [data-meridian-tag] {
+    border-color: var(--skin-tile-rule);
+    border-radius: var(--skin-radius-tile);
+    font-family: var(--skin-font-heading);
+  }
+
+  /* Figures line up in whatever face the skin sets aside for them. */
+  [data-meridian-facts] dd,
+  [data-canvas-panel-body] [data-numeric] {
+    font-family: var(--skin-font-figure);
+  }
+
+  [data-meridian-facts] dt {
+    color: var(--skin-ink-muted);
+  }
+
+  /*
+   * The application's own chrome around each Canvas — the Pipeline's trail and
+   * event channel, the book's inspector. They are not Panels, but they are
+   * inside the frame and a skin that stopped at the Workspace edge would leave
+   * a sans-serif rail above a serif Canvas.
+   */
+  [data-meridian-trail],
+  [data-meridian-event-channel],
+  [data-meridian-inspector] {
+    background: var(--skin-surface);
+    border-color: var(--skin-rule);
+    color: var(--skin-ink);
+
+    /*
+     * They take the skin's colours and its typeface, but not its type scale.
+     * These strips are the application's chrome rather than Panel content, and
+     * they are laid out in fixed measures — a trail station is clamped to 11rem
+     * so a long record name cannot push the path off screen. Scaled up with a
+     * roomy skin, that clamp truncated every station to six letters and the
+     * trail stopped saying where the reader had been.
+     */
+    --text-xs: 0.75rem;
+    --text-sm: 0.875rem;
+    --text-base: 1rem;
+  }
+
+  /*
+   * The trail draws its connecting line *behind* the stations and knocks it out
+   * with an opaque fill, so both have to be painted in whatever the skin puts
+   * behind them or the line runs straight through the words.
+   */
+  [data-meridian-trail] [data-meridian-station],
+  [data-meridian-trail] [data-meridian-step] {
+    background: var(--skin-surface);
+  }
+}
+
+/*
+ * Tile padding, which is the one thing a token could not carry.
+ *
+ * The two surfaces pad their tiles differently on purpose — the Pipeline draws
+ * a card, the account book draws a ruled line — and a single `--skin-tile-pad`
+ * would have flattened that difference for every skin including the ones happy
+ * with it. So only the two skins whose whole point is density say anything, and
+ * they say it here rather than making six others declare a default.
+ */
+@layer skin {
+  :root[data-canvas-skin="float"] [data-meridian-tile] {
+    padding: 0.875rem 1rem;
+  }
+
+  :root[data-canvas-skin="compact"] [data-meridian-tile] {
+    padding: 0.25rem 0.5rem;
+  }
+
+  :root[data-canvas-skin="brutalist"] [data-meridian-tile] {
+    padding: 0.75rem 0.875rem;
+  }
+
+  /* The stack inside a section breathes with the rest of the skin. */
+  :root[data-canvas-skin="float"] [data-meridian-section],
+  :root[data-canvas-skin="float"] [data-meridian-hero] {
+    gap: 1rem;
+  }
+
+  :root[data-canvas-skin="compact"] [data-meridian-section],
+  :root[data-canvas-skin="compact"] [data-meridian-hero] {
+    gap: 0.375rem;
+  }
+}
+
+/* ========================================================================== *
+ *  The contact directory, and the Canvas inside a Panel.
+ *
+ *  Structure only, as with the other two sections: the skin above decides how
+ *  all of this is dressed.
+ * ========================================================================== */
+@layer components {
+  [data-meridian-directory="mounted"] [data-canvas-workspace] {
+    --canvas-panel-min-height: 0;
+
+    flex: 1 1 auto;
+    min-block-size: 0;
+  }
+
+  [data-meridian-directory="mounted"] [data-canvas-application] {
+    flex: 1 1 auto;
+    min-block-size: 0;
+  }
+
+  /* The index keeps a steady width; the file grows, because it holds a Canvas. */
+  [data-meridian-directory="mounted"]
+  [data-canvas-panel][data-panel-kind="directory"] {
+    flex: 0 0 min(23rem, 92vw);
+  }
+
+  [data-meridian-directory="mounted"]
+    [data-canvas-panel][data-panel-kind="dossier"] {
+    flex: 1 1 min(30rem, 92vw);
+    max-inline-size: 46rem;
+  }
+
+  /*
+   * The nested Workspace.
+   *
+   * It inherits the skin like everything else — it is a Canvas, and the tokens
+   * are on `:root` — but not the skin's *scale*. A Workspace sitting in a
+   * section of a Panel body is furniture inside a document, and a 24px gutter
+   * or a 20px radius on furniture reads as a rendering fault rather than as a
+   * second Canvas. So the geometry is stated here and the colours are left
+   * alone.
+   *
+   * It is given an explicit height for the same reason every other mount is:
+   * the package sizes a Workspace from its Panels unless something above it
+   * says otherwise, and "as tall as its tallest Panel" inside a scrolling body
+   * is not a height anybody chose.
+   */
+  [data-meridian-nested] [data-canvas-workspace] {
+    --canvas-panel-min-height: 0;
+    --canvas-panel-width: 14rem;
+    --canvas-panel-active-width: 17rem;
+    --canvas-panel-gap: 0;
+    --canvas-header-min-height: 2rem;
+
+    block-size: 17rem;
+  }
+
+  [data-meridian-nested] [data-canvas-application] {
+    block-size: 100%;
+    padding: 0;
+    scroll-padding-inline: 0;
+  }
+
+  [data-meridian-nested] [data-canvas-panel] {
+    border: none;
+    border-inline-end: 1px solid var(--skin-rule);
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  [data-meridian-nested] [data-canvas-panel]:last-child {
+    border-inline-end: none;
+  }
+}
+
+/* ========================================================================== *
+ *  The reading room. Structure only; the skin dresses it.
+ * ========================================================================== */
+@layer components {
+  [data-meridian-reports="mounted"] [data-canvas-workspace] {
+    --canvas-panel-min-height: 0;
+
+    flex: 1 1 auto;
+    min-block-size: 0;
+  }
+
+  [data-meridian-reports="mounted"] [data-canvas-application] {
+    flex: 1 1 auto;
+    min-block-size: 0;
+  }
+
+  /*
+   * The shelf keeps a steady width. The analyses take what is left, up to a
+   * measure a bar chart still reads at — a 90rem-wide bar says nothing a 30rem
+   * one does not.
+   */
+  [data-meridian-reports="mounted"]
+  [data-canvas-panel][data-panel-kind="reports"] {
+    flex: 0 0 min(24rem, 92vw);
+  }
+
+  [data-meridian-reports="mounted"]
+    [data-canvas-panel][data-panel-kind="metric"]:not([style*="flex-basis"]) {
+    flex: 1 1 min(22rem, 92vw);
+    max-inline-size: 32rem;
+  }
+}
+
+/* ========================================================================== *
+ *  The territory book. Structure only; the skin dresses it.
+ * ========================================================================== */
+@layer components {
+  [data-meridian-territories="mounted"] [data-canvas-workspace] {
+    --canvas-panel-min-height: 0;
+
+    flex: 1 1 auto;
+    min-block-size: 0;
+  }
+
+  [data-meridian-territories="mounted"] [data-canvas-application] {
+    flex: 1 1 auto;
+    min-block-size: 0;
+  }
+
+  /*
+   * Every Panel keeps a steady, equal width here. The cascade is read by
+   * comparing three Panels side by side — which counters moved and which did
+   * not — and a layout that gave one of them more room than the others would
+   * be answering the question before the reader got to it.
+   */
+  [data-meridian-territories="mounted"]
+  [data-canvas-panel]:not([style*="flex-basis"]) {
+    flex: 1 1 min(22rem, 92vw);
+    max-inline-size: 30rem;
+  }
+}
+
+/*
+ * The read band's flash.
+ *
+ * A re-read that lands correctly is invisible, which is the point of doing it
+ * in place and useless for showing that it happened. The band carries its own
+ * state attribute rather than a class so the transition survives whatever the
+ * skin is doing to the colours underneath it.
+ */
+@layer skin {
+  [data-meridian-read-band] {
+    transition:
+      background-color 400ms ease,
+      border-color 400ms ease,
+      color 400ms ease;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    [data-meridian-read-band] {
+      transition-duration: 1ms;
+    }
   }
 }

@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 
 import { AppSidebar } from "@/components/app-shell/sidebar";
 import { TopBar } from "@/components/app-shell/top-bar";
+import { skinBootstrapScript } from "@/components/canvas-skin/skins";
 import { CommandPaletteHost } from "@/components/pipeline/command-palette";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
@@ -24,6 +25,17 @@ export default function RootLayout({
 }: Readonly<{ children: ReactNode }>) {
   return (
     <html lang="en" suppressHydrationWarning>
+      <head>
+        {/*
+          The Canvas skin, applied before the first paint. A skin changes
+          surfaces, radii and type, so resolving it in an effect would show
+          every reader the wrong Canvas for a frame — the same reason
+          `next-themes` writes `data-theme` this way. It is the only script
+          this application inlines.
+        */}
+        {/* biome-ignore lint/security/noDangerouslySetInnerHtml: a blocking inline script is the only thing that runs before paint, and its source is this repository. */}
+        <script dangerouslySetInnerHTML={{ __html: skinBootstrapScript() }} />
+      </head>
       <body className="min-h-svh antialiased">
         <ThemeProvider>
           <TooltipProvider delayDuration={300}>

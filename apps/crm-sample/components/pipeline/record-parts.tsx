@@ -102,8 +102,14 @@ export function PanelHero({
   children?: ReactNode;
 }>) {
   return (
-    <div className="flex flex-col gap-2 border-b border-border px-5 py-4">
-      <span className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+    <div
+      className="flex flex-col gap-2 border-b border-border px-5 py-4"
+      data-meridian-hero=""
+    >
+      <span
+        className="text-xs font-medium tracking-wide text-muted-foreground uppercase"
+        data-meridian-eyebrow=""
+      >
         {eyebrow}
       </span>
       {/*
@@ -113,6 +119,7 @@ export function PanelHero({
       */}
       <h3
         className="rounded-sm text-lg leading-tight font-semibold focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+        data-meridian-title=""
         ref={headingRef}
         tabIndex={-1}
       >
@@ -140,8 +147,13 @@ export function PanelSection({
   children: ReactNode;
 }>) {
   return (
-    <section className="flex flex-col gap-3 border-b border-border px-5 py-4 last:border-b-0">
-      <h4 className="text-sm font-semibold">{title}</h4>
+    <section
+      className="flex flex-col gap-3 border-b border-border px-5 py-4 last:border-b-0"
+      data-meridian-section=""
+    >
+      <h4 className="text-sm font-semibold" data-meridian-section-title="">
+        {title}
+      </h4>
       {description ? (
         <p className="text-sm text-muted-foreground">{description}</p>
       ) : null}
@@ -154,7 +166,10 @@ export function MetaList({
   items,
 }: Readonly<{ items: readonly (readonly [string, ReactNode])[] }>) {
   return (
-    <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
+    <dl
+      className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm"
+      data-meridian-facts=""
+    >
       {items.map(([term, value]) => (
         <div className="flex min-w-0 flex-col gap-0.5" key={term}>
           <dt className="text-xs text-muted-foreground">{term}</dt>
@@ -208,6 +223,7 @@ export function RecordRow({
         litRow,
       )}
       data-meridian-record={recordId}
+      data-meridian-tile=""
       onClick={onSelect}
       type="button"
     >
@@ -256,6 +272,7 @@ export function DealCard({
         litRow,
       )}
       data-meridian-record={deal.id}
+      data-meridian-tile=""
       onClick={onSelect}
       type="button"
     >

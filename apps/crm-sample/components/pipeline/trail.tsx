@@ -203,7 +203,10 @@ function Step({ label, ahead }: Readonly<{ label: string; ahead: boolean }>) {
           strokeWidth="1.25"
         />
       </svg>
-      <span className="relative bg-background px-1.5 text-[0.6875rem] leading-none tracking-tight text-muted-foreground">
+      <span
+        className="relative bg-background px-1.5 text-[0.6875rem] leading-none tracking-tight text-muted-foreground"
+        data-meridian-step=""
+      >
         {label}
       </span>
     </span>

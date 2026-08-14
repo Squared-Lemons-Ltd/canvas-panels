@@ -1,5 +1,6 @@
 import { BellIcon } from "lucide-react";
 
+import { SkinMenu } from "@/components/canvas-skin/skin-menu";
 import { CommandPaletteTrigger } from "@/components/pipeline/command-palette";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -41,6 +42,7 @@ export function TopBar() {
             </TooltipTrigger>
             <TooltipContent>Notifications</TooltipContent>
           </Tooltip>
+          <SkinMenu />
           <ThemeToggle />
           <Separator
             orientation="vertical"
