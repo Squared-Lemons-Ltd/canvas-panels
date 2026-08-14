@@ -1,6 +1,8 @@
 # Private package delivery
 
-`@squaredlemons/canvas-panels` is intended for restricted publication on the npm registry. This repository does not contain npm credentials and the package remains marked `private` until the Package Gate authorizes the first real `0.x` release.
+`@squaredlemons/canvas-panels` is published restricted on the npm registry, under the `@squaredlemons` scope. This repository contains no npm credential of any kind: the release workflow authenticates each run through OIDC trusted publishing, and nothing else in the repository can publish.
+
+Everything below the "Release runbook" heading describes the one authorized path from a verified commit to a published version.
 
 ## Verified delivery path
 
@@ -55,8 +57,75 @@ npm's trusted-publishing documentation supports GitHub Actions through OIDC. Tru
 6. Run the complete Package Gate before every `npm publish`.
 7. Publish subsequent releases with OIDC and no long-lived publish token.
 
-The normal CI workflow deliberately has only `contents: read` and contains no publishing command. A release workflow must not be added until a real package release is approved and the exact workflow identity can be registered on npm.
+The normal CI workflow deliberately has only `contents: read` and contains no publishing command. `.github/workflows/release.yml` is the only workflow that publishes; it runs on `main` only, holds `id-token: write`, and carries no `NODE_AUTH_TOKEN` or `NPM_TOKEN`. The contract suite asserts all of that, and fails if a second workflow acquires a publishing command.
 
 Because this is a private GitHub repository, npm provenance attestations are not supported. `publishConfig.provenance` is explicitly `false`; this does not prevent OIDC trusted publishing.
 
 Primary reference: [Trusted publishing for npm packages](https://docs.npmjs.com/trusted-publishers/), reviewed 7 August 2026.
+
+## Release runbook
+
+One command is the gate:
+
+```sh
+pnpm gate
+```
+
+It runs formatting, linting and dependency boundaries, typechecking, the contract suite, the build, and the clean pack-and-install of both consumers. `release:publish` runs it again immediately before `changeset publish`, on the runner that publishes, so the tarball that reaches the registry is the one that was just verified.
+
+### A stable release
+
+1. Land the work on `main`, each change carrying a Changeset. Nothing else is required of a contributor.
+2. The release workflow opens a **Version Packages** pull request holding the version bump and the generated `CHANGELOG.md`. That pull request is the review of the version and the changelog.
+3. Merge it. The workflow runs again, the gate passes, and `changeset publish` publishes the package to the `latest` dist-tag and pushes the release tag.
+4. Record the release in `docs/delivery/release-evidence.md` using the verification commands there.
+
+### A prerelease
+
+Prereleases publish to `next` and never to `latest`. The dist-tag comes from Changesets pre mode rather than from `publishConfig.tag` — with a tag pinned in the manifest *every* publish would carry it, which is exactly how a prerelease reaches a stable range by accident.
+
+```sh
+pnpm exec changeset pre enter next   # commit .changeset/pre.json
+# land changes as usual; each merge publishes 0.x.y-next.<n> to the `next` tag
+pnpm exec changeset pre exit         # commit; the next release goes to `latest`
+```
+
+While `.changeset/pre.json` exists, every version the workflow produces is a prerelease and every publish is tagged `next`. A consumer asking for `@squaredlemons/canvas-panels` without a version never resolves one, because npm resolves the `latest` tag and a semver range never matches a prerelease unless the range names one.
+
+### Promoting a release candidate
+
+A candidate is promoted by moving a tag, never by building again. The artifact that was verified is the artifact that becomes `latest`:
+
+```sh
+pnpm exec changeset pre exit            # commit; the next version is 1.0.0, not 1.0.0-next.n
+# merge the Version Packages pull request; the workflow publishes 1.0.0
+npm dist-tag add @squaredlemons/canvas-panels@1.0.0 latest
+```
+
+The candidate is published under its final version number and reaches consumers only through the `next` tag until the tag is moved. Verify it there — install `@squaredlemons/canvas-panels@next` into the proof consumer, run that application's own gate — and then move `latest` onto the version already on the registry.
+
+Two things this deliberately avoids. It never publishes a *separate* `1.0.0-rc.1` that is then rebuilt as `1.0.0`, because those are two artifacts and only one of them was verified. And it never re-runs the build between verification and promotion, because `npm dist-tag add` touches no bytes: the integrity recorded in `release-evidence.md` is the same before and after.
+
+If the candidate fails verification, leave `latest` where it is. Nothing has to be undone: a version nobody's range resolves is a version nobody has.
+
+### The first release, which is different
+
+npm registers a trusted publisher against a package that already exists, so the first version cannot come from the workflow:
+
+1. Run `pnpm gate` on the exact commit to be released. It must pass.
+2. Publish that commit from an organization owner's authenticated local npm session with write-protected 2FA. Do not create an automation token.
+3. Add the trusted publisher in the new package's npm settings: GitHub organization `Squared-Lemons-Ltd`, repository `canvas-panels`, workflow `release.yml`.
+4. Confirm with `npm access list packages squaredlemons --json` that the package is `restricted`.
+5. Every release after this one goes through the workflow, and no long-lived publish token is ever created.
+
+### Rolling back a release
+
+npm versions are immutable and are not unpublished. A bad release is superseded:
+
+```sh
+npm dist-tag add @squaredlemons/canvas-panels@<previous-version> latest
+```
+
+That moves consumers installing by tag back to the previous version immediately. Then land the fix and release forward. `npm deprecate` the bad version with a sentence naming its replacement; deprecating is reversible, unpublishing is not, and after 72 hours unpublishing is not available at all.
+
+Consumers roll back with a dependency change and nothing else — the package holds no persistent state. See "Rollback" in the package README for the two things to check when rolling back across a Navigation Document change.

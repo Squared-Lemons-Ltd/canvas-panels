@@ -10,9 +10,13 @@
  * elements and never needs a consumer Tailwind scan.
  *
  * Applications theme the Canvas by redeclaring the documented `--canvas-*`
- * tokens on any ancestor of the Workspace. The private `[data-canvas-*]`
- * attributes below are implementation detail; token overrides are the
- * supported integration seam.
+ * tokens on any ancestor of the Workspace. That is the first seam and the one
+ * to reach for. The `[data-canvas-*]` attributes below are the second: every
+ * one of them is listed in the README's attribute table and covered by the
+ * versioning policy, so a rule written against one is supported — the contract
+ * suite fails on an attribute this stylesheet or the Canvas emits and that
+ * table does not name. `data-testid` is the one exception, and is not part of
+ * the contract.
  */
 @layer canvas-panels {
   /*
@@ -37,6 +41,15 @@
     /* Surfaces */
     --canvas-surface: Canvas;
     --canvas-surface-active: Canvas;
+    /*
+     * The two surfaces the package paints *above* the Canvas rather than in it:
+     * the Guarded Transition dialog and an Overlay Workspace. They used to be
+     * the system `Canvas` with no token at all, which left an application that
+     * had themed everything else reaching past the documented seam and on to
+     * the `[data-canvas-*]` attributes to brand the one dialog its users are
+     * asked to make a decision in.
+     */
+    --canvas-surface-raised: Canvas;
     --canvas-surface-overlay: rgb(0 0 0 / 45%);
     --canvas-border: color-mix(in srgb, CanvasText 18%, transparent);
     --canvas-text: CanvasText;
@@ -80,6 +93,11 @@
     --canvas-action-text-destructive: color-mix(in srgb, red 70%, CanvasText);
     --canvas-action-radius: 99px;
     --canvas-action-padding: 0.4rem 0.7rem;
+    /*
+     * 1.75rem, so an action clears the 24px pointer target of WCAG 2.5.8 even
+     * where its label is one character and its padding has been overridden away.
+     */
+    --canvas-action-min-size: 1.75rem;
 
     /* Motion */
     --canvas-transition-duration: 300ms;
@@ -94,11 +112,14 @@
   }
 
   /*
-   * The Canvas live region. Removed from view without being removed from the
-   * accessibility tree, so `display: none`, `visibility: hidden`, and zero size
-   * are all unavailable — each of those would stop it announcing.
+   * The Canvas live region, and the Panel title a registered visual title has
+   * taken the heading's visible place from. Both are removed from view without
+   * being removed from the accessibility tree, so `display: none`,
+   * `visibility: hidden`, and zero size are all unavailable — each of those
+   * would stop the first announcing and leave the second's Panel unnamed.
    */
-  [data-canvas-announcer] {
+  [data-canvas-announcer],
+  [data-canvas-panel-title] {
     border: 0;
     clip-path: inset(50%);
     height: 1px;
@@ -116,7 +137,19 @@
     gap: var(--canvas-panel-gap);
     max-width: 100%;
     min-height: var(--canvas-panel-min-height);
+    /*
+     * Both axes, stated. `overflow-x: auto` alone does not leave the other axis
+     * alone: CSS computes a `visible` axis to `auto` whenever the other one is
+     * not `visible`, so the Canvas became vertically scrollable too — and
+     * scrolling it carried the Panel headers off the top of the frame and left
+     * a band of bare bed under the Panels.
+     *
+     * A Canvas is a horizontal surface. Vertical scrolling belongs to each
+     * Panel body, which keeps its own header in place while it happens, and
+     * one axis cannot say that.
+     */
     overflow-x: auto;
+    overflow-y: hidden;
     overscroll-behavior-x: contain;
   }
 
@@ -186,6 +219,8 @@
     gap: 0.5rem;
     min-height: var(--canvas-header-min-height);
     padding-inline: var(--canvas-header-padding-inline);
+    /* Contains what it holds, for the same reason the body does. */
+    position: relative;
   }
 
   [data-canvas-panel-header] h2 {
@@ -203,7 +238,8 @@
   }
 
   [data-canvas-panel-header] button,
-  [data-canvas-mobile-navigation] button {
+  [data-canvas-mobile-navigation] button,
+  [data-canvas-transition-actions] button {
     background: var(--canvas-action-surface);
     /*
      * A derived default, resolved here rather than on `:root`: an action
@@ -215,12 +251,42 @@
     border-radius: var(--canvas-action-radius);
     color: var(--canvas-action-text, var(--canvas-text-muted));
     cursor: pointer;
+    /*
+     * An action keeps its target. Every one of these is a flex item beside
+     * something that grows — a Panel title that ellipsises, a breadcrumb trail
+     * that wraps — and the initial `flex-shrink: 1` let the growing thing take
+     * the space: a Close button asking for 28px was measured at 16px, under the
+     * 24px WCAG 2.5.8 wants of a pointer target. The title is what should give
+     * way, and it already knows how.
+     */
+    flex: 0 0 auto;
     font: inherit;
+    min-block-size: var(--canvas-action-min-size);
+    min-inline-size: var(--canvas-action-min-size);
     padding: var(--canvas-action-padding);
     transition:
       background var(--canvas-transition-duration)
       var(--canvas-transition-easing),
       color var(--canvas-transition-duration) var(--canvas-transition-easing);
+  }
+
+  /*
+   * Save, Discard, and Stay are the most consequential controls the package
+   * renders, and they used to ship no styling at all: under an application
+   * preflight they arrived as bare text with no hit target. They take the
+   * action treatment above, and each is named so an application can tell the
+   * three apart without matching the English in a label.
+   *
+   * Save is the one the dialog leads with. It sits here, and not beside the
+   * dialog's own rules, so the hover below still outranks it: it matches the
+   * same two attributes and one type, and at equal specificity the later rule
+   * is the one that wins.
+   */
+  [data-canvas-transition-actions]
+  button[data-canvas-transition-action="save"] {
+    border-color: var(--canvas-action-text, var(--canvas-text-muted));
+    color: var(--canvas-text);
+    font-weight: 600;
   }
 
   [data-canvas-panel-header] button {
@@ -232,12 +298,14 @@
   }
 
   [data-canvas-panel-header] button:hover,
-  [data-canvas-mobile-navigation] button:hover {
+  [data-canvas-mobile-navigation] button:hover,
+  [data-canvas-transition-actions] button:hover {
     background: var(--canvas-action-surface-hover);
     color: var(--canvas-action-text-hover, var(--canvas-text));
   }
 
-  [data-canvas-panel-header] button[disabled] {
+  [data-canvas-panel-header] button[disabled],
+  [data-canvas-transition-actions] button[disabled] {
     cursor: not-allowed;
     opacity: 0.5;
   }
@@ -253,6 +321,18 @@
     overflow-y: auto;
     overscroll-behavior: contain;
     padding: var(--canvas-body-padding);
+    /*
+     * The containing block for what the body holds, so the scroll it already
+     * has is the scroll that clips it.
+     *
+     * Without this the nearest positioned ancestor is the Panel, so an
+     * absolutely positioned descendant is laid out against the Panel while
+     * still counting toward the body's scroll box: the body never clips it and
+     * the Panel grows by its height. Which sounds theoretical until you notice
+     * that Tailwind's `sr-only` is `position: absolute` — fourteen rows of
+     * visually hidden labels in one table measured 323px of overflow.
+     */
+    position: relative;
   }
 
   [data-canvas-mobile-navigation] {
@@ -372,10 +452,10 @@
   }
 
   [data-canvas-transition-dialog] {
-    background: Canvas;
+    background: var(--canvas-surface-raised);
     border-radius: var(--canvas-radius);
     box-shadow: 0 1rem 3rem rgb(0 0 0 / 25%);
-    color: CanvasText;
+    color: var(--canvas-text);
     padding: var(--canvas-dialog-padding);
     width: var(--canvas-dialog-width);
   }
@@ -426,7 +506,7 @@
   }
 
   [data-canvas-overlay] > [data-canvas-workspace] {
-    background: Canvas;
+    background: var(--canvas-surface-raised);
     border-radius: var(--canvas-radius);
     box-shadow: 0 1rem 3rem rgb(0 0 0 / 25%);
     max-block-size: 100%;

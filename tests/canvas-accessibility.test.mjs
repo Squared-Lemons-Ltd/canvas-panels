@@ -783,6 +783,61 @@ test("colours come from system keywords so forced-colours modes survive", () => 
   }
 });
 
+test("a Canvas action keeps its pointer target beside a title that grows", () => {
+  const rule = stylesheet.match(
+    /\[data-canvas-panel-header\] button,[^{]*\{([^}]*)\}/,
+  );
+  assert.ok(rule, "the stylesheet must style the Canvas actions");
+
+  // Every one of these is a flex item beside something that grows — a Panel
+  // title that ellipsises, a breadcrumb trail that wraps — and the initial
+  // `flex-shrink: 1` let the growing thing take the space: a Close button
+  // asking for 28px was measured at 16px, under the 24px WCAG 2.5.8 wants.
+  assert.match(rule[1], /flex:\s*0 0 auto;/);
+  assert.match(rule[1], /min-block-size:\s*var\(--canvas-action-min-size\);/);
+  assert.match(rule[1], /min-inline-size:\s*var\(--canvas-action-min-size\);/);
+
+  const size = stylesheet.match(/--canvas-action-min-size:\s*([^;]+);/);
+  assert.ok(size, "the target size must be a token an application can read");
+  assert.ok(
+    Number(size[1].replace("rem", "")) * 16 >= 24,
+    `${size[1]} is under the 24px WCAG 2.5.8 asks of a pointer target`,
+  );
+
+  // Save, Discard, and Stay are the most consequential controls the package
+  // renders and used to ship no styling at all, so under an application
+  // preflight they arrived as bare text with no hit target.
+  assert.match(rule[0], /\[data-canvas-transition-actions\] button/);
+});
+
+test("the dialog names its three decisions so an application can style them", async () => {
+  const canvas = renderCanvas();
+  openClassAndLearner(canvas);
+  act(() => {
+    canvas.engine.registerLifecycle({
+      target: canvas.engine.getSnapshot().panels[1].instanceRef,
+      lifecycle: {
+        dirty: true,
+        guard: () => ({ status: "confirm", message: "Unsaved changes" }),
+        save: async () => {},
+        discard: async () => {},
+      },
+    });
+  });
+  act(() => {
+    canvas.engine.close({
+      target: canvas.engine.getSnapshot().panels[1].instanceRef,
+    });
+  });
+
+  const decisions = [
+    ...canvas.container.querySelectorAll("[data-canvas-transition-action]"),
+  ].map((button) => button.getAttribute("data-canvas-transition-action"));
+
+  assert.deepEqual(decisions, ["save", "discard", "stay"]);
+  canvas.unmount();
+});
+
 test("Panel widths are viewport-capped so a 320px viewport cannot overflow", () => {
   const widths = [
     ...stylesheet.matchAll(/--canvas-panel(?:-active)?-width:\s*([^;]+);/g),

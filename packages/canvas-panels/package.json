@@ -1,8 +1,16 @@
 {
   "name": "@squaredlemons/canvas-panels",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
   "description": "Reusable Canvas Panels interaction framework for Squared Lemons applications",
+  "license": "UNLICENSED",
+  "author": "Squared Lemons Ltd",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Squared-Lemons-Ltd/canvas-panels.git",
+    "directory": "packages/canvas-panels"
+  },
+  "homepage": "https://github.com/Squared-Lemons-Ltd/canvas-panels#readme",
+  "bugs": "https://github.com/Squared-Lemons-Ltd/canvas-panels/issues",
   "type": "module",
   "files": [
     "dist",

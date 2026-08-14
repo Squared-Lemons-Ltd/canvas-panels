@@ -1,0 +1,104 @@
+name: Release
+
+# The only path that may publish @squaredlemons/canvas-panels.
+#
+# It runs on `main` and nowhere else: a fork, a pull request, or a branch cannot
+# reach it, and the job that publishes holds no long-lived credential. npm
+# authenticates the run itself through OIDC trusted publishing, registered
+# against this repository and this workflow filename, so there is no token to
+# leak and no token to rotate.
+#
+# Nothing is published without the complete Package Gate passing first. The gate
+# runs twice on purpose: once across the supported Node versions, and once more
+# inside `pnpm release:publish` on the runner that publishes, so the tarball that
+# reaches the registry is the one that was just verified.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Never cancelled: a half-run release is worse than a queued one.
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    name: Package Gate on Node ${{ matrix.node-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [22, 24]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run the complete Package Gate
+        run: pnpm gate
+
+  release:
+    name: Version or publish
+    needs: gate
+    runs-on: ubuntu-latest
+    permissions:
+      # Changesets writes the version commit, the changelog, and the release tag.
+      contents: write
+      # And opens the Version Packages pull request that reviews them.
+      pull-requests: write
+      # The publish credential. Nothing else in this repository asks for it.
+      id-token: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      # Trusted publishing needs an npm new enough to exchange the OIDC token.
+      # The pinned floor is the version that introduced it.
+      - name: Install a publishing npm
+        run: npm install --global npm@^11.5.1
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Version or publish through Changesets
+        uses: changesets/action@v1
+        with:
+          version: pnpm release:version
+          publish: pnpm release:publish
+          commit: "chore: version packages"
+          title: "chore: version packages"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # No NODE_AUTH_TOKEN and no NPM_TOKEN. If OIDC cannot authenticate the
+          # run, the publish fails — it does not fall back to a secret.
+          NPM_CONFIG_PROVENANCE: "false"

@@ -1393,6 +1393,81 @@ test("scoped composition registers actions, titles, focus targets, lifecycle lab
   rendered.unmount();
 });
 
+test("a registered visual title replaces the heading rather than printing beside it", () => {
+  const editor = definePanel({ kind: "editor", title: ({ name }) => name });
+  let Canvas;
+
+  function Editor({ descriptor }) {
+    // The ordinary case: an application's visual title carries the record's
+    // name, which is also the Panel's title. Both used to render, and the name
+    // appeared twice.
+    Canvas.useHeader({ visualTitle: descriptor.name });
+    return createElement("p", null, "Draft body");
+  }
+
+  Canvas = createCanvasModule({
+    root: defineRootPanel({ kind: "root", title: "Home" }),
+    panels: [editor],
+    renderers: {
+      root: () => {
+        const navigation = Canvas.useNavigation();
+        return createElement(
+          "button",
+          {
+            onClick: () => navigation.open(editor, { name: "Ada Lovelace" }),
+            type: "button",
+          },
+          "Open editor",
+        );
+      },
+      editor: Editor,
+    },
+  });
+  const rendered = render(
+    createElement(
+      Canvas.Provider,
+      null,
+      createElement(Canvas.Workspace, { label: "Editors" }),
+    ),
+  );
+  fireEvent.click(rendered.getByRole("button", { name: "Open editor" }));
+
+  const heading = rendered.container.querySelector(
+    "[data-canvas-panel][data-active] [data-canvas-panel-header] h2",
+  );
+  assert.ok(heading, "the Panel must keep its heading");
+
+  // One visible title. Everything the heading shows a sighted reader is the
+  // registered one; the Panel title is inside it, hidden, and rendered once.
+  const shown = [...heading.childNodes]
+    .filter(
+      (node) =>
+        !(node.nodeType === 1 && node.hasAttribute("data-canvas-panel-title")),
+    )
+    .map((node) => node.textContent)
+    .join("");
+  assert.equal(shown, "Ada Lovelace");
+  assert.equal(heading.querySelectorAll("[data-canvas-panel-title]").length, 1);
+  assert.equal(
+    heading.querySelector("[data-canvas-panel-title]").textContent,
+    "Ada Lovelace",
+  );
+  assert.equal(
+    heading
+      .querySelector("[data-canvas-visual-title]")
+      .getAttribute("aria-hidden"),
+    "true",
+  );
+
+  // And the heading is still the whole heading: the Panel's accessible name,
+  // what the region points at, and a focus target that is not 1px of nothing.
+  assert.ok(rendered.getByRole("heading", { name: "Ada Lovelace" }));
+  assert.equal(heading.tabIndex, -1);
+  const region = heading.closest("[data-canvas-panel]");
+  assert.equal(region.getAttribute("aria-labelledby"), heading.id);
+  rendered.unmount();
+});
+
 test("duplicate renderer lifecycle registration fails inside that Panel boundary", async () => {
   let Canvas;
   const reports = [];

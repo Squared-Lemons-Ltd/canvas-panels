@@ -10,6 +10,7 @@
   "ignore": [
     "@canvas-panels/next-fixture",
     "@canvas-panels/react-fixture",
-    "@canvas-panels/company-agent-prototype"
+    "@canvas-panels/company-agent-prototype",
+    "@canvas-panels/crm-sample"
   ]
 }

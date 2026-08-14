@@ -30,7 +30,12 @@ test("the private workspace declares the package and both clean-consumer fixture
   assert.match(workspace, /packages\/\*/);
   assert.match(workspace, /apps\/\*/);
   assert.equal(canvasPackage.name, "@squaredlemons/canvas-panels");
-  assert.equal(canvasPackage.private, true);
+  // The workspace stays private; the package does not. `private: true` is what
+  // npm refuses to publish, so the one package that is meant to be published
+  // must not carry it — and every other workspace member must.
+  assert.equal(canvasPackage.private, undefined);
+  assert.equal(reactFixture.private, true);
+  assert.equal(nextFixture.private, true);
   assert.equal(
     reactFixture.dependencies["@squaredlemons/canvas-panels"],
     "workspace:*",
@@ -56,7 +61,6 @@ test("the package exposes only the approved ESM entry points and compiled styles
   ];
 
   assert.equal(canvasPackage.type, "module");
-  assert.equal(canvasPackage.private, true);
   assert.equal(canvasPackage.publishConfig.access, "restricted");
   assert.equal(canvasPackage.publishConfig.provenance, false);
   assert.ok(canvasPackage.exports, "package exports must be declared");
@@ -659,6 +663,105 @@ test("the --canvas-* defaults are inherited, so an ancestor can theme the Canvas
   }
 });
 
+test("a Panel contains what it holds, and the Canvas scrolls on one axis", () => {
+  const own = (selector) =>
+    stylesheetRules.find(
+      (rule) => rule.selector === selector && rule.at.length === 1,
+    );
+  const application = own("[data-canvas-application]");
+  const body = own("[data-canvas-panel-body]");
+  const header = own("[data-canvas-panel-header]");
+
+  assert.ok(application && body && header, "the Canvas chrome must be styled");
+
+  // An absolutely positioned descendant is laid out against the nearest
+  // positioned ancestor. Without these that is the Panel, so a body's own
+  // scroll never clips what it holds while its height still counts toward that
+  // scroll box — and Tailwind's `sr-only` is `position: absolute`, which put
+  // 323px of overflow into one measured Canvas.
+  assert.match(body.declarations, /position:\s*relative;/);
+  assert.match(header.declarations, /position:\s*relative;/);
+
+  // Both axes, stated. CSS computes a `visible` axis to `auto` whenever the
+  // other one is not `visible`, so `overflow-x: auto` alone made the whole
+  // Canvas vertically scrollable and scrolling it carried the Panel headers off
+  // the top of the frame. Vertical scrolling belongs to each Panel body.
+  assert.match(application.declarations, /overflow-x:\s*auto;/);
+  assert.match(application.declarations, /overflow-y:\s*hidden;/);
+  assert.match(body.declarations, /overflow-y:\s*auto;/);
+});
+
+test("every surface the package paints answers to a --canvas-* token", () => {
+  const painted = stylesheetRules.filter(
+    ({ at, declarations }) =>
+      at.length === 1 && /(?:^|[\s;])background:/.test(declarations),
+  );
+
+  assert.ok(painted.length > 0, "the scanner must find painted surfaces");
+  for (const rule of painted) {
+    const [, value] = rule.declarations.match(/(?:^|[\s;])background:([^;]+);/);
+    assert.match(
+      value,
+      // Or paints nothing at all: a non-modal overlay covers no page and is
+      // deliberately transparent.
+      /var\(--canvas-|^\s*none\s*$/,
+      `${rule.selector} paints outside the token seam`,
+    );
+  }
+
+  // The two surfaces the package paints *above* the Canvas rather than in it.
+  // Both used to be the literal system `Canvas` with no token to redirect, so
+  // an application that had themed everything else had to reach past the
+  // documented seam and on to the attributes to brand the one dialog its users
+  // are asked to make a decision in.
+  for (const selector of [
+    "[data-canvas-transition-dialog]",
+    "[data-canvas-overlay] > [data-canvas-workspace]",
+  ]) {
+    const rule = painted.find((candidate) => candidate.selector === selector);
+    assert.ok(rule, `${selector} must be painted`);
+    assert.match(
+      rule.declarations,
+      /background:\s*var\(--canvas-surface-raised\)/,
+    );
+  }
+});
+
+test("every integration attribute the package emits is named in the contract", async () => {
+  const readme = await readFile(
+    join(root, "packages/canvas-panels/README.md"),
+    "utf8",
+  );
+  const sources = await Promise.all(
+    (await collectFiles(distribution))
+      .filter((file) => file.endsWith(".js"))
+      .map((file) => readFile(file, "utf8")),
+  );
+  const emitted = new Set(
+    [...sources, stylesheet].flatMap((source) =>
+      [...source.matchAll(/["[](data-[a-z-]+)["\]]/g)].map(([, name]) => name),
+    ),
+  );
+
+  assert.ok(emitted.size > 20, "the scanner must find the Canvas attributes");
+  for (const attribute of [...emitted].sort()) {
+    // A styling or integration hook a consumer can see in the DOM but cannot
+    // find in the README is one they will use anyway and one the package can
+    // then break without noticing. The table is the freeze; this is what keeps
+    // it complete. `data-testid` is the single documented exception, named in
+    // the README as outside the contract.
+    if (attribute === "data-testid") continue;
+    assert.ok(
+      readme.includes(`\`${attribute}\``),
+      `${attribute} is emitted but missing from the README's attribute table`,
+    );
+  }
+  assert.match(
+    readme,
+    /`data-testid`[^\n]*not[^\n]*part of the Public Contract/,
+  );
+});
+
 test("the stylesheet is one named cascade layer, and says so where a consumer reads", async () => {
   const readme = await readFile(
     join(root, "packages/canvas-panels/README.md"),
@@ -711,4 +814,201 @@ test("continuous integration runs every delivery-path gate on Node 22 and 24", a
     assert.ok(workflow.includes(command), `CI must run ${command}`);
   }
   assert.doesNotMatch(workflow, /npm publish|pnpm publish/);
+});
+
+/**
+ * The inventory's export lists, read back out of the document: for each
+ * `### `@squaredlemons/canvas-panels/<subpath>`` heading, the backticked names
+ * in the paragraph under it.
+ */
+function inventoriedExports(inventory) {
+  const sections = inventory.split(/^### /m).slice(1);
+  const listed = new Map();
+  for (const section of sections) {
+    const [heading, ...rest] = section.split("\n");
+    const subpath = heading.match(
+      /^`@squaredlemons\/canvas-panels\/([^`]+)`$/,
+    )?.[1];
+    if (subpath === undefined || subpath === "styles.css") continue;
+    listed.set(
+      subpath,
+      [...rest.join("\n").matchAll(/`([A-Za-z][A-Za-z0-9]*)`/g)]
+        .map(([, name]) => name)
+        .sort(),
+    );
+  }
+  return listed;
+}
+
+test("the frozen inventory lists exactly what the package exports", async () => {
+  const inventory = await readFile(
+    join(root, "docs/delivery/public-contract.md"),
+    "utf8",
+  );
+  const canvasPackage = await readJson("packages/canvas-panels/package.json");
+  const listed = inventoriedExports(inventory);
+  const subpaths = Object.keys(canvasPackage.exports)
+    .map((subpath) => subpath.replace(/^\.\//, ""))
+    .filter((subpath) => subpath !== "styles.css");
+
+  // An inventory that has quietly stopped naming a subpath would agree with an
+  // empty comparison, so the set of subpaths is checked before their contents.
+  assert.deepEqual([...listed.keys()].sort(), [...subpaths].sort());
+
+  for (const subpath of subpaths) {
+    const module = await import(
+      pathToFileURL(
+        join(
+          distribution,
+          canvasPackage.exports[`./${subpath}`].import.replace(
+            /^\.\/dist\//,
+            "",
+          ),
+        ),
+      ).href
+    );
+    // The freeze, as an assertion. An export added, removed, or renamed without
+    // an edit to the inventory fails here — which is the point: deciding
+    // whether something is a breaking change should not depend on who is asked.
+    assert.deepEqual(
+      listed.get(subpath),
+      Object.keys(module).sort(),
+      `the inventory and @squaredlemons/canvas-panels/${subpath} disagree`,
+    );
+  }
+});
+
+test("the frozen inventory lists every result discriminant the types declare", async () => {
+  const inventory = await readFile(
+    join(root, "docs/delivery/public-contract.md"),
+    "utf8",
+  );
+  const declarations = await Promise.all(
+    (await collectFiles(distribution))
+      .filter((file) => file.endsWith(".d.ts"))
+      .map((file) => readFile(file, "utf8")),
+  );
+  const declared = (key) =>
+    new Set(
+      declarations.flatMap((source) =>
+        [...source.matchAll(new RegExp(`${key}: "([a-z-]+)"`, "g"))].map(
+          ([, member]) => member,
+        ),
+      ),
+    );
+  // The paragraph *under* each label, not the label's own line: the sentence
+  // introducing a union is free to mention a member without listing it.
+  const listedUnder = (label) =>
+    new Set(
+      [
+        ...(
+          inventory.match(
+            new RegExp(`\\*\\*\`${label}\`\\*\\*[^\\n]*\\n\\n([^\\n]*)`),
+          )?.[1] ?? ""
+        ).matchAll(/`([a-z-]+)`/g),
+      ].map(([, member]) => member),
+    );
+
+  for (const key of ["status", "reason"]) {
+    const members = declared(key);
+    assert.ok(members.size > 5, `the scanner must find the ${key} members`);
+    assert.deepEqual(
+      [...listedUnder(key)].sort(),
+      [...members].sort(),
+      `the inventory and the declared \`${key}\` union disagree`,
+    );
+  }
+});
+
+test("the complete Package Gate is one command, and it is what CI runs", async () => {
+  const workspaceRoot = await readJson("package.json");
+  const gate = workspaceRoot.scripts.gate;
+
+  // A gate spelled out step by step in a workflow is a gate that can be run
+  // differently by hand, and differently again by the release path. One script
+  // is what makes "the complete Package Gate passed" a checkable statement.
+  assert.ok(gate, "the workspace must name the Package Gate");
+  for (const step of [
+    "pnpm format:check",
+    "pnpm lint",
+    "pnpm typecheck",
+    "pnpm test",
+    "pnpm build",
+    "pnpm pack:check",
+  ]) {
+    assert.ok(gate.includes(step), `the gate must run ${step}`);
+  }
+  assert.equal(
+    workspaceRoot.scripts["release:publish"],
+    "pnpm gate && changeset publish",
+  );
+});
+
+test("only the release workflow can publish, and it holds no publish token", async () => {
+  const release = await readFile(
+    join(root, ".github/workflows/release.yml"),
+    "utf8",
+  );
+  const workflows = await collectFiles(join(root, ".github/workflows"));
+
+  // Exactly one workflow publishes, and it is reachable only from `main`.
+  const publishing = [];
+  for (const file of workflows) {
+    const source = await readFile(file, "utf8");
+    if (/release:publish|changeset publish|npm publish/.test(source))
+      publishing.push(relative(root, file));
+  }
+  assert.deepEqual(publishing, [".github/workflows/release.yml"]);
+  assert.match(release, /on:\s*\n\s*push:\s*\n\s*branches:\s*\[main\]/);
+
+  // The gate runs before anything is published, on both supported Node
+  // versions, and the publishing job waits for it.
+  assert.match(release, /node-version:\s*\[22, 24\]/);
+  assert.match(release, /run:\s*pnpm gate/);
+  assert.match(release, /needs:\s*gate/);
+
+  // OIDC trusted publishing, and no credential of any kind. A publish token in
+  // the environment is exactly what this repository decided not to hold: if the
+  // exchange fails the release fails rather than falling back to a secret.
+  // Read past the comments, which are free to name the tokens they explain.
+  const executed = release.replace(/^\s*#.*$/gm, "");
+  assert.match(release, /id-token:\s*write/);
+  assert.doesNotMatch(executed, /NODE_AUTH_TOKEN|NPM_TOKEN|_authToken/);
+  assert.match(release, /npm@\^11\.5\.1/);
+
+  // Provenance attestations are unavailable to a private repository, so the
+  // package says so once and the workflow does not quietly re-enable it.
+  assert.match(release, /NPM_CONFIG_PROVENANCE:\s*"false"/);
+});
+
+test("a prerelease publishes to next and a stable release to latest", async () => {
+  const config = await readJson(".changeset/config.json");
+  const canvasPackage = await readJson("packages/canvas-panels/package.json");
+  const runbook = await readFile(
+    join(root, "docs/delivery/private-package.md"),
+    "utf8",
+  );
+
+  // No `tag` in publishConfig: with one, every publish would carry it, and a
+  // prerelease tag pinned there is how a `next` build reaches `latest`.
+  // Changesets takes the dist-tag from pre mode instead — `next` while
+  // `.changeset/pre.json` exists, `latest` once it has been exited.
+  assert.equal(canvasPackage.publishConfig.tag, undefined);
+  assert.equal(config.access, "restricted");
+  assert.match(runbook, /changeset pre enter next/);
+  assert.match(runbook, /changeset pre exit/);
+
+  // And a candidate is promoted by moving a tag, never by building again: the
+  // artifact that was verified has to be the artifact that becomes `latest`,
+  // and `npm dist-tag add` is the only step that touches no bytes.
+  assert.match(runbook, /npm dist-tag add @squaredlemons\/canvas-panels@/);
+
+  // Every workspace member that is not the package is ignored, so a fixture or
+  // a sample can never be versioned or published alongside it.
+  assert.deepEqual([...config.ignore].sort(), [
+    "@canvas-panels/company-agent-prototype",
+    "@canvas-panels/crm-sample",
+    "@canvas-panels/next-fixture",
+    "@canvas-panels/react-fixture",
+  ]);
 });

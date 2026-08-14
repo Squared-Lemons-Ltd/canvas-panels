@@ -553,9 +553,12 @@ function GuardedTransitionDialog({
       createElement(
         "div",
         { "data-canvas-transition-actions": "" },
+        // Each decision is named, so an application can restyle the three
+        // controls it most needs to without matching the English in a label.
         createElement(
           "button",
           {
+            "data-canvas-transition-action": "save",
             disabled: busy,
             onClick: () => void decide("save"),
             type: "button",
@@ -565,6 +568,7 @@ function GuardedTransitionDialog({
         createElement(
           "button",
           {
+            "data-canvas-transition-action": "discard",
             disabled: busy,
             onClick: () => void decide("discard"),
             type: "button",
@@ -574,6 +578,7 @@ function GuardedTransitionDialog({
         createElement(
           "button",
           {
+            "data-canvas-transition-action": "stay",
             disabled: busy,
             onClick: () => void decide("stay"),
             ref: stayButton,
@@ -1729,18 +1734,41 @@ export function createCanvasModule<
                 createElement(
                   "header",
                   { "data-canvas-panel-header": "" },
+                  // A registered visual title takes the heading's visible place
+                  // rather than printing beside it. Both used to render, so an
+                  // application whose visual title carried the record's name
+                  // showed that name twice.
+                  //
+                  // The heading stays one element either way: it is the Panel's
+                  // accessible name, what the region's `aria-labelledby` points
+                  // at, and where the Panel Focus Owner puts focus. Hiding it
+                  // and focusing the ornament instead would land a keyboard
+                  // reader on a 1px target that had been told nothing — so the
+                  // Panel title moves inside the heading and is hidden there,
+                  // still read, out of the way of the title the application
+                  // chose to show.
                   createElement(
                     "h2",
                     { id: headingId, tabIndex: -1 },
-                    panel.title,
+                    visualTitle === undefined
+                      ? panel.title
+                      : createElement(
+                          "span",
+                          { "data-canvas-panel-title": "", key: "title" },
+                          panel.title,
+                        ),
+                    visualTitle === undefined
+                      ? null
+                      : createElement(
+                          "span",
+                          {
+                            "aria-hidden": true,
+                            "data-canvas-visual-title": "",
+                            key: "visual-title",
+                          },
+                          visualTitle,
+                        ),
                   ),
-                  visualTitle === undefined
-                    ? null
-                    : createElement(
-                        "span",
-                        { "aria-hidden": true, "data-canvas-visual-title": "" },
-                        visualTitle,
-                      ),
                   dirtyLabel === undefined
                     ? null
                     : createElement(

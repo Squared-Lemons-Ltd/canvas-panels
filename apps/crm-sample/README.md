@@ -304,37 +304,40 @@ layer that the order above puts above `canvas-panels`:
 Declaring them on the element rather than on an ancestor is the arrangement that
 holds whichever way the package places its own defaults, because a value
 declared on an element beats one inherited from an ancestor whatever the layers
-say. That matters, because at the time of writing the package declared its
-defaults in a rule matching `[data-canvas-workspace]` while documenting the
-opposite — `packages/canvas-panels/README.md` says "Override them on any
-ancestor of the Workspace", and an inline `--canvas-radius: 99rem` on the
-Workspace's parent was measured to have no effect at all. Reported; this app
-does not touch the package.
+say. That mattered when this app was written: the package declared its defaults
+in a rule matching `[data-canvas-workspace]` while documenting the opposite, and
+an inline `--canvas-radius: 99rem` on the Workspace's parent was measured to
+have no effect at all. Reported and fixed — the defaults now live on `:root`, so
+an ancestor override works as documented. This app keeps declaring on the
+element, which is correct either way.
 
-### Where the tokens run out
+### Where the tokens ran out — fixed
 
-Two surfaces the Canvas paints in the CSS system colours `Canvas` and
+Two surfaces the Canvas painted in the CSS system colours `Canvas` and
 `CanvasText` rather than in its own tokens, with no `--canvas-*` to redirect
 them: the overlay layer's Workspace, and the Guarded Transition dialog. They
-follow `color-scheme`, so they stay readable in both themes — they are simply
-not the product's colours, which is obvious the moment a dialog opens over the
-Meridian graphite.
+followed `color-scheme`, so they stayed readable in both themes — they were
+simply not the product's colours, which was obvious the moment a dialog opened
+over the Meridian graphite. The dialog's Save / Discard / Stay buttons carried
+no styling at all, so under Tailwind's preflight they arrived as bare text with
+no hit target.
 
-The dialog's Save / Discard / Stay buttons carry no styling at all, so under
-Tailwind's preflight they arrive as bare text with no hit target.
+Reported, and both fixed in the package. Both surfaces now answer to
+`--canvas-surface-raised`, so `app/globals.css` sets a colour through the token
+seam — `--canvas-surface-raised: var(--popover)` on the Workspace, re-pointed to
+`var(--card)` on the overlay — and reaches the attributes only for the edge and
+the inner layout. The dialog's three decisions ship a real control with a real
+hit target, and each carries `data-canvas-transition-action="save" | "discard" |
+"stay"`, so the skin names the primary rather than counting to it.
 
-Both are overridden in `app/globals.css` by reaching past the token seam and on
-to the `[data-canvas-*]` attributes, which the package calls implementation
-detail. Reported rather than papered over silently — see the comments there.
-
-Three more reaches past that seam, for the same reason and recorded here so the
-list is complete. None of the three is in the contract table at
-`packages/canvas-panels/README.md`:
+Three further reaches past the seam remain, and all three are now documented
+hooks in the contract table at `packages/canvas-panels/README.md` rather than
+implementation detail:
 
 - `[data-canvas-visual-title]` — the span a registered visual title renders
-  into. The skin moves it ahead of the heading with `order: -1`, because the
-  package renders it second and an ornament meant to precede a name should not
-  follow it.
+  into. The skin no longer has to place it: the package renders it inside the
+  `h2`, in the heading's visible place, with the Panel's own title hidden beside
+  it for the reader. The `order: -1` that used to correct this is gone.
 - `[data-canvas-dirty-label]` — restyled from muted body text into a tinted
   chip, so a Panel holding unapplied work still reads as such on a rail of
   small caps.
@@ -342,9 +345,9 @@ list is complete. None of the three is in the contract table at
   and case. The package sets `font: inherit` here, so without this a Panel's
   title is the only text in the Canvas the skin does not reach.
 
-Each would be better as a token — `--canvas-dirty-label-*`, a documented
-ordering for the visual title, and a title type scale — which is the shape of
-the request rather than a complaint about the workaround.
+The last two would still be better as tokens — `--canvas-dirty-label-*` and a
+title type scale — which is the shape of the request rather than a complaint
+about the workaround.
 
 ### `data-canvas-panel-id` was not stable across a server render — fixed
 
@@ -365,7 +368,7 @@ the command palette mounts a second Workspace. This app's own scroll-into-view
 therefore still finds Panels by **position in the stack**, which needs no such
 caveat; see `useActivePanelInView` in `canvas-mount.tsx`.
 
-### A Panel body does not contain what it holds — worked around
+### A Panel body did not contain what it holds — fixed
 
 Found by watching a short window: scrolling the account book carried the Panel
 *headers* off the top of the frame and left a band of bare bed under the Panels.
@@ -384,7 +387,7 @@ vertical overflow — measured. Then the second half: the package sets
 `auto` alongside it, so the whole Canvas became vertically scrollable and the
 headers went with it.
 
-Two declarations in `app/globals.css`:
+Two declarations held it while it was open, in `app/globals.css`:
 
 ```css
 [data-canvas-panel-body] { position: relative; }
@@ -396,9 +399,10 @@ scroll they already sit in. The second says what the package means but cannot
 express with one axis: a Canvas is a horizontal surface, and vertical scrolling
 belongs to each Panel body, which keeps its header in place while it happens.
 
-Both belong in the package. Any consumer using a utility framework will hit the
-first the moment a Panel body contains a visually-hidden label, which is to say
-almost immediately.
+Both belonged in the package, because any consumer using a utility framework
+hits the first the moment a Panel body contains a visually hidden label — which
+is to say almost immediately. Both are now the package's own, and the two
+declarations above have been deleted from this app.
 
 ## The Canvas
 

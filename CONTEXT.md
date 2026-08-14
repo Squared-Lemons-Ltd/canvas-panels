@@ -208,9 +208,19 @@ An optional, application-typed, in-memory value published by a mounted Panel for
 
 The documented package exports, behaviours, schemas, accessibility guarantees, compatibility ranges, semantic styling hooks, and integration attributes protected by the package’s versioning policy. Undocumented implementation details are not part of this contract.
 
+## Supported Line
+
+The newest published minor version, and the only one that receives fixes. There is no backport branch: a fix lands on the line and is released forward. That is affordable because the package holds no persistent state, so moving between versions is a dependency change and a rollback is a reinstall.
+
+## Release Evidence
+
+The record of what a published version is and what was verified about it: its immutable version, the integrity of the artifact, the provenance position, the source commit, the workflow run, and the gates that passed. A version whose record is incomplete is not a released version. Promotion moves a tag onto an artifact that already has a record; it never rebuilds one, because a rebuild is a different artifact with a different record.
+
 ## Proof Consumer
 
-The first real application installation used to verify that the published package, documented integration boundary, and complete acceptance gates work outside package fixtures. Project Holly is the v1 Proof Consumer.
+The first real application installation used to verify that the published package, documented integration boundary, and complete acceptance gates work outside package fixtures. The Meridian CRM sample (`apps/crm-sample`) is the v1 Proof Consumer: it is a whole application rather than a fixture — five Canvas Workspaces across five History Namespaces, built out of a utility CSS framework — and it replaced Project Holly, which needed a second codebase and a deploy before it could say anything.
+
+A Proof Consumer earns the name by reporting rather than absorbing. A defect it works around in its own stylesheet is a defect the next consumer meets untouched, so a finding is written down, fixed in the package, and the workaround is then deleted from the application.
 
 ## Package Gate
 

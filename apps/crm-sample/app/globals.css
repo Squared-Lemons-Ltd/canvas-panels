@@ -795,12 +795,13 @@
 /*
  * Canvas Panels theming.
  *
- * The package declares its `--canvas-*` tokens *on the Workspace element* in
- * the `canvas-panels` layer, so an override has to target that element too — a
- * token set on an ancestor is inherited, and an inherited value always loses to
- * a value declared on the element itself. Writing the override in the
- * `components` layer is enough to win, because the layer statement at the top
- * of this file puts `canvas-panels` below `components`.
+ * The package declares its `--canvas-*` defaults on `:root`, so the Workspace
+ * inherits them and an override on any ancestor reaches it. This app writes on
+ * the Workspace element itself, which is the arrangement that holds whichever
+ * way the package places its defaults: a value declared on an element always
+ * beats one inherited into it. Writing the override in the `components` layer
+ * is belt and braces, because the layer statement at the top of this file puts
+ * `canvas-panels` below `components`.
  *
  * This is the whole seam between the skin contract above and the package: one
  * rule, no conditionals. Every skin reaches the Canvas through it.
@@ -813,6 +814,13 @@
   [data-canvas-workspace] {
     --canvas-surface: var(--skin-surface);
     --canvas-surface-active: var(--skin-surface-active);
+    /*
+     * What the package paints above the Canvas rather than in it — the Guarded
+     * Transition dialog, and the Workspace inside the overlay layer. The
+     * overlay re-points it below; a dialog is a popover and a command palette
+     * is a card.
+     */
+    --canvas-surface-raised: var(--popover);
     --canvas-border: var(--skin-rule);
     --canvas-text: var(--skin-ink);
     --canvas-text-muted: var(--skin-ink-muted);
@@ -978,40 +986,7 @@
    * the bed is what turns the token into a gutter — and under a skin with no
    * gutter, it is what the space past the last Panel is drawn in.
    */
-  /*
-   * A Panel body must be the containing block for what it contains.
-   *
-   * The package makes each Panel `position: relative` and gives its body
-   * `overflow-y: auto`. An absolutely positioned descendant of that body is
-   * therefore laid out against the *Panel*, not the body — so the body's
-   * overflow never clips it, and it lands at its static position somewhere down
-   * inside the scrolled content, adding its own height to the Panel's scroll
-   * box and then to the Canvas's.
-   *
-   * Which sounds theoretical until you notice that Tailwind's `sr-only` is
-   * `position: absolute`. Every "Select <account>" and "Open the record" label
-   * in the account book's table is one, so a fourteen-row table quietly gave
-   * the Canvas 323px of vertical overflow — and because `overflow-x: auto` on
-   * the application computes `overflow-y: auto` alongside it, the whole Canvas
-   * became vertically scrollable. Scrolling it carried the Panel *headers* off
-   * the top of the frame and left a band of bare bed under the Panels.
-   *
-   * One declaration fixes it: contained by the body, those labels are clipped
-   * by the scroll they already sit in and contribute nothing beyond it.
-   */
-  [data-canvas-panel-body] {
-    position: relative;
-  }
-
   [data-canvas-application] {
-    /*
-     * And the Canvas itself never scrolls vertically. It is a horizontal
-     * surface; vertical scrolling belongs to each Panel body, which owns its
-     * own and keeps its header in place while it happens. `overflow-x: auto`
-     * alone cannot say that — the other axis computes to `auto` with it — so it
-     * has to be said.
-     */
-    overflow-y: hidden;
     background: var(--skin-bed);
     padding-block: var(--skin-canvas-inset-block);
     padding-inline: var(--skin-canvas-inset-inline);
@@ -1024,20 +999,14 @@
   }
 
   /*
-   * A registered visual title, placed *before* the heading rather than after
-   * it.
-   *
-   * The package renders both: the `h2` carries the accessible name and is the
-   * element the Canvas gives focus to, and this `aria-hidden` span carries
-   * whatever the application wants seen. In source order the span comes second,
-   * which would put an ornament meant to precede a name after it — `order` is
-   * the whole fix, and it costs nothing because the header is already a flex
-   * row.
+   * A registered visual title. The package renders it inside the `h2`, in the
+   * heading's visible place, with the Panel's own title hidden beside it for
+   * the reader — so there is no ordering to correct here and nothing to place:
+   * it is the heading, and the rule below dresses it with the rest.
    */
   [data-canvas-visual-title] {
     display: inline-flex;
     align-items: center;
-    order: -1;
   }
 
   /* The Panel's own title, in the skin's voice rather than the application's. */
@@ -1427,22 +1396,18 @@
   }
 
   /*
-   * Two surfaces the Canvas paints in system colours rather than in its own
-   * tokens: the overlay layer's Workspace and the Guarded Transition dialog.
-   * `Canvas`/`CanvasText` follow `color-scheme`, so they are readable in both
-   * themes — they are simply not *this* product's colours, which is very
-   * visible when a dialog opens over the Meridian graphite. There is no
-   * `--canvas-*` token for either, so this reaches past the token seam and on
-   * to the attributes. Reported to the package rather than worked around
-   * quietly.
+   * The two surfaces the package paints above the Canvas. Both answer to
+   * `--canvas-surface-raised`, so the colour is set through the token seam and
+   * only the edge and the inner layout are written here; the overlay takes a
+   * card rather than the popover the dialog gets.
    */
   [data-canvas-overlay] > [data-canvas-workspace] {
-    background: var(--card);
+    --canvas-surface-raised: var(--card);
+
     border: 1px solid var(--border);
   }
 
   [data-canvas-transition-dialog] {
-    background: var(--popover);
     border: 1px solid var(--border);
     color: var(--popover-foreground);
     display: flex;
@@ -1468,10 +1433,9 @@
   }
 
   /*
-   * Save, Discard and Stay are the most consequential controls the package
-   * renders, and they are the only ones it ships no styling for — so under
-   * Tailwind's preflight they arrive as bare text with no hit target at all.
-   * WCAG 2.5.8 wants 24px; these are given a full control height.
+   * Save, Discard and Stay. The package now ships them a real control with a
+   * real hit target, so this is a skin rather than a rescue: the same shape as
+   * every other button in the application, at a full 2.25rem control height.
    */
   [data-canvas-transition-actions] button {
     background: var(--secondary);
@@ -1485,7 +1449,13 @@
     padding-inline: 0.9rem;
   }
 
-  [data-canvas-transition-actions] button:first-child {
+  /*
+   * Named, rather than counted: the package says which decision this is. The
+   * selector keeps the descendant so it outranks the shared rule above, which
+   * would otherwise win on specificity alone.
+   */
+  [data-canvas-transition-actions]
+  button[data-canvas-transition-action="save"] {
     background: var(--primary);
     border-color: transparent;
     color: var(--primary-foreground);

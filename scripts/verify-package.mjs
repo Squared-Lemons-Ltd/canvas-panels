@@ -261,6 +261,7 @@ const documentedAreas = Object.freeze([
   "Extensions",
   "Testing",
   "Compatibility",
+  "Support",
   "Migration",
   "Rollback",
 ]);

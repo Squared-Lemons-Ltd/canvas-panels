@@ -6,18 +6,18 @@ A **Canvas Workspace** presents an ordered **Panel Stack**: a permanent Root Pan
 
 ## Installation
 
-**This package is not yet published.** It is marked `private`, and no release has been made to any registry, so `pnpm add @squaredlemons/canvas-panels` cannot resolve it yet. Until the first release, consume it one of two ways:
-
-Inside this workspace, depend on it directly:
-
-```json
-{ "dependencies": { "@squaredlemons/canvas-panels": "workspace:*" } }
-```
-
-Outside it, install a tarball built from the package directory with `npm pack`:
+The package is published **restricted** under the `@squaredlemons` scope on npm. Installing it needs an npm account with access to the scope:
 
 ```sh
-pnpm add file:../canvas-panels/squaredlemons-canvas-panels-0.0.0.tgz
+pnpm add @squaredlemons/canvas-panels
+```
+
+In CI, authenticate the scope with a read-only token rather than a publishing one:
+
+```ini
+# .npmrc
+@squaredlemons:registry=https://registry.npmjs.org/
+//registry.npmjs.org/:_authToken=${NPM_READ_TOKEN}
 ```
 
 React 19 is a required peer; Next.js is an optional one. Install the peers the application actually uses:
@@ -26,7 +26,15 @@ React 19 is a required peer; Next.js is an optional one. Install the peers the a
 pnpm add react@^19 react-dom@^19
 ```
 
-Once the package is released to the Squared Lemons registry, installation becomes the ordinary `pnpm add @squaredlemons/canvas-panels` against an `.npmrc` that maps the `@squaredlemons` scope to that registry.
+**Pin an exact version while the package is `0.x`.** A minor release may contain a breaking change before 1.0 (see [Migration](#migration)), so `"@squaredlemons/canvas-panels": "0.1.0"` and a deliberate upgrade is the supported arrangement; a caret range is not.
+
+Prereleases are published to the `next` dist-tag and never to `latest`, so they are reached only by asking for them — `pnpm add @squaredlemons/canvas-panels@next` — and never resolved by a range.
+
+Inside this repository the fixtures depend on the package directly, which is what keeps them honest about the workspace copy rather than a published one:
+
+```json
+{ "dependencies": { "@squaredlemons/canvas-panels": "workspace:*" } }
+```
 
 The package is ESM-only and ships no runtime dependencies, so it adds nothing to a lockfile beyond itself. Import the stylesheet once, as high in the application as the Canvas is rendered:
 
@@ -281,6 +289,7 @@ Override them on any ancestor of the Workspace:
   --canvas-panel-min-height: 0;
   --canvas-surface: Canvas;
   --canvas-surface-active: Canvas;
+  --canvas-surface-raised: Canvas;
   --canvas-surface-overlay: Canvas;
   --canvas-text: CanvasText;
   --canvas-text-muted: GrayText;
@@ -294,27 +303,45 @@ Override them on any ancestor of the Workspace:
 }
 ```
 
-Action, dialog, and separator styling have their own properties in the same family — `--canvas-action-*`, `--canvas-dialog-width`, `--canvas-dialog-padding`. Three of them have no default of their own and derive from a more general token instead: `--canvas-action-text` from `--canvas-text-muted`, `--canvas-action-text-hover` from `--canvas-text`, and `--canvas-action-border` from `--canvas-border`. The derivation is resolved on the action itself, so recolouring the general token recolours the actions with it, and setting the specific one takes them out of the arrangement.
+`--canvas-surface-raised` is the surface the package paints *above* the Canvas rather than in it: the Guarded Transition dialog and an Overlay Workspace. Both render outside the Panel Stack — the dialog inside the Workspace that raised it, the overlay in its own Workspace element under `[data-canvas-overlay]` — so a token set on `[data-canvas-workspace]`, on any ancestor, or on `:root` reaches them.
+
+Action, dialog, and separator styling have their own properties in the same family — `--canvas-action-*`, `--canvas-dialog-width`, `--canvas-dialog-padding`. `--canvas-action-min-size` is the floor a Canvas Action keeps on both axes; it defaults to `1.75rem` and lowering it below `1.5rem` puts the control under what WCAG 2.5.8 asks of a pointer target. Three properties have no default of their own and derive from a more general token instead: `--canvas-action-text` from `--canvas-text-muted`, `--canvas-action-text-hover` from `--canvas-text`, and `--canvas-action-border` from `--canvas-border`. The derivation is resolved on the action itself, so recolouring the general token recolours the actions with it, and setting the specific one takes them out of the arrangement.
 
 An override on an element — an ancestor, or the Workspace itself — wins whatever layer it is written in, because it is nearer to the Workspace than `:root` is. An override written **on `:root` itself** is a different matter: it meets the package's default on the same element, so layer order decides, and a layer sorted before `canvas-panels` loses. That includes Tailwind's `@theme`, which emits into the `theme` layer. Set Canvas tokens in unlayered CSS, in a layer sorted after `canvas-panels`, or on an ancestor element.
 
-Structural state is exposed through data attributes rather than class names, and these are part of the Public Contract:
+Structural state is exposed through data attributes rather than class names. The table below is the complete list, and every entry is part of the Public Contract — an attribute the package emits and this table does not name is a defect, and the contract suite fails on one.
 
 | Attribute | On | Meaning |
 | --- | --- | --- |
 | `data-canvas-workspace` | the Workspace | the Canvas root |
 | `data-canvas-breakpoint` | the Workspace | the current Declared Breakpoint |
+| `data-canvas-resizing` | the Workspace | present while a resize is in progress |
+| `data-canvas-announcer` | within the Workspace | the single polite live region |
+| `data-canvas-application` | within the Workspace | the horizontally scrolling Panel Stack |
 | `data-canvas-panel` | each Panel | one Panel Region |
 | `data-canvas-panel-id` | each Panel | its Panel Instance ID |
 | `data-panel-kind` | each Panel | its Panel Kind |
 | `data-active` | the Active Panel | present only on the Active Panel |
 | `data-canvas-panel-context` | a visible, non-Active Panel | `previous` |
 | `data-canvas-panel-header`, `data-canvas-panel-body` | within a Panel | its two regions |
+| `data-canvas-panel-title` | within a Panel's heading | the Panel title, present only while a registered visual title has taken its visible place |
+| `data-canvas-visual-title` | within a Panel's heading | the visual title an application registered through `useHeader` |
+| `data-canvas-dirty-label` | within a Panel's header | the label a Panel's lifecycle registered for unsaved work |
 | `data-canvas-panel-separator` | the Panel Separator | the resize control |
 | `data-canvas-panel-close` | the close control | present on a closable Panel's own close button |
 | `data-canvas-action` | each Canvas Action | the `id` the application gave that Action |
-| `data-canvas-resizing` | the Workspace | present while a resize is in progress |
+| `data-destructive` | a Canvas Action | present on an Action the application declared destructive |
+| `data-canvas-panel-notice` | within a Panel body | the renderer failure notice that replaced it |
+| `data-canvas-mobile-navigation` | within the Workspace | the narrow presentation's navigation bar |
+| `data-canvas-breadcrumbs` | within that bar | the trail of retained Panels |
+| `data-canvas-back` | within that bar | the control that returns to the previous Panel |
+| `data-canvas-transition-backdrop`, `data-canvas-transition-dialog` | the Guarded Transition dialog | its scrim and its modal |
+| `data-canvas-transition-actions` | within that dialog | the row holding its decisions |
+| `data-canvas-transition-action` | each decision | `save`, `discard`, or `stay` |
 | `data-canvas-overlay`, `data-canvas-overlay-modality` | the overlay layer | an Overlay Workspace and its modality |
+| `data-canvas-overlay-main` | the application behind an overlay | the content a modal overlay makes `inert` |
+
+`data-testid` attributes also appear in the rendered Canvas. They are **not** part of the Public Contract and may change in any release; use the attributes above.
 
 A Panel that the current presentation does not show is `hidden` and `inert` rather than carrying a visibility attribute, so it is removed from the accessibility tree and from Tab order by the platform.
 
@@ -556,6 +583,23 @@ Browser support is stated from the standard features the package uses — `inert
 
 Two further limits are worth knowing before depending on the compatibility table. The packed Next consumer builds against Next 16, so the lower half of the declared Next range is supported by declaration rather than by an automated build. The security and bundle guarantees are structural — the package declares no runtime dependency and no install script, and each optional subpath is proven absent from every bundle that does not import it — rather than the output of a vulnerability scanner or a size budget.
 
+## Support
+
+**The supported line is the newest published minor.** Fixes land on it and are released forward; there is no backport branch, and an older `0.x` receives nothing. That is affordable precisely because upgrading is a dependency change — the package holds no persistent state, and [Rollback](#rollback) is a reinstall. An application that cannot take the newest minor should say so before it is stranded rather than after.
+
+**Deprecations are announced before they are removed.** A part of the Public Contract that is going away is marked deprecated in its own release — in the changelog, in this document, and with a `@deprecated` JSDoc tag where it is an export, so it surfaces in an editor and in `pnpm typecheck` rather than only in prose. It keeps working for at least one further minor release, and its removal is a breaking change described with the edit a consumer has to make. Nothing is removed in the same release that deprecates it.
+
+**Known limitations**, none of which block a release, all of which are worth knowing before depending on the contract:
+
+| Limitation | What is actually true |
+| --- | --- |
+| WCAG 2.2 AA sign-off is partial | Automated checks cover roles, names, focus order, live-region wiring, and axe-clean rendering in Chromium. A manual VoiceOver and Safari pass has not been performed. |
+| One browser is automated | Chromium only. Firefox and WebKit are supported by declaration, from the standard features the package uses, and are not in an automated matrix. |
+| The Next range is half-verified | The packed Next consumer builds against Next 16. `>=15` is supported by declaration rather than by an automated build. |
+| Security and size are structural claims | The package declares no runtime dependency and no install script, and each optional subpath is proven absent from every bundle that does not import it. There is no vulnerability scanner and no size budget in the gate. |
+| `dirty` does two jobs | It both arms the Transition Guard and renders the header's dirty label and the `beforeunload` prompt. A Panel that must block while otherwise clean has to report `dirty: true` and shows the label while it does. Splitting the two is a planned Panel Engine change. |
+| The narrow presentations are verified by test, not by eye | The mobile and tablet presentations are covered by the contract suite and by axe in a simulated viewport. The most recent consumer proof could not resize its automated browser below the package's breakpoints, so nothing narrow has been seen rendering in a real application. |
+
 ## Migration
 
 The package follows semantic versioning over its **Public Contract**: the documented exports, behaviours, schemas, accessibility guarantees, compatibility ranges, semantic styling hooks, and integration attributes described in this document. Undocumented implementation details are not part of that contract and may change in any release.
@@ -567,7 +611,19 @@ Two things migrate independently of the package version:
 - **Navigation Documents.** Each Panel Kind versions its own descriptor. When a descriptor shape changes, raise that Kind's `version` and add a migration from the previous one; the ordered migration chain must be complete back to version 1. An already-current document requests no history change, while a migrated one requests replace-history normalisation, so an old URL silently becomes a current one on first load. Never remove a historical migration: a bookmarked link may be arbitrarily old. Use `buildNavigationDocument` from `@squaredlemons/canvas-panels/testing` to pin each historical version with a test.
 - **The Navigation Parameter.** Its own `v<n>.` prefix versions the transport. A parameter carrying an unrecognised version fails closed and produces a Recovery Panel rather than a partially reconstructed stack.
 
-When upgrading, run the application's typecheck first: the package is strict, and most contract changes surface as type errors rather than runtime behaviour.
+**Upgrading**, in the order that finds problems cheapest first:
+
+```sh
+pnpm add @squaredlemons/canvas-panels@<version>   # an exact version, not a range
+pnpm install --frozen-lockfile
+pnpm typecheck                                    # the package is strict; most contract changes are type errors
+pnpm test
+pnpm build
+```
+
+Read the changelog entry for every version between the two, not only the newest: while the package is `0.x` a minor may carry a breaking change, and each one names the edit to make. Then exercise the application's own Canvas — a Guarded Transition, a deep link restored from a URL, and the narrow presentation — because those are the three the type system cannot check for you.
+
+If the upgrade crosses a Navigation Document change, keep an old URL to hand and load it: an old link is the one input that outlives every release, and [Rollback](#rollback) explains what it does when it cannot be restored.
 
 ## Rollback
 
