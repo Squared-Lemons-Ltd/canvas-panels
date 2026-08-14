@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { navigation } from "./navigation";
 
@@ -37,11 +36,6 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
               )}
             />
             <span className="flex-1 truncate">{item.label}</span>
-            {item.demo ? null : (
-              <Badge variant="outline" className="text-[0.625rem]">
-                Soon
-              </Badge>
-            )}
           </Link>
         );
       })}
