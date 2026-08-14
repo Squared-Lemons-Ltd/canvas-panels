@@ -423,7 +423,7 @@
 }
 
 /* Ledger — a book of business. Flush, ruled, small caps, figures in mono. */
-:root[data-canvas-skin="ledger"] {
+:root[data-meridian-skin="ledger"] {
   --skin-header-fill: var(--muted);
   --skin-header-fill-active: var(--accent);
   --skin-header-height: 2.25rem;
@@ -459,7 +459,7 @@
 }
 
 /* Terminal — a line printer that learned to scroll sideways. */
-:root[data-canvas-skin="terminal"] {
+:root[data-meridian-skin="terminal"] {
   --skin-surface: light-dark(oklch(1 0 0), oklch(0.17 0.02 155));
   --skin-surface-active: light-dark(oklch(1 0 0), oklch(0.19 0.025 155));
   --skin-bed: light-dark(oklch(0.9 0.004 155), oklch(0.115 0.015 155));
@@ -516,7 +516,7 @@
 }
 
 /* Paper — editorial. Warm stock, serif, generous measure, nothing filled. */
-:root[data-canvas-skin="paper"] {
+:root[data-meridian-skin="paper"] {
   --skin-surface: light-dark(oklch(0.975 0.014 84), oklch(0.225 0.012 62));
   --skin-surface-active: light-dark(
     oklch(0.99 0.012 84),
@@ -578,7 +578,7 @@
 }
 
 /* Glass — translucent Panels over a lit bed. */
-:root[data-canvas-skin="glass"] {
+:root[data-meridian-skin="glass"] {
   --skin-surface: color-mix(in srgb, var(--src-card) 40%, transparent);
   --skin-surface-active: color-mix(in srgb, var(--src-card) 55%, transparent);
   --skin-bed: light-dark(
@@ -638,7 +638,7 @@
  * type scale and no radius at all: the whole skin is geometry, and it is the
  * one a reader who works in this surface all day would pick.
  */
-:root[data-canvas-skin="compact"] {
+:root[data-meridian-skin="compact"] {
   --skin-header-fill: var(--skin-muted);
   --skin-header-height: 1.75rem;
   --skin-header-pad: 0.5rem;
@@ -681,7 +681,7 @@
  * The bed is tinted a shade under the Panels so the shadow has something to
  * fall on: a shadow over a bed the same colour as the card is a smudge.
  */
-:root[data-canvas-skin="float"] {
+:root[data-meridian-skin="float"] {
   --skin-bed: light-dark(oklch(0.94 0.006 265), oklch(0.135 0.012 265));
   --skin-bed-flat: light-dark(oklch(0.94 0.006 265), oklch(0.135 0.012 265));
 
@@ -728,7 +728,7 @@
  * the set by being the furthest a `--canvas-*` token can be pushed: if the
  * Canvas survives this it will survive a brand.
  */
-:root[data-canvas-skin="brutalist"] {
+:root[data-meridian-skin="brutalist"] {
   --skin-surface: light-dark(oklch(0.99 0 0), oklch(0.17 0 0));
   --skin-surface-active: light-dark(oklch(1 0 0), oklch(0.2 0 0));
   --skin-bed: light-dark(oklch(0.92 0.14 96), oklch(0.24 0.06 96));
@@ -1095,7 +1095,7 @@
    * still promotes the element to its own layer in some engines, so the
    * declaration is written by the skin that wants it rather than defaulted here.
    */
-  :root[data-canvas-skin="glass"] [data-canvas-panel] {
+  :root[data-meridian-skin="glass"] [data-canvas-panel] {
     backdrop-filter: var(--skin-panel-blur);
   }
 
@@ -1722,26 +1722,26 @@
  * they say it here rather than making six others declare a default.
  */
 @layer skin {
-  :root[data-canvas-skin="float"] [data-meridian-tile] {
+  :root[data-meridian-skin="float"] [data-meridian-tile] {
     padding: 0.875rem 1rem;
   }
 
-  :root[data-canvas-skin="compact"] [data-meridian-tile] {
+  :root[data-meridian-skin="compact"] [data-meridian-tile] {
     padding: 0.25rem 0.5rem;
   }
 
-  :root[data-canvas-skin="brutalist"] [data-meridian-tile] {
+  :root[data-meridian-skin="brutalist"] [data-meridian-tile] {
     padding: 0.75rem 0.875rem;
   }
 
   /* The stack inside a section breathes with the rest of the skin. */
-  :root[data-canvas-skin="float"] [data-meridian-section],
-  :root[data-canvas-skin="float"] [data-meridian-hero] {
+  :root[data-meridian-skin="float"] [data-meridian-section],
+  :root[data-meridian-skin="float"] [data-meridian-hero] {
     gap: 1rem;
   }
 
-  :root[data-canvas-skin="compact"] [data-meridian-section],
-  :root[data-canvas-skin="compact"] [data-meridian-hero] {
+  :root[data-meridian-skin="compact"] [data-meridian-section],
+  :root[data-meridian-skin="compact"] [data-meridian-hero] {
     gap: 0.375rem;
   }
 }

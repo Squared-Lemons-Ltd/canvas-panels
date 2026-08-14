@@ -145,7 +145,7 @@ independently and every combination is meant to work.
 ### How it is built
 
 One flat set of `--skin-*` custom properties on `:root`, overridden per skin by
-`:root[data-canvas-skin="…"]`. Two things read them, and they are the two halves
+`:root[data-meridian-skin="…"]`. Two things read them, and they are the two halves
 of a themed Canvas:
 
 1. **The package's chrome**, through the `--canvas-*` tokens it publishes —
@@ -326,6 +326,25 @@ Tailwind's preflight they arrive as bare text with no hit target.
 Both are overridden in `app/globals.css` by reaching past the token seam and on
 to the `[data-canvas-*]` attributes, which the package calls implementation
 detail. Reported rather than papered over silently — see the comments there.
+
+Three more reaches past that seam, for the same reason and recorded here so the
+list is complete. None of the three is in the contract table at
+`packages/canvas-panels/README.md`:
+
+- `[data-canvas-visual-title]` — the span a registered visual title renders
+  into. The skin moves it ahead of the heading with `order: -1`, because the
+  package renders it second and an ornament meant to precede a name should not
+  follow it.
+- `[data-canvas-dirty-label]` — restyled from muted body text into a tinted
+  chip, so a Panel holding unapplied work still reads as such on a rail of
+  small caps.
+- `[data-canvas-panel-header] h2` — given the skin's own face, size, tracking
+  and case. The package sets `font: inherit` here, so without this a Panel's
+  title is the only text in the Canvas the skin does not reach.
+
+Each would be better as a token — `--canvas-dirty-label-*`, a documented
+ordering for the visual title, and a title type scale — which is the shape of
+the request rather than a complaint about the workaround.
 
 ### `data-canvas-panel-id` was not stable across a server render — fixed
 

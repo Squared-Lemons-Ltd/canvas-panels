@@ -9,11 +9,17 @@
  * A Canvas Workspace can be restyled to the house style of the product it is
  * dropped into without the product being restyled around it.
  *
- * All five are the same package, the same DOM, the same Panel Engine. Every
+ * All eight are the same package, the same DOM, the same Panel Engine. Every
  * difference between them is a custom property: the `--canvas-*` tokens the
  * package publishes, plus a set this application publishes for its own Panel
  * *content* in exactly the same spirit. Nothing here is a fork, an option
  * passed to `createCanvasModule`, or a second set of renderers.
+ *
+ * The chosen skin is carried on `<html>` as `data-meridian-skin`, in this
+ * application's own attribute namespace. `data-canvas-*` belongs to the
+ * package: every attribute in it is part of the published Public Contract, and
+ * an application inventing a new one there is squatting on a name the package
+ * may later define.
  *
  * Structure is a separate axis and belongs to the page. The Pipeline is a trail
  * — spines, a board that grows, a path drawn above it. The account book is a
@@ -112,6 +118,27 @@ export const routeSkins: readonly (readonly [string, SkinId])[] = Object.freeze(
   ],
 );
 
+/**
+ * What "match the section" actually does, in one sentence, derived from the
+ * table above rather than written out beside it.
+ *
+ * The hand-written version listed four of the five sections and quietly went
+ * stale the moment a fifth was added — a menu describing its own behaviour
+ * wrongly is worse than one that says nothing. Reading it from `routeSkins`
+ * means it cannot happen twice.
+ */
+export function describeRouteSkins(
+  labelForRoute: (prefix: string) => string,
+): string {
+  const named = routeSkins.map(
+    ([prefix, skin]) =>
+      `${labelForRoute(prefix)} in ${skins.find(({ id }) => id === skin)?.label ?? skin}`,
+  );
+  const fallback =
+    skins.find(({ id }) => id === defaultSkin)?.label ?? defaultSkin;
+  return `Everything else in ${fallback}; ${named.join(", ")}.`;
+}
+
 export function skinForRoute(pathname: string): SkinId {
   const matched = routeSkins.find(
     ([prefix]) => pathname === prefix || pathname.startsWith(`${prefix}/`),
@@ -139,7 +166,7 @@ export function skinBootstrapScript(): string {
     `var c=localStorage.getItem(${JSON.stringify(skinStorageKey)});`,
     "var p=location.pathname,s=null;",
     "for(var i=0;i<r.length;i++){if(p===r[i][0]||p.indexOf(r[i][0]+'/')===0){s=r[i][1];break}}",
-    `document.documentElement.setAttribute('data-canvas-skin',c||s||${JSON.stringify(defaultSkin)});`,
+    `document.documentElement.setAttribute('data-meridian-skin',c||s||${JSON.stringify(defaultSkin)});`,
     "}catch(e){}",
   ].join("");
 }

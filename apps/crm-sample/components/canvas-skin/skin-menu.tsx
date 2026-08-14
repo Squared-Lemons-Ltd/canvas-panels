@@ -15,13 +15,24 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
+import { navigation } from "@/components/app-shell/navigation";
+
 import {
+  describeRouteSkins,
   isSkinChoice,
   type SkinChoice,
   skinForRoute,
   skinStorageKey,
   skins,
 } from "./skins";
+
+/**
+ * Each section named the way the sidebar names it, so the menu and the
+ * navigation cannot disagree about what a route is called either.
+ */
+const sectionSkins = describeRouteSkins(
+  (prefix) => navigation.find(({ href }) => href === prefix)?.label ?? prefix,
+);
 
 /**
  * The Canvas skin switcher.
@@ -55,7 +66,7 @@ export function SkinMenu() {
 
   useEffect(() => {
     document.documentElement.setAttribute(
-      "data-canvas-skin",
+      "data-meridian-skin",
       choice === "auto" ? skinForRoute(pathname) : choice,
     );
   }, [choice, pathname]);
@@ -99,8 +110,7 @@ export function SkinMenu() {
             <span className="flex flex-col gap-0.5">
               <span className="font-medium">Match the section</span>
               <span className="text-xs text-muted-foreground">
-                Pipeline in Meridian, Accounts in Ledger, Contacts in Float,
-                Reports in Paper.
+                {sectionSkins}
               </span>
             </span>
           </DropdownMenuRadioItem>
