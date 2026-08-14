@@ -2,6 +2,8 @@
 
 `@squaredlemons/canvas-panels` is published restricted on the npm registry, under the `@squaredlemons` scope. This repository contains no npm credential of any kind: the release workflow authenticates each run through OIDC trusted publishing, and nothing else in the repository can publish.
 
+**Nothing has been published yet.** `0.1.0` is built, gated, and recorded in [`release-evidence.md`](./release-evidence.md); what it is waiting for is the one step below that npm cannot delegate to a workflow.
+
 Everything below the "Release runbook" heading describes the one authorized path from a verified commit to a published version.
 
 ## Verified delivery path
@@ -94,19 +96,29 @@ While `.changeset/pre.json` exists, every version the workflow produces is a pre
 
 ### Promoting a release candidate
 
-A candidate is promoted by moving a tag, never by building again. The artifact that was verified is the artifact that becomes `latest`:
+A candidate is promoted by moving a tag, never by building again. The artifact that was verified is the artifact that becomes `latest`.
+
+The version published is the final one — `1.0.0`, not `1.0.0-rc.1` — and it reaches `next` first. That is the whole point: a separate `rc` that is later rebuilt as `1.0.0` is two artifacts, and only one of them was ever verified.
+
+Getting there needs one deliberate step, because the ordinary path does not do it. Out of pre mode `changeset publish` tags whatever it publishes `latest` immediately, so exiting pre mode and merging the version pull request would put `1.0.0` straight into every consumer's range with nothing between. The candidate is published with an explicit tag instead:
 
 ```sh
-pnpm exec changeset pre exit            # commit; the next version is 1.0.0, not 1.0.0-next.n
-# merge the Version Packages pull request; the workflow publishes 1.0.0
+pnpm exec changeset pre exit      # commit; the next version is 1.0.0, not 1.0.0-next.n
+# merge the Version Packages pull request, but do not let the workflow publish it:
+#   land the exit and the version bump while the release job is disabled, or
+#   publish from the bootstrap path below with the tag named explicitly.
+pnpm gate && pnpm exec changeset publish --tag next
+```
+
+Now verify what is on the registry: install `@squaredlemons/canvas-panels@next` into the Proof Consumer, run that application's own gate, and check the integrity against `release-evidence.md`. Then promote the version already there:
+
+```sh
 npm dist-tag add @squaredlemons/canvas-panels@1.0.0 latest
 ```
 
-The candidate is published under its final version number and reaches consumers only through the `next` tag until the tag is moved. Verify it there — install `@squaredlemons/canvas-panels@next` into the proof consumer, run that application's own gate — and then move `latest` onto the version already on the registry.
+`npm dist-tag add` touches no bytes. The integrity recorded before promotion is the integrity after it, which is what makes "the already verified artifact" a checkable claim rather than a hope.
 
-Two things this deliberately avoids. It never publishes a *separate* `1.0.0-rc.1` that is then rebuilt as `1.0.0`, because those are two artifacts and only one of them was verified. And it never re-runs the build between verification and promotion, because `npm dist-tag add` touches no bytes: the integrity recorded in `release-evidence.md` is the same before and after.
-
-If the candidate fails verification, leave `latest` where it is. Nothing has to be undone: a version nobody's range resolves is a version nobody has.
+If the candidate fails verification, leave `latest` where it is. Nothing has to be undone: a version no consumer's range resolves is a version no consumer has. Deprecate it with a sentence naming its replacement and release forward.
 
 ### The first release, which is different
 

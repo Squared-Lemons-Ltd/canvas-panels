@@ -1750,24 +1750,24 @@ export function createCanvasModule<
                   createElement(
                     "h2",
                     { id: headingId, tabIndex: -1 },
-                    visualTitle === undefined
-                      ? panel.title
-                      : createElement(
-                          "span",
-                          { "data-canvas-panel-title": "", key: "title" },
-                          panel.title,
-                        ),
-                    visualTitle === undefined
-                      ? null
-                      : createElement(
-                          "span",
-                          {
-                            "aria-hidden": true,
-                            "data-canvas-visual-title": "",
-                            key: "visual-title",
-                          },
-                          visualTitle,
-                        ),
+                    ...(visualTitle === undefined
+                      ? [panel.title]
+                      : [
+                          createElement(
+                            "span",
+                            { "data-canvas-panel-title": "", key: "title" },
+                            panel.title,
+                          ),
+                          createElement(
+                            "span",
+                            {
+                              "aria-hidden": true,
+                              "data-canvas-visual-title": "",
+                              key: "visual-title",
+                            },
+                            visualTitle,
+                          ),
+                        ]),
                   ),
                   dirtyLabel === undefined
                     ? null

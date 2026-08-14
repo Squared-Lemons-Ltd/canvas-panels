@@ -6,7 +6,9 @@ A **Canvas Workspace** presents an ordered **Panel Stack**: a permanent Root Pan
 
 ## Installation
 
-The package is published **restricted** under the `@squaredlemons` scope on npm. Installing it needs an npm account with access to the scope:
+The package is published **restricted** under the `@squaredlemons` scope on npm, so installing it needs an npm account with access to that scope.
+
+> **0.1.0 has not reached the registry yet.** It is built, gated, and recorded in `docs/delivery/release-evidence.md`, and it is published by hand once — npm registers a trusted publisher against a package that already exists, so the first version cannot come from the release workflow. Until it lands, depend on the workspace copy. Everything below is how installation works from the version after that, and how it will work for this one.
 
 ```sh
 pnpm add @squaredlemons/canvas-panels
@@ -286,26 +288,51 @@ Override them on any ancestor of the Workspace:
   --canvas-panel-width: 22rem;
   --canvas-panel-active-width: 32rem;
   --canvas-panel-gap: 1px;
-  --canvas-panel-min-height: 0;
+  --canvas-body-padding: 1rem;
   --canvas-surface: Canvas;
-  --canvas-surface-active: Canvas;
-  --canvas-surface-raised: Canvas;
-  --canvas-surface-overlay: Canvas;
-  --canvas-text: CanvasText;
   --canvas-text-muted: GrayText;
   --canvas-border: color-mix(in srgb, CanvasText 20%, transparent);
   --canvas-radius: 0.5rem;
-  --canvas-body-padding: 1rem;
-  --canvas-header-padding-inline: 1rem;
-  --canvas-header-min-height: 3rem;
   --canvas-transition-duration: 150ms;
-  --canvas-transition-easing: ease;
 }
 ```
 
-`--canvas-surface-raised` is the surface the package paints *above* the Canvas rather than in it: the Guarded Transition dialog and an Overlay Workspace. Both render outside the Panel Stack — the dialog inside the Workspace that raised it, the overlay in its own Workspace element under `[data-canvas-overlay]` — so a token set on `[data-canvas-workspace]`, on any ancestor, or on `:root` reaches them.
+This is the complete list, and it is part of the Public Contract: a token the package reads and this table does not name is a defect, and the contract suite fails on one.
 
-Action, dialog, and separator styling have their own properties in the same family — `--canvas-action-*`, `--canvas-dialog-width`, `--canvas-dialog-padding`. `--canvas-action-min-size` is the floor a Canvas Action keeps on both axes; it defaults to `1.75rem` and lowering it below `1.5rem` puts the control under what WCAG 2.5.8 asks of a pointer target. Three properties have no default of their own and derive from a more general token instead: `--canvas-action-text` from `--canvas-text-muted`, `--canvas-action-text-hover` from `--canvas-text`, and `--canvas-action-border` from `--canvas-border`. The derivation is resolved on the action itself, so recolouring the general token recolours the actions with it, and setting the specific one takes them out of the arrangement.
+| Token | Default | What it sets |
+| --- | --- | --- |
+| `--canvas-surface` | `Canvas` | the Canvas bed and every Panel |
+| `--canvas-surface-active` | `Canvas` | the Active Panel |
+| `--canvas-surface-raised` | `Canvas` | what the package paints *above* the Canvas: the Guarded Transition dialog, and an Overlay Workspace |
+| `--canvas-surface-overlay` | `rgb(0 0 0 / 45%)` | the scrim behind a modal overlay or dialog. The one token that is not a system colour — a translucent shade is the point — and the one the forced-colours block replaces |
+| `--canvas-border` | `color-mix(in srgb, CanvasText 18%, transparent)` | Panel edges and header rules |
+| `--canvas-text` | `CanvasText` | Canvas text |
+| `--canvas-text-muted` | `color-mix(in srgb, CanvasText 65%, transparent)` | secondary text, and what an action's colour derives from |
+| `--canvas-panel-width` | `min(24rem, 84vw)` | an inactive Panel |
+| `--canvas-panel-active-width` | `min(36rem, 90vw)` | the Active Panel |
+| `--canvas-panel-min-height` | `24rem` | the Canvas's own floor |
+| `--canvas-panel-gap` | `0` | the gutter between Panels |
+| `--canvas-header-min-height` | `3.5rem` | a Panel header |
+| `--canvas-header-padding-inline` | `1.25rem` | a Panel header, and the narrow navigation bar |
+| `--canvas-body-padding` | `0` | a Panel body |
+| `--canvas-radius` | `0.75rem` | the dialog and the overlay Workspace |
+| `--canvas-dialog-width` | `min(100%, 32rem)` | the Guarded Transition dialog |
+| `--canvas-dialog-padding` | `1.5rem` | the Guarded Transition dialog |
+| `--canvas-action-surface` | `transparent` | a Canvas Action at rest |
+| `--canvas-action-surface-hover` | `color-mix(in srgb, CanvasText 10%, transparent)` | a Canvas Action under the pointer |
+| `--canvas-action-text-destructive` | `color-mix(in srgb, red 70%, CanvasText)` | an Action the application declared destructive |
+| `--canvas-action-radius` | `99px` | a Canvas Action |
+| `--canvas-action-padding` | `0.4rem 0.7rem` | a Canvas Action |
+| `--canvas-action-min-size` | `1.75rem` | the floor a Canvas Action keeps on both axes. Lowering it under `1.5rem` puts the control below what WCAG 2.5.8 asks of a pointer target |
+| `--canvas-transition-duration` | `300ms` | Panel width transitions |
+| `--canvas-transition-easing` | `ease` | Panel width transitions |
+| `--canvas-action-text` | *derived from* `--canvas-text-muted` | a Canvas Action's colour |
+| `--canvas-action-text-hover` | *derived from* `--canvas-text` | a Canvas Action's colour under the pointer |
+| `--canvas-action-border` | *derived from* `--canvas-border` | a Canvas Action's edge |
+
+The last three have no default of their own. Each derives from a more general token, and the derivation is resolved **on the action itself** rather than on `:root` — so recolouring the general token recolours the actions with it, and setting the specific one takes them out of the arrangement. A default written on `:root` could not do that: a `var()` inside a custom property is substituted where the property is declared, and every descendant then inherits the answer.
+
+`--canvas-surface-raised` reaches two elements that render outside the Panel Stack — the dialog, inside the Workspace that raised it, and the overlay, in its own Workspace element under `[data-canvas-overlay]` — so a token set on `[data-canvas-workspace]`, on any ancestor, or on `:root` reaches both.
 
 An override on an element — an ancestor, or the Workspace itself — wins whatever layer it is written in, because it is nearer to the Workspace than `:root` is. An override written **on `:root` itself** is a different matter: it meets the package's default on the same element, so layer order decides, and a layer sorted before `canvas-panels` loses. That includes Tailwind's `@theme`, which emits into the `theme` layer. Set Canvas tokens in unlayered CSS, in a layer sorted after `canvas-panels`, or on an ancestor element.
 

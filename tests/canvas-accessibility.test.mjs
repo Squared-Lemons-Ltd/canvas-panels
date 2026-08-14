@@ -799,8 +799,13 @@ test("a Canvas action keeps its pointer target beside a title that grows", () =>
 
   const size = stylesheet.match(/--canvas-action-min-size:\s*([^;]+);/);
   assert.ok(size, "the target size must be a token an application can read");
+  // Read the unit rather than assuming one: a correct `24px` would fail a
+  // check that divided every value by the root font size, and a `1.5em` would
+  // pass one — the assertion has to know which it is looking at.
+  const [, amount, unit] = size[1].trim().match(/^([\d.]+)(rem|px)$/) ?? [];
+  assert.ok(unit, `${size[1]} must be an absolute rem or px length`);
   assert.ok(
-    Number(size[1].replace("rem", "")) * 16 >= 24,
+    Number(amount) * (unit === "rem" ? 16 : 1) >= 24,
     `${size[1]} is under the 24px WCAG 2.5.8 asks of a pointer target`,
   );
 

@@ -14,7 +14,7 @@ Adding to the contract is a minor release. Removing from it, or narrowing what a
 
 ## Exports
 
-Nine subpaths, no root export. Every name below is public; a name reachable only through a deep import is not.
+Nine code subpaths and the stylesheet, and no root export. Every name below is public; a name reachable only through a deep import is not.
 
 ### `@squaredlemons/canvas-panels/core`
 
@@ -80,7 +80,7 @@ These live in the package README, which ships inside the tarball, and each is en
 | --- | --- | --- |
 | Navigation and guards | README "API", "Navigation" | Branch Replacement, Guard Outcomes, atomic commit, document limits and fail-closed rules |
 | Accessibility | README "Accessibility" | F6 region cycling as the only claimed key, one polite live region, the single Panel Focus Owner, dialog inertness and focus return, reduced motion |
-| Custom properties | README "Theming" | every `--canvas-*` token, its default, and the three override positions |
+| Custom properties | README "Theming" | every `--canvas-*` token the package reads, its default, and the three override positions. The suite fails on a token the stylesheet knows and the table does not, and on a documented default that has drifted from the one declared |
 | Integration attributes | README "Theming" | the complete `data-canvas-*` table; an attribute the package emits and that table does not name fails the gate |
 | Cascade layer | README "Theming" | the layer name `canvas-panels`, and that nothing is emitted outside it |
 | Testing tools | README "Testing" | a fake or builder for every published seam |
@@ -114,7 +114,7 @@ Peer ranges are part of the contract: widening one is a minor release, narrowing
 
 - `data-testid` attributes, and the DOM structure inside a Panel body.
 - The spelling of a Panel Instance ID. Its *scope* — numbered from one within its own Panel Engine — is contractual; `canvas-panel-<n>` is not.
-- Any module path other than the nine subpaths above. Deep imports into `dist` are unsupported and are proven unreachable by the packed-consumer gate.
+- Any module path other than the nine code subpaths and the stylesheet above. Deep imports into `dist` are unsupported and are proven unreachable by the packed-consumer gate.
 - The internal module layout, and the identity of any object the package does not document as stable.
 
 ## Known limitations

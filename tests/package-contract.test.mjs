@@ -692,14 +692,23 @@ test("a Panel contains what it holds, and the Canvas scrolls on one axis", () =>
 });
 
 test("every surface the package paints answers to a --canvas-* token", () => {
+  const paint = /(?:^|[\s;])background(?:-color)?:\s*([^;]+);/;
+  // `at.length === 1` is the layer and nothing else, which deliberately leaves
+  // out the one block that must paint system colours directly: forced-colours
+  // modes replace every author colour, and a token resolving to a `color-mix()`
+  // there is exactly what has to be overridden. Those rules are asserted by
+  // name in canvas-accessibility.test.mjs instead.
   const painted = stylesheetRules.filter(
-    ({ at, declarations }) =>
-      at.length === 1 && /(?:^|[\s;])background:/.test(declarations),
+    ({ at, declarations }) => at.length === 1 && paint.test(declarations),
+  );
+  const forced = stylesheetRules.filter(({ at }) =>
+    at.some((rule) => rule.includes("forced-colors")),
   );
 
   assert.ok(painted.length > 0, "the scanner must find painted surfaces");
+  assert.ok(forced.length > 0, "the excluded block must still be there");
   for (const rule of painted) {
-    const [, value] = rule.declarations.match(/(?:^|[\s;])background:([^;]+);/);
+    const [, value] = rule.declarations.match(paint);
     assert.match(
       value,
       // Or paints nothing at all: a non-modal overlay covers no page and is
@@ -723,6 +732,55 @@ test("every surface the package paints answers to a --canvas-* token", () => {
     assert.match(
       rule.declarations,
       /background:\s*var\(--canvas-surface-raised\)/,
+    );
+  }
+});
+
+test("every --canvas-* token the stylesheet knows is named in the contract", async () => {
+  const readme = await readFile(
+    join(root, "packages/canvas-panels/README.md"),
+    "utf8",
+  );
+  const css = stylesheetRules.map(({ declarations }) => declarations).join("");
+  // Declared *or* read: the three derived properties have no default of their
+  // own and appear only inside a `var()`, and they are the ones an application
+  // is most likely to reach for.
+  const tokens = new Set([
+    ...[...css.matchAll(/(--canvas-[a-z-]+)\s*:/g)].map(([, name]) => name),
+    ...[...css.matchAll(/var\(\s*(--canvas-[a-z-]+)/g)].map(([, name]) => name),
+  ]);
+
+  assert.ok(tokens.size > 20, "the scanner must find the tokens");
+  for (const token of [...tokens].sort()) {
+    // A token a consumer can set but cannot find is one they will set anyway,
+    // from reading the stylesheet, and one the package can then rename without
+    // noticing it broke someone. Presentation is the documented seam; this is
+    // what keeps the documentation of it complete.
+    assert.ok(
+      readme.includes(`\`${token}\``),
+      `${token} is part of the theming seam but missing from the README`,
+    );
+  }
+
+  // And the defaults it publishes are the defaults it has. A documented default
+  // that has drifted from the stylesheet is worse than none: it is the value a
+  // consumer reasons about when deciding whether they need an override at all.
+  // Biome wraps a long value across lines, which is a change to the stylesheet
+  // and not to the value, so the comparison is made on the value itself: one
+  // space between tokens, and none just inside a bracket.
+  const flatten = (value) =>
+    value
+      .replace(/\s+/g, " ")
+      .replace(/\(\s+/g, "(")
+      .replace(/\s+\)/g, ")")
+      .trim();
+  const documented = flatten(readme);
+  for (const [, token, value] of css.matchAll(
+    /(--canvas-[a-z-]+)\s*:\s*([^;]+);/g,
+  )) {
+    assert.ok(
+      documented.includes(`\`${flatten(value)}\``),
+      `${token} defaults to ${flatten(value)}, which the README does not say`,
     );
   }
 });
@@ -938,9 +996,13 @@ test("the complete Package Gate is one command, and it is what CI runs", async (
   ]) {
     assert.ok(gate.includes(step), `the gate must run ${step}`);
   }
-  assert.equal(
-    workspaceRoot.scripts["release:publish"],
-    "pnpm gate && changeset publish",
+  const publish = workspaceRoot.scripts["release:publish"];
+  assert.ok(publish?.includes("pnpm gate"), "publishing must run the gate");
+  assert.ok(publish.includes("changeset publish"), "publishing must publish");
+  assert.match(
+    publish,
+    /pnpm gate\s*&&/,
+    "the gate must run before the publish, not after it",
   );
 });
 
@@ -950,6 +1012,10 @@ test("only the release workflow can publish, and it holds no publish token", asy
     "utf8",
   );
   const workflows = await collectFiles(join(root, ".github/workflows"));
+  // What the workflow actually does, with the comments taken out: they are free
+  // to name the triggers and the tokens they explain, and every assertion below
+  // that forbids something has to read past them to mean anything.
+  const executed = release.replace(/^\s*#.*$/gm, "");
 
   // Exactly one workflow publishes, and it is reachable only from `main`.
   const publishing = [];
@@ -961,6 +1027,13 @@ test("only the release workflow can publish, and it holds no publish token", asy
   assert.deepEqual(publishing, [".github/workflows/release.yml"]);
   assert.match(release, /on:\s*\n\s*push:\s*\n\s*branches:\s*\[main\]/);
 
+  // One trigger, and it names the branch. A `workflow_dispatch` can be aimed at
+  // any ref, which would turn "publishes only from the protected path" into
+  // "publishes from whatever a maintainer typed" — so the publishing job checks
+  // the ref as well, and a trigger added later still cannot widen it.
+  assert.doesNotMatch(executed, /workflow_dispatch|workflow_call|pull_request/);
+  assert.match(executed, /if:\s*github\.ref == 'refs\/heads\/main'/);
+
   // The gate runs before anything is published, on both supported Node
   // versions, and the publishing job waits for it.
   assert.match(release, /node-version:\s*\[22, 24\]/);
@@ -970,8 +1043,6 @@ test("only the release workflow can publish, and it holds no publish token", asy
   // OIDC trusted publishing, and no credential of any kind. A publish token in
   // the environment is exactly what this repository decided not to hold: if the
   // exchange fails the release fails rather than falling back to a secret.
-  // Read past the comments, which are free to name the tokens they explain.
-  const executed = release.replace(/^\s*#.*$/gm, "");
   assert.match(release, /id-token:\s*write/);
   assert.doesNotMatch(executed, /NODE_AUTH_TOKEN|NPM_TOKEN|_authToken/);
   assert.match(release, /npm@\^11\.5\.1/);

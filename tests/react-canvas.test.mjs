@@ -1398,10 +1398,12 @@ test("a registered visual title replaces the heading rather than printing beside
   let Canvas;
 
   function Editor({ descriptor }) {
-    // The ordinary case: an application's visual title carries the record's
-    // name, which is also the Panel's title. Both used to render, and the name
-    // appeared twice.
-    Canvas.useHeader({ visualTitle: descriptor.name });
+    // The two strings are deliberately different. The defect this guards
+    // against is the record's name printing twice, and an application that
+    // registers exactly its Panel title would agree with a swapped pair, a
+    // duplicated span, or the accessible name coming from the ornament —
+    // every arrangement this is meant to tell apart.
+    Canvas.useHeader({ visualTitle: `Editing ${descriptor.name}` });
     return createElement("p", null, "Draft body");
   }
 
@@ -1437,8 +1439,10 @@ test("a registered visual title replaces the heading rather than printing beside
   );
   assert.ok(heading, "the Panel must keep its heading");
 
-  // One visible title. Everything the heading shows a sighted reader is the
-  // registered one; the Panel title is inside it, hidden, and rendered once.
+  // One visible title, and it is the registered one. Everything the heading
+  // shows a sighted reader — every node but the hidden Panel title — reads
+  // exactly the string the application asked for, so a second copy of either
+  // title anywhere in the header fails here.
   const shown = [...heading.childNodes]
     .filter(
       (node) =>
@@ -1446,7 +1450,11 @@ test("a registered visual title replaces the heading rather than printing beside
     )
     .map((node) => node.textContent)
     .join("");
-  assert.equal(shown, "Ada Lovelace");
+  assert.equal(shown, "Editing Ada Lovelace");
+  assert.equal(
+    heading.closest("[data-canvas-panel-header]").textContent,
+    "Ada LovelaceEditing Ada LovelaceClose",
+  );
   assert.equal(heading.querySelectorAll("[data-canvas-panel-title]").length, 1);
   assert.equal(
     heading.querySelector("[data-canvas-panel-title]").textContent,
@@ -1459,9 +1467,14 @@ test("a registered visual title replaces the heading rather than printing beside
     "true",
   );
 
-  // And the heading is still the whole heading: the Panel's accessible name,
-  // what the region points at, and a focus target that is not 1px of nothing.
+  // And the heading is still the whole heading: the Panel's accessible name is
+  // the Panel's title and not the ornament, the region points at it, and it is
+  // a focus target rather than 1px of nothing.
   assert.ok(rendered.getByRole("heading", { name: "Ada Lovelace" }));
+  assert.equal(
+    rendered.queryByRole("heading", { name: "Editing Ada Lovelace" }),
+    null,
+  );
   assert.equal(heading.tabIndex, -1);
   const region = heading.closest("[data-canvas-panel]");
   assert.equal(region.getAttribute("aria-labelledby"), heading.id);

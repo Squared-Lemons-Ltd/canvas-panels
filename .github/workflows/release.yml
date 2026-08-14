@@ -2,11 +2,17 @@ name: Release
 
 # The only path that may publish @squaredlemons/canvas-panels.
 #
-# It runs on `main` and nowhere else: a fork, a pull request, or a branch cannot
-# reach it, and the job that publishes holds no long-lived credential. npm
-# authenticates the run itself through OIDC trusted publishing, registered
-# against this repository and this workflow filename, so there is no token to
-# leak and no token to rotate.
+# It runs on `main` and nowhere else. There is deliberately no
+# `workflow_dispatch` here: a manual trigger can be aimed at any ref, which
+# would make "the protected path" mean "whatever a maintainer typed". A failed
+# run is re-run from the Actions UI, which keeps the ref it already had. The
+# publishing job re-checks the ref anyway, so a trigger added later cannot
+# quietly widen it.
+#
+# The job that publishes holds no long-lived credential: npm authenticates the
+# run itself through OIDC trusted publishing, registered against this repository
+# and this workflow filename, so there is no token to leak and no token to
+# rotate.
 #
 # Nothing is published without the complete Package Gate passing first. The gate
 # runs twice on purpose: once across the supported Node versions, and once more
@@ -16,7 +22,6 @@ name: Release
 on:
   push:
     branches: [main]
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -57,6 +62,7 @@ jobs:
   release:
     name: Version or publish
     needs: gate
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       # Changesets writes the version commit, the changelog, and the release tag.
