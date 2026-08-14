@@ -11,9 +11,9 @@ import {
   dealValue,
   type DealSource,
   dealSourceLabels,
+  formatMoney,
   isOpenStage,
   type MeridianDataset,
-  type Money,
   type PipelineStage,
   pipelineStageLabels,
   pipelineStages,
@@ -161,18 +161,13 @@ function regionMixRows(dataset: MeridianDataset): readonly MetricRow[] {
       .map(([region, value]) => ({
         key: region,
         label: regionLabels[region],
-        figure: compact(value, dataset.reportingCurrency),
+        figure: formatMoney(
+          { amount: value, currency: dataset.reportingCurrency },
+          { compact: true },
+        ),
         share: largest === 0 ? 0 : value / largest,
       })),
   );
-}
-
-function compact(amount: number, currency: Money["currency"]): string {
-  const symbol = currency === "GBP" ? "£" : currency === "EUR" ? "€" : "$";
-  if (amount >= 1_000_000) {
-    return `${symbol}${Math.round(amount / 100_000) / 10}M`;
-  }
-  return `${symbol}${Math.round(amount / 1000)}K`;
 }
 
 /**
