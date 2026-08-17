@@ -56,10 +56,11 @@ The first release: the package's whole history to date, versioned out of thirtee
 | Packed size | 129,750 bytes, 51 entries, 583,719 bytes unpacked |
 | Registry | GitHub Packages, `https://npm.pkg.github.com`, from `Squared-Lemons-Ltd/canvas-panels` |
 | Provenance | Not available. GitHub Packages serves no npm attestation; `publishConfig.provenance` is `false` by decision, not by omission. The reproducible integrity above stands in its place. |
-| Visibility | Private, following the repository — *intended; not yet asserted by the registry* |
-| dist-tag | `latest` on publication — *not yet held; nothing is on the registry* |
-| Source commit | `a0c47231c7e1fcd6d331dbe7ca37f05ff0369dec` |
-| Workflow run | *pending — see "Publication status"* |
+| Visibility | Private, following the repository |
+| dist-tag | `latest` |
+| Source commit | `a0c47231c7e1fcd6d331dbe7ca37f05ff0369dec` — the tree the artifact above was packed from |
+| Published from | `ded9e0a1747104454ef61b892d5cae0502c81148`, tagged `@squared-lemons-ltd/canvas-panels@0.1.0` |
+| Workflow run | [31999486816](https://github.com/Squared-Lemons-Ltd/canvas-panels/actions/runs/31999486816), 17 August 2026 |
 | Toolchain | Node 22.20.0, npm 11.12.1, pnpm 9.15.9 |
 | Gate | `pnpm gate` passed: 426 contract tests, 3 packed-consumer tests, 0 failures |
 
@@ -72,10 +73,12 @@ The first release: the package's whole history to date, versioned out of thirtee
 
 ### Publication status
 
-**Not yet published**, and waiting on nothing but the workflow run that publishes it.
+**Published**, on 17 August 2026, by the release workflow — no hand publish, and no credential that outlived the run.
 
-This version was first prepared for the public npm registry under `@squaredlemons/canvas-panels`. That publish was refused — `402 Payment Required`, because private packages under an *organization* scope need a paid org plan, which a personal subscription does not cover — and with nothing yet published and no consumers to break, the registry was changed to GitHub Packages rather than the plan. [`private-package.md`](./private-package.md#why-github-packages-and-what-it-cost) records that reversal, what it cost, and what it made simpler.
+Two commits appear above because the record is stamped after the tree it describes. `a0c4723` is the tree the tarball was packed from; `ded9e0a` adds only this file's own source-commit line, which is outside `files` and so cannot reach the tarball. Packing either produces the integrity recorded above.
 
-The renamed `0.1.0` has never existed on any registry: the npm-scoped one was never accepted, and the numbers in the table above are the GitHub Packages artifact.
+The route here was not the planned one. This version was first prepared for the public npm registry as `@squaredlemons/canvas-panels`, and that publish was refused — `402 Payment Required`, because private packages under an *organization* scope need a paid org plan that a personal subscription does not cover. With nothing published and no consumers to break, the registry was changed rather than the plan. [`private-package.md`](./private-package.md#why-github-packages-and-what-it-cost) records the reversal, what it cost, and what it made simpler. Nothing was ever published under the npm scope, so `0.1.0` has exactly one published form: this one.
 
-When the workflow publishes it, replace the two *intended* fields above with what the registry actually reports and record the run URL. Until then this row records a verified artifact, not a published one, and should be read as neither less nor more than that.
+### Still to confirm
+
+The registry's own report of the integrity — `npm view … dist.integrity` — and a clean install from it, per "How to verify a published version" above. Both need a token with `read:packages`, which is a separate grant from the one that pushes code. Until that is run, the artifact's integrity is established by reproduction from source and by the workflow log, and the registry's agreement with it is expected but unchecked.
