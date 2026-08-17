@@ -48,9 +48,9 @@ Primary references: [Working with the npm registry](https://docs.github.com/en/p
 
 ## The publishing credential
 
-`.github/workflows/release.yml` is the only workflow that publishes. It runs on `main` only, and the job that publishes holds `id-token: write` and reads exactly one secret: `GITHUB_TOKEN`, which Changesets uses to push the release tag and create the GitHub release — never to publish.
+`.github/workflows/release.yml` is the only workflow that publishes. It runs on `main` only, the job that publishes holds `id-token: write` and `contents: write`, and it reads **no secret at all** — the registry credential is minted by the OIDC exchange, and pushing the release tags uses the token `actions/checkout` already persisted.
 
-There is no npm credential in this repository. The npm CLI detects the Actions OIDC environment, exchanges the run's identity token for a registry credential scoped to this package, and that credential expires with the job. So there is no publishing token to leak, to rotate, or to find in a settings page. The contract suite asserts that the workflow reads no other secret, that `NPM_TOKEN` and `_authToken` appear nowhere, that no second workflow acquires a publishing command, and that the ordinary CI workflow keeps `contents: read` and publishes nothing.
+There is no npm credential in this repository. The npm CLI detects the Actions OIDC environment, exchanges the run's identity token for a registry credential scoped to this package, and that credential expires with the job. So there is no publishing token to leak, to rotate, or to find in a settings page. The contract suite asserts that the workflow reads no secret whatsoever, that `NPM_TOKEN` and `_authToken` appear nowhere, that no second workflow acquires a publishing command, and that the ordinary CI workflow keeps `contents: read` and publishes nothing.
 
 Two requirements are load-bearing and easy to lose:
 
@@ -79,10 +79,14 @@ It runs formatting, linting and dependency boundaries, typechecking, the contrac
    ```
 
    That consumes the Changesets, writes the version bump and the generated `CHANGELOG.md`, and updates the lockfile. **Read what it produced** — the version number and the changelog entry are the thing being reviewed, and this commit is where they are reviewed. Nothing has been published and nothing is irreversible until it is pushed.
-3. Push the version commit to `main`. The workflow runs, the gate passes, and `changeset publish` publishes to the `latest` dist-tag with a provenance attestation, then pushes the release tag and creates the GitHub release.
+3. Push the version commit to `main`. The workflow runs, the gate passes, and `changeset publish` publishes to the `latest` dist-tag with a provenance attestation; the workflow then pushes the release tag.
 4. Record the release in `docs/delivery/release-evidence.md` using the verification commands there.
 
-There is deliberately no **Version Packages** pull request. This organization does not permit GitHub Actions to create pull requests, so the workflow carries no `version:` step — one that could never succeed would be worse than none, because it would fail every release and teach everyone to ignore a red run. A Changeset left on `main` therefore waits rather than releasing itself: the publish job publishes whatever the manifest already says, so an unversioned Changeset is inert until someone runs step 2.
+There is deliberately no **Version Packages** pull request, and the workflow does not use `changesets/action` at all.
+
+That is worth explaining, because the obvious fix does not work. The action does not branch on whether a `version:` step was configured — it branches on whether a Changeset is *pending*, and with one present it always takes the version-and-pull-request path, falling back to a default version command. This organization forbids GitHub Actions from creating or approving pull requests, and the repository-level setting that would allow it is refused with `409 Conflict` against that org policy. So the path could only ever fail here: it pushed a `changeset-release/main` branch and then died listing the pull request it wanted to open. A code path that cannot succeed is worse than no code path, because it fails on the perfectly reasonable act of landing a Changeset, and lands the red run on whoever pushes next.
+
+The publish is therefore an ordinary `run:` step. A Changeset left on `main` is inert: the job publishes whatever the manifest already says, and a version already on the registry is a no-op.
 
 ### A prerelease
 

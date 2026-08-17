@@ -67,14 +67,8 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
-      # Changesets pushes the release tag and creates the GitHub release.
+      # Pushing the release tags that `changeset publish` writes.
       contents: write
-      # Read, not write. The action lists pull requests unconditionally — it
-      # looks for an existing Version Packages one even when it has no `version:`
-      # step and nothing to open — and fails with "Resource not accessible by
-      # integration" without this. `read` satisfies that query and still cannot
-      # create or approve anything, which the organization forbids anyway.
-      pull-requests: read
       # The publish credential, and the only place it is granted. This mints the
       # OIDC token the npm CLI exchanges at the registry; there is nothing else
       # to grant, and no stored secret it stands in for.
@@ -108,20 +102,27 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # Publish only. There is deliberately no `version:` step here: this
-      # organization does not permit GitHub Actions to create pull requests, so
-      # a Version Packages pull request cannot be opened and never has been.
-      # Versioning is a local `pnpm release:version`, reviewed as the commit
-      # that carries it — the same scrutiny at the same moment, through a
-      # mechanism that exists. With no `version:` step, a pending Changeset
-      # simply waits: this job publishes what the manifest says and nothing else.
-      - name: Publish through Changesets
-        uses: changesets/action@v1
-        with:
-          publish: pnpm release:publish
-        env:
-          # Used by Changesets to write the version commit and open its pull
-          # request. It is not a publishing credential and cannot publish: the
-          # registry credential is minted by the OIDC exchange above and never
-          # appears here.
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # `changesets/action` is deliberately not used. It does not branch on
+      # whether a `version:` step was configured — it branches on whether a
+      # Changeset is pending, and with one present it always takes the
+      # version-and-pull-request path, falling back to a default version
+      # command. This organization forbids GitHub Actions from creating pull
+      # requests, so that path can only ever fail here: it pushed a
+      # `changeset-release/main` branch and then died listing the pull request
+      # it wanted to open. A code path that cannot succeed is worse than no code
+      # path, because it fails on the perfectly reasonable act of landing a
+      # Changeset and lands the red run on whoever pushed next.
+      #
+      # So the publish is an ordinary step. Versioning is a local
+      # `pnpm release:version`, reviewed as the commit that carries it — the
+      # same scrutiny at the same moment, through a mechanism that exists.
+      # A pending Changeset is now inert: this publishes whatever the manifest
+      # already says, and a version already on the registry is a no-op.
+      - name: Publish
+        run: pnpm release:publish
+
+      # `changeset publish` writes a git tag per published version and nothing
+      # pushes them by itself. Nothing to push is not a failure: an unchanged
+      # version publishes nothing and tags nothing.
+      - name: Push the release tags
+        run: git push --tags
