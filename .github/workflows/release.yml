@@ -67,10 +67,8 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
-      # Changesets writes the version commit, the changelog, and the release tag.
+      # Changesets pushes the release tag and creates the GitHub release.
       contents: write
-      # And opens the Version Packages pull request that reviews them.
-      pull-requests: write
       # The publish credential, and the only place it is granted. This mints the
       # OIDC token the npm CLI exchanges at the registry; there is nothing else
       # to grant, and no stored secret it stands in for.
@@ -104,13 +102,17 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Version or publish through Changesets
+      # Publish only. There is deliberately no `version:` step here: this
+      # organization does not permit GitHub Actions to create pull requests, so
+      # a Version Packages pull request cannot be opened and never has been.
+      # Versioning is a local `pnpm release:version`, reviewed as the commit
+      # that carries it — the same scrutiny at the same moment, through a
+      # mechanism that exists. With no `version:` step, a pending Changeset
+      # simply waits: this job publishes what the manifest says and nothing else.
+      - name: Publish through Changesets
         uses: changesets/action@v1
         with:
-          version: pnpm release:version
           publish: pnpm release:publish
-          commit: "chore: version packages"
-          title: "chore: version packages"
         env:
           # Used by Changesets to write the version commit and open its pull
           # request. It is not a publishing credential and cannot publish: the

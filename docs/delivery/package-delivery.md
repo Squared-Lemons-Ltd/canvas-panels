@@ -48,7 +48,7 @@ Primary references: [Working with the npm registry](https://docs.github.com/en/p
 
 ## The publishing credential
 
-`.github/workflows/release.yml` is the only workflow that publishes. It runs on `main` only, and the job that publishes holds `id-token: write` and reads exactly one secret: `GITHUB_TOKEN`, which Changesets uses to write the version commit and open its pull request — never to publish.
+`.github/workflows/release.yml` is the only workflow that publishes. It runs on `main` only, and the job that publishes holds `id-token: write` and reads exactly one secret: `GITHUB_TOKEN`, which Changesets uses to push the release tag and create the GitHub release — never to publish.
 
 There is no npm credential in this repository. The npm CLI detects the Actions OIDC environment, exchanges the run's identity token for a registry credential scoped to this package, and that credential expires with the job. So there is no publishing token to leak, to rotate, or to find in a settings page. The contract suite asserts that the workflow reads no other secret, that `NPM_TOKEN` and `_authToken` appear nowhere, that no second workflow acquires a publishing command, and that the ordinary CI workflow keeps `contents: read` and publishes nothing.
 
@@ -72,9 +72,17 @@ It runs formatting, linting and dependency boundaries, typechecking, the contrac
 ### A stable release
 
 1. Land the work on `main`, each change carrying a Changeset. Nothing else is required of a contributor.
-2. The release workflow opens a **Version Packages** pull request holding the version bump and the generated `CHANGELOG.md`. That pull request is the review of the version and the changelog.
-3. Merge it. The workflow runs again, the gate passes, and `changeset publish` publishes the package to the `latest` dist-tag with a provenance attestation, and pushes the release tag.
+2. When the accumulated Changesets are worth a version, cut it locally:
+
+   ```sh
+   pnpm release:version    # changeset version && pnpm install --lockfile-only
+   ```
+
+   That consumes the Changesets, writes the version bump and the generated `CHANGELOG.md`, and updates the lockfile. **Read what it produced** — the version number and the changelog entry are the thing being reviewed, and this commit is where they are reviewed. Nothing has been published and nothing is irreversible until it is pushed.
+3. Push the version commit to `main`. The workflow runs, the gate passes, and `changeset publish` publishes to the `latest` dist-tag with a provenance attestation, then pushes the release tag and creates the GitHub release.
 4. Record the release in `docs/delivery/release-evidence.md` using the verification commands there.
+
+There is deliberately no **Version Packages** pull request. This organization does not permit GitHub Actions to create pull requests, so the workflow carries no `version:` step — one that could never succeed would be worse than none, because it would fail every release and teach everyone to ignore a red run. A Changeset left on `main` therefore waits rather than releasing itself: the publish job publishes whatever the manifest already says, so an unversioned Changeset is inert until someone runs step 2.
 
 ### A prerelease
 
@@ -94,7 +102,7 @@ A candidate is promoted by moving a tag, never by building again. The artifact t
 
 The version published is the final one — `1.0.0`, not `1.0.0-rc.1` — and it reaches `next` first. That is the whole point: a separate `rc` that is later rebuilt as `1.0.0` is two artifacts, and only one of them was ever verified.
 
-Getting there needs one deliberate step, because the ordinary path does not do it. Out of pre mode `changeset publish` tags whatever it publishes `latest` immediately, so exiting pre mode and merging the version pull request would put `1.0.0` straight into every consumer's range with nothing between. The candidate is published with an explicit tag instead:
+Getting there needs one deliberate step, because the ordinary path does not do it. Out of pre mode `changeset publish` tags whatever it publishes `latest` immediately, so exiting pre mode and pushing the version commit would put `1.0.0` straight into every consumer's range with nothing between. The candidate is published with an explicit tag instead:
 
 ```sh
 pnpm exec changeset pre exit      # commit; the next version is 1.0.0, not 1.0.0-next.n
