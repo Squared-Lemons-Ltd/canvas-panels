@@ -10,12 +10,12 @@
  *  a Panel's.
  * ------------------------------------------------------------------------ */
 
-import { createPanelEngine } from "@squaredlemons/canvas-panels/core";
+import { createPanelEngine } from "@squared-lemons-ltd/canvas-panels/core";
 import {
   type CanvasNavigationState,
   seedCanvasNavigation,
   useCanvasNavigationSync,
-} from "@squaredlemons/canvas-panels/next";
+} from "@squared-lemons-ltd/canvas-panels/next";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useCallback, useState } from "react";
 import { toast } from "sonner";

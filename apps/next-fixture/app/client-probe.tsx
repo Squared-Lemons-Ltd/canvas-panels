@@ -1,12 +1,12 @@
 "use client";
 
-import * as editor from "@squaredlemons/canvas-panels/extensions/editor";
-import * as nextAdapter from "@squaredlemons/canvas-panels/next";
-import * as overlay from "@squaredlemons/canvas-panels/overlay";
-import * as canvasReact from "@squaredlemons/canvas-panels/react";
-import * as resources from "@squaredlemons/canvas-panels/extensions/resources";
-import * as testing from "@squaredlemons/canvas-panels/testing";
-import * as ui from "@squaredlemons/canvas-panels/ui";
+import * as editor from "@squared-lemons-ltd/canvas-panels/extensions/editor";
+import * as nextAdapter from "@squared-lemons-ltd/canvas-panels/next";
+import * as overlay from "@squared-lemons-ltd/canvas-panels/overlay";
+import * as canvasReact from "@squared-lemons-ltd/canvas-panels/react";
+import * as resources from "@squared-lemons-ltd/canvas-panels/extensions/resources";
+import * as testing from "@squared-lemons-ltd/canvas-panels/testing";
+import * as ui from "@squared-lemons-ltd/canvas-panels/ui";
 
 export function ClientProbe() {
   const entrypoints = [

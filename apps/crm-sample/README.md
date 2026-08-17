@@ -236,7 +236,7 @@ accident**. A consumer has to say what they want explicitly.
 
 ### The finding
 
-`@squaredlemons/canvas-panels/styles.css` puts everything it ships inside one
+`@squared-lemons-ltd/canvas-panels/styles.css` puts everything it ships inside one
 `@layer canvas-panels`. Tailwind v4 puts everything it generates inside `theme`,
 `base`, `components` and `utilities`. Nothing in either stylesheet states how
 the two sets relate, so the relationship falls out of **source order**, because
@@ -262,7 +262,7 @@ imports):
 @layer theme, base, canvas-panels, components, utilities;
 
 @import "tailwindcss";
-@import "@squaredlemons/canvas-panels/styles.css";
+@import "@squared-lemons-ltd/canvas-panels/styles.css";
 ```
 
 That places the Canvas above Tailwind's preflight and below anything the
@@ -647,7 +647,7 @@ quietly does nothing is the worst of both.
 - **A descriptor migration.** `metric` is at version 2. Version 1 spelled the
   field `metric`; version 2 spells it `metricId`. Nothing writes the old shape
   any more, so the *Open a version 1 link* button carries an address built with
-  `buildNavigationDocument` from `@squaredlemons/canvas-panels/testing` — which
+  `buildNavigationDocument` from `@squared-lemons-ltd/canvas-panels/testing` — which
   the package's own README calls the only way to exercise a migration from
   outside, since an Engine can only ever encode the current version. Opening it
   reconstructs the stack and the address in the bar silently becomes a version 2

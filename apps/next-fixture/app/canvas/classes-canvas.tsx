@@ -1,12 +1,12 @@
 "use client";
 
-import { createPanelEngine } from "@squaredlemons/canvas-panels/core";
+import { createPanelEngine } from "@squared-lemons-ltd/canvas-panels/core";
 import {
   type CanvasNavigationState,
   seedCanvasNavigation,
   useCanvasNavigationSync,
-} from "@squaredlemons/canvas-panels/next";
-import { createCanvasModule } from "@squaredlemons/canvas-panels/ui";
+} from "@squared-lemons-ltd/canvas-panels/next";
+import { createCanvasModule } from "@squared-lemons-ltd/canvas-panels/ui";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useState } from "react";
 

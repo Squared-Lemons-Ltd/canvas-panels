@@ -1,8 +1,8 @@
 # Private package delivery
 
-`@squaredlemons/canvas-panels` is published restricted on the npm registry, under the `@squaredlemons` scope. This repository contains no npm credential of any kind: the release workflow authenticates each run through OIDC trusted publishing, and nothing else in the repository can publish.
+`@squared-lemons-ltd/canvas-panels` is published privately to **GitHub Packages**, at `https://npm.pkg.github.com`, from this repository. This repository stores no publishing credential: the release workflow authenticates with the `GITHUB_TOKEN` that GitHub mints for that run and expires when the job ends, and nothing else in the repository can publish.
 
-**Nothing has been published yet.** `0.1.0` is built, gated, and recorded in [`release-evidence.md`](./release-evidence.md); what it is waiting for is the one step below that npm cannot delegate to a workflow.
+**Nothing has been published yet.** `0.1.0` is built, gated, and recorded in [`release-evidence.md`](./release-evidence.md), and it is the release workflow's to publish.
 
 Everything below the "Release runbook" heading describes the one authorized path from a verified commit to a published version.
 
@@ -22,48 +22,34 @@ Repository fixtures exercise the same package exports through the pnpm workspace
 pnpm build
 ```
 
-## npm registry status
+## Why GitHub Packages, and what it cost
 
-Checked on 7 August 2026:
+The original decision, in [#10](https://github.com/Squared-Lemons-Ltd/canvas-panels/issues/10), was the public npm registry under a restricted `@squaredlemons` scope, chosen over GitHub Packages to keep the agreed scope name and to spare consumers a GitHub token in their `.npmrc`.
 
-- `npm whoami` returns `jonathangill`.
-- The npm profile has a verified email address and two-factor authentication set to `auth-and-writes`.
-- `npm org ls squaredlemons --json` confirms that `jonathangill` owns the `squaredlemons` organization.
-- `npm team ls squaredlemons:developers --json` confirms that `jonathangill` belongs to the default developers team.
-- `npm access list packages squaredlemons --json` succeeds and currently returns an empty package list.
-- An authenticated lookup of `@squaredlemons/canvas-panels` returns `E404`. Because the organization owner can see its private packages, this confirms that the intended package name has not been published within the scope.
+That decision was reversed on 16 August 2026, before anything was published, when the first `npm publish` was refused:
 
-The npm CLI does not expose the organization's billing plan. The organization owner confirmed on 7 August 2026 that the **Unlimited private packages** plan is active. No placeholder package was published to reserve the name.
-
-Reverify the access path without printing credentials:
-
-```sh
-npm whoami
-npm org ls squaredlemons --json
-npm team ls squaredlemons:developers --json
-npm access list packages squaredlemons --json
-npm view @squaredlemons/canvas-panels name version --json
+```
+402 Payment Required — You must sign up for private packages
 ```
 
-The final command should continue to return `E404` until the first approved release.
+npm sells private packages under a *personal* scope and under an *organization* scope as two separate paid plans. `@squaredlemons` is an organization, so a personal subscription does not cover it. With no consumers and no published version, the cheapest moment to change registry was that one, and GitHub Packages hosts private packages for a private repository under the plan the repository is already on.
 
-## Trusted publishing route
+Two consequences, both accepted deliberately:
 
-npm's trusted-publishing documentation supports GitHub Actions through OIDC. Trusted publishers are configured in an existing package's settings, so they cannot be registered before the first real package version exists. When the complete Package Gate authorizes that release:
+- **The scope is not a choice.** GitHub Packages resolves a package by scope and requires that scope to be the repository owner, so the package is `@squared-lemons-ltd/canvas-panels` — `Squared-Lemons-Ltd`, lowercased. Renaming the GitHub organization would rename the package with it, and vice versa. Nothing else could have kept `@squaredlemons`.
+- **Consumers authenticate to GitHub, not to npm.** Every consuming application, and every CI job of every consuming application, needs a token with `read:packages` in its `.npmrc` before `pnpm install` resolves the scope. See "Installation" in the package README.
 
-1. Bootstrap the first approved restricted release from an organization owner's authenticated local npm session with write-protected 2FA; do not create an automation token.
-2. Add a trusted publisher in the new package's npm settings for GitHub organization `Squared-Lemons-Ltd`, repository `canvas-panels`, and the exact release workflow filename.
-3. Use a GitHub-hosted runner with `permissions: id-token: write` and `contents: read`.
-4. Configure `actions/setup-node` for `https://registry.npmjs.org`.
-5. Install private dependencies with a separate read-only token if needed; do not use it for publishing.
-6. Run the complete Package Gate before every `npm publish`.
-7. Publish subsequent releases with OIDC and no long-lived publish token.
+One thing got simpler. npm's trusted publishing had to be registered against a package that already existed, so the first version could never come from CI and had to be published by hand from an owner's session. GitHub Packages authenticates the workflow run itself, so **the first release is an ordinary release** — there is no bootstrap step and no human publish.
 
-The normal CI workflow deliberately has only `contents: read` and contains no publishing command. `.github/workflows/release.yml` is the only workflow that publishes; it runs on `main` only, holds `id-token: write`, and carries no `NODE_AUTH_TOKEN` or `NPM_TOKEN`. The contract suite asserts all of that, and fails if a second workflow acquires a publishing command.
+## The publishing credential
 
-Because this is a private GitHub repository, npm provenance attestations are not supported. `publishConfig.provenance` is explicitly `false`; this does not prevent OIDC trusted publishing.
+`.github/workflows/release.yml` is the only workflow that publishes. It runs on `main` only, and the job that publishes holds `packages: write` and reads exactly one secret: `GITHUB_TOKEN`.
 
-Primary reference: [Trusted publishing for npm packages](https://docs.npmjs.com/trusted-publishers/), reviewed 7 August 2026.
+That token is not stored anywhere. GitHub mints it for the run, scopes it to the permissions the job declares, and expires it when the job finishes — so there is no publishing credential to leak, to rotate, or to find in a settings page. The contract suite asserts that the workflow reads no other secret, that no second workflow acquires a publishing command, and that the ordinary CI workflow keeps `contents: read` and publishes nothing.
+
+GitHub Packages does not serve npm provenance attestations, so `publishConfig.provenance` stays `false`. The integrity recorded for each release in [`release-evidence.md`](./release-evidence.md) is what stands in its place: it is reproducible from the source commit by anyone, which is the property provenance would otherwise assert on the registry's behalf.
+
+Primary reference: [Working with the npm registry](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-npm-registry), reviewed 16 August 2026.
 
 ## Release runbook
 
@@ -92,7 +78,7 @@ pnpm exec changeset pre enter next   # commit .changeset/pre.json
 pnpm exec changeset pre exit         # commit; the next release goes to `latest`
 ```
 
-While `.changeset/pre.json` exists, every version the workflow produces is a prerelease and every publish is tagged `next`. A consumer asking for `@squaredlemons/canvas-panels` without a version never resolves one, because npm resolves the `latest` tag and a semver range never matches a prerelease unless the range names one.
+While `.changeset/pre.json` exists, every version the workflow produces is a prerelease and every publish is tagged `next`. A consumer asking for `@squared-lemons-ltd/canvas-panels` without a version never resolves one, because npm resolves the `latest` tag and a semver range never matches a prerelease unless the range names one.
 
 ### Promoting a release candidate
 
@@ -100,44 +86,54 @@ A candidate is promoted by moving a tag, never by building again. The artifact t
 
 The version published is the final one — `1.0.0`, not `1.0.0-rc.1` — and it reaches `next` first. That is the whole point: a separate `rc` that is later rebuilt as `1.0.0` is two artifacts, and only one of them was ever verified.
 
-Getting there needs one deliberate step, because the ordinary path does not do it. Out of pre mode `changeset publish` tags whatever it publishes `latest` immediately, so exiting pre mode and merging the version pull request would put `1.0.0` straight into every consumer's range with nothing between. The candidate is published with an explicit tag instead:
+Getting there needs one deliberate step, because the ordinary path does not do it. Out of pre mode `changeset publish` tags whatever it publishes `latest` immediately, so exiting pre mode and merging the version pull request would put `1.0.0` straight into every consumer's range with nothing between. The candidate is published with an explicit tag instead — from a maintainer's own machine, with the release job disabled while the version commit lands:
 
 ```sh
 pnpm exec changeset pre exit      # commit; the next version is 1.0.0, not 1.0.0-next.n
-# merge the Version Packages pull request, but do not let the workflow publish it:
-#   land the exit and the version bump while the release job is disabled, or
-#   publish from the bootstrap path below with the tag named explicitly.
+# land the exit and the version bump with the release workflow disabled, then:
 pnpm gate && pnpm exec changeset publish --tag next
 ```
 
-Now verify what is on the registry: install `@squaredlemons/canvas-panels@next` into the Proof Consumer, run that application's own gate, and check the integrity against `release-evidence.md`. Then promote the version already there:
+Publishing by hand needs a GitHub token with `write:packages` in your own `.npmrc`; see "Installing from GitHub Packages" below and add `write:packages` to the scopes. Re-enable the release workflow as soon as the promotion is done — it is the ordinary path, and a repository that stays in the manual state loses the guarantee that the gate ran.
+
+Now verify what is on the registry: install `@squared-lemons-ltd/canvas-panels@next` into the Proof Consumer, run that application's own gate, and check the integrity against `release-evidence.md`. Then promote the version already there:
 
 ```sh
-npm dist-tag add @squaredlemons/canvas-panels@1.0.0 latest
+npm dist-tag add @squared-lemons-ltd/canvas-panels@1.0.0 latest
 ```
 
 `npm dist-tag add` touches no bytes. The integrity recorded before promotion is the integrity after it, which is what makes "the already verified artifact" a checkable claim rather than a hope.
 
 If the candidate fails verification, leave `latest` where it is. Nothing has to be undone: a version no consumer's range resolves is a version no consumer has. Deprecate it with a sentence naming its replacement and release forward.
 
-### The first release, which is different
+### The first release is not different
 
-npm registers a trusted publisher against a package that already exists, so the first version cannot come from the workflow:
+Worth stating plainly, because the previous registry made it a whole procedure. GitHub Packages authenticates the workflow run itself, so `0.1.0` publishes exactly the way `0.2.0` will: land it on `main`, let the gate pass, let the workflow publish. There is no bootstrap, no publish from a laptop, and no credential to create.
 
-1. Run `pnpm gate` on the exact commit to be released. It must pass.
-2. Publish that commit from an organization owner's authenticated local npm session with write-protected 2FA. Do not create an automation token.
-3. Add the trusted publisher in the new package's npm settings: GitHub organization `Squared-Lemons-Ltd`, repository `canvas-panels`, workflow `release.yml`.
-4. Confirm with `npm access list packages squaredlemons --json` that the package is `restricted`.
-5. Every release after this one goes through the workflow, and no long-lived publish token is ever created.
+### Installing from GitHub Packages
+
+A consumer authenticates to GitHub rather than to npm. In the consuming repository:
+
+```ini
+# .npmrc
+@squared-lemons-ltd:registry=https://npm.pkg.github.com
+//npm.pkg.github.com/:_authToken=${GITHUB_PACKAGES_TOKEN}
+```
+
+The token is a GitHub personal access token — classic, with the `read:packages` scope, and nothing else — or, inside a GitHub Actions job in the same organization, the run's own `GITHUB_TOKEN` with `permissions: packages: read`. A fine-grained token works too, given read access to this repository's packages.
+
+Only the scope line is required in the repository; keep the token itself in the environment rather than committed.
 
 ### Rolling back a release
 
-npm versions are immutable and are not unpublished. A bad release is superseded:
+A published version is superseded, not withdrawn:
 
 ```sh
-npm dist-tag add @squaredlemons/canvas-panels@<previous-version> latest
+npm dist-tag add @squared-lemons-ltd/canvas-panels@<previous-version> latest
 ```
 
-That moves consumers installing by tag back to the previous version immediately. Then land the fix and release forward. `npm deprecate` the bad version with a sentence naming its replacement; deprecating is reversible, unpublishing is not, and after 72 hours unpublishing is not available at all.
+That moves every consumer installing by tag back to the previous version immediately. Then land the fix and release forward, and `npm deprecate` the bad version with a sentence naming its replacement — deprecating is reversible, deleting is not.
+
+GitHub Packages does allow deleting a version outright, which npm's registry mostly does not. **Do not.** A deleted version breaks every lockfile that pinned it, including ones in repositories nobody is looking at today, and the deletion is not reversible. Moving the tag achieves the same thing for anyone installing by range, and costs nothing to anyone who pinned.
 
 Consumers roll back with a dependency change and nothing else — the package holds no persistent state. See "Rollback" in the package README for the two things to check when rolling back across a Navigation Document change.

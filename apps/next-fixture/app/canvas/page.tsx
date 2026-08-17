@@ -1,4 +1,4 @@
-import { readCanvasNavigationState } from "@squaredlemons/canvas-panels/next/server";
+import { readCanvasNavigationState } from "@squared-lemons-ltd/canvas-panels/next/server";
 
 import { ClassesCanvas } from "./classes-canvas";
 

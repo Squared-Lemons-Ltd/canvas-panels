@@ -19,7 +19,7 @@
 
 @import "tailwindcss";
 @import "tw-animate-css";
-@import "@squaredlemons/canvas-panels/styles.css";
+@import "@squared-lemons-ltd/canvas-panels/styles.css";
 
 @source "../app/**/*.{ts,tsx}";
 @source "../components/**/*.{ts,tsx}";

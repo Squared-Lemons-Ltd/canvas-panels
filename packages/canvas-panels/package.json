@@ -1,5 +1,5 @@
 {
-  "name": "@squaredlemons/canvas-panels",
+  "name": "@squared-lemons-ltd/canvas-panels",
   "version": "0.1.0",
   "description": "Reusable Canvas Panels interaction framework for Squared Lemons applications",
   "license": "UNLICENSED",
@@ -76,6 +76,7 @@
     }
   },
   "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
     "access": "restricted",
     "provenance": false
   }

@@ -1,6 +1,8 @@
 # Release evidence
 
-One record per published version of `@squaredlemons/canvas-panels`, so that "which artifact is in production, and what was verified about it?" is answerable from this repository without asking npm, and so that a version can be matched to the exact source that produced it.
+One record per published version of `@squared-lemons-ltd/canvas-panels`, so that "which artifact is in production, and what was verified about it?" is answerable from this repository without asking the registry, and so that a version can be matched to the exact source that produced it.
+
+It carries more weight here than it would elsewhere. GitHub Packages serves no provenance attestation, so nothing on the registry ties a published tarball back to a commit — this file is that tie, and it is checkable because the tarball is reproducible from the source.
 
 Every release records the immutable version, the tarball integrity, the provenance position, the source commit, the workflow run, and the verification that was performed. A release with a missing field is not a released version — and a row whose registry fields are still marked *intended* records a verified artifact, not a published one.
 
@@ -17,22 +19,25 @@ cd packages/canvas-panels && npm pack --dry-run --json
 
 ## How to verify a published version from the registry
 
+Reading a private package needs a GitHub token with `read:packages`; the commands below assume it is in `GITHUB_PACKAGES_TOKEN` and the scope is mapped as described in [`private-package.md`](./private-package.md#installing-from-github-packages).
+
 ```sh
-npm view @squaredlemons/canvas-panels@<version> dist.integrity dist.shasum gitHead --json
-npm dist-tag ls @squaredlemons/canvas-panels
+npm view @squared-lemons-ltd/canvas-panels@<version> dist.integrity dist.shasum gitHead --json
+npm dist-tag ls @squared-lemons-ltd/canvas-panels
 ```
 
 The `dist.integrity` the registry reports must equal the row below. Then install it into a clean consumer that is not this workspace:
 
 ```sh
 mkdir /tmp/canvas-smoke && cd /tmp/canvas-smoke && npm init -y
-npm add @squaredlemons/canvas-panels@<version> react@^19 react-dom@^19
+printf '@squared-lemons-ltd:registry=https://npm.pkg.github.com\n//npm.pkg.github.com/:_authToken=%s\n' "$GITHUB_PACKAGES_TOKEN" > .npmrc
+npm add @squared-lemons-ltd/canvas-panels@<version> react@^19 react-dom@^19
 node --input-type=module -e '
-  import { createPanelEngine, defineRootPanel } from "@squaredlemons/canvas-panels/core";
+  import { createPanelEngine, defineRootPanel } from "@squared-lemons-ltd/canvas-panels/core";
   import { createRequire } from "node:module";
   const engine = createPanelEngine({ root: defineRootPanel({ kind: "root", title: "Root" }), panels: [] });
   console.log(engine.getSnapshot().panels.length === 1 ? "core ok" : "core broken");
-  console.log(createRequire(import.meta.url).resolve("@squaredlemons/canvas-panels/styles.css"));
+  console.log(createRequire(import.meta.url).resolve("@squared-lemons-ltd/canvas-panels/styles.css"));
 '
 ```
 
@@ -45,29 +50,32 @@ The first release: the package's whole history to date, versioned out of thirtee
 | Field | Value |
 | --- | --- |
 | Version | `0.1.0` |
-| Tarball | `squaredlemons-canvas-panels-0.1.0.tgz` |
-| Integrity | `sha512-D2bqJ7ZeUMY6E1OBUkbUY6ryH4RYcyjIyFWlb5rY7zacIzYUTzZgWttCO9wIWoG0GFsrk2JCYFULVZIqH5P0rw==` |
-| Shasum | `00badf5fa8e810da51751d90781d29d5c627f215` |
-| Packed size | 129,594 bytes, 51 entries, 583,246 bytes unpacked |
-| Provenance | Not available. The repository is private, so npm cannot attest; `publishConfig.provenance` is `false` by decision, not by omission. |
-| Access | `restricted`, scope `@squaredlemons` — *intended; not yet asserted by the registry* |
+| Tarball | `squared-lemons-ltd-canvas-panels-0.1.0.tgz` |
+| Integrity | `sha512-wOm2tSNPGOg5q3NzNOfWYdUwEGzUn11TJvqyFBGdRsIAhhoAcZsG7A/GXHHUYaJYmtFLk7hBICQTMUKQMbbX+g==` |
+| Shasum | `370a509802933975ef0d1b68c3eebd0167c87136` |
+| Packed size | 129,750 bytes, 51 entries, 583,719 bytes unpacked |
+| Registry | GitHub Packages, `https://npm.pkg.github.com`, from `Squared-Lemons-Ltd/canvas-panels` |
+| Provenance | Not available. GitHub Packages serves no npm attestation; `publishConfig.provenance` is `false` by decision, not by omission. The reproducible integrity above stands in its place. |
+| Visibility | Private, following the repository — *intended; not yet asserted by the registry* |
 | dist-tag | `latest` on publication — *not yet held; nothing is on the registry* |
 | Source commit | `f3349bbd10e4ea265f47e7e3061d0694c9240c19` |
-| Workflow run | None. The first version is published by hand — see "Publication status" |
+| Workflow run | *pending — see "Publication status"* |
 | Toolchain | Node 22.20.0, npm 11.12.1, pnpm 9.15.9 |
-| Gate | `pnpm gate` passed: 425 contract tests, 3 packed-consumer tests, 0 failures |
+| Gate | `pnpm gate` passed: 426 contract tests, 3 packed-consumer tests, 0 failures |
 
 ### What the gate verified
 
 - Formatting, linting, and the dependency-boundary check across the workspace.
 - Typechecking of the package, every fixture application, and the public type tests.
-- 425 contract tests, including the frozen export inventory, the frozen result discriminants, the complete token and integration-attribute tables, and every accepted finding from the Meridian consumer proof.
+- 426 contract tests, including the frozen export inventory, the frozen result discriminants, the complete token and integration-attribute tables, and every accepted finding from the Meridian consumer proof.
 - The build, and a clean pack-and-install of both a React 19 and a Next.js consumer from the tarball: every subpath imported, the stylesheet resolved, a Next production build completed, a server render hydrated with matching Panel identities, and the artifact inspected for source leakage, secret material, duplicate React copies, and reachable deep imports.
 
 ### Publication status
 
-**Not yet published.** Everything that does not require a credential is done and verified; what remains is the one step npm cannot delegate.
+**Not yet published**, and waiting on nothing but the workflow run that publishes it.
 
-The first version of a package cannot come from the release workflow, because npm registers a trusted publisher against a package that already exists. So `0.1.0` is published once, by hand, from an organization owner's authenticated npm session with write-protected 2FA — the procedure in [`private-package.md`](./private-package.md#the-first-release-which-is-different) — after which the trusted publisher is registered for `Squared-Lemons-Ltd/canvas-panels` and `release.yml`, and no long-lived publish token is ever created.
+This version was first prepared for the public npm registry under `@squaredlemons/canvas-panels`. That publish was refused — `402 Payment Required`, because private packages under an *organization* scope need a paid org plan, which a personal subscription does not cover — and with nothing yet published and no consumers to break, the registry was changed to GitHub Packages rather than the plan. [`private-package.md`](./private-package.md#why-github-packages-and-what-it-cost) records that reversal, what it cost, and what it made simpler.
 
-When that is done, replace the two *intended* fields above with what the registry actually reports, and — for `0.1.1` onward, which the workflow publishes — record the workflow run URL. Until then this row records a verified artifact, not a published one, and should be read as neither less nor more than that.
+The renamed `0.1.0` has never existed on any registry: the npm-scoped one was never accepted, and the numbers in the table above are the GitHub Packages artifact.
+
+When the workflow publishes it, replace the two *intended* fields above with what the registry actually reports and record the run URL. Until then this row records a verified artifact, not a published one, and should be read as neither less nor more than that.

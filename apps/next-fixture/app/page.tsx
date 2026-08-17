@@ -1,5 +1,5 @@
-import * as core from "@squaredlemons/canvas-panels/core";
-import * as nextServer from "@squaredlemons/canvas-panels/next/server";
+import * as core from "@squared-lemons-ltd/canvas-panels/core";
+import * as nextServer from "@squared-lemons-ltd/canvas-panels/next/server";
 import { ClientProbe } from "./client-probe";
 
 export default function Page() {

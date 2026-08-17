@@ -78,9 +78,9 @@ for (const file of await collectTypeScriptFiles(sourceRoot)) {
   const source = await readFile(file, "utf8");
   for (const specifier of importSpecifiers(source)) {
     let importedLayer;
-    if (specifier.startsWith("@squaredlemons/canvas-panels/")) {
+    if (specifier.startsWith("@squared-lemons-ltd/canvas-panels/")) {
       importedLayer = layerForPackageSubpath(
-        specifier.slice("@squaredlemons/canvas-panels/".length),
+        specifier.slice("@squared-lemons-ltd/canvas-panels/".length),
       );
     } else {
       if (!specifier.startsWith(".")) continue;

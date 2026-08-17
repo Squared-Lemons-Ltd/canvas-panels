@@ -1,4 +1,4 @@
-import "@squaredlemons/canvas-panels/styles.css";
+import "@squared-lemons-ltd/canvas-panels/styles.css";
 import type { ReactNode } from "react";
 
 export default function RootLayout({

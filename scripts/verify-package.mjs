@@ -55,7 +55,10 @@ async function writeJson(path, value) {
  */
 async function assertInstalledSubpathsStayOptional(consumerDirectory) {
   const reached = await optionalSubpathsReachedFromBaseEntryPoints(
-    join(consumerDirectory, "node_modules/@squaredlemons/canvas-panels/dist"),
+    join(
+      consumerDirectory,
+      "node_modules/@squared-lemons-ltd/canvas-panels/dist",
+    ),
   );
 
   for (const [entry, optional] of reached) {
@@ -164,11 +167,11 @@ async function assertInstalledArtifactShape(installedDirectory) {
  */
 async function assertPrivateDeepImportsAreRefused(consumerDirectory) {
   const privatePaths = [
-    "@squaredlemons/canvas-panels/dist/core/index.js",
-    "@squaredlemons/canvas-panels/dist/ui/index.js",
-    "@squaredlemons/canvas-panels/package.json",
-    "@squaredlemons/canvas-panels/src/core/index.ts",
-    "@squaredlemons/canvas-panels",
+    "@squared-lemons-ltd/canvas-panels/dist/core/index.js",
+    "@squared-lemons-ltd/canvas-panels/dist/ui/index.js",
+    "@squared-lemons-ltd/canvas-panels/package.json",
+    "@squared-lemons-ltd/canvas-panels/src/core/index.ts",
+    "@squared-lemons-ltd/canvas-panels",
   ];
   await writeFile(
     join(consumerDirectory, "deep-import-probe.mjs"),
@@ -283,14 +286,16 @@ async function assertDocumentationIsComplete(installedDirectory, exports) {
   // declared export, and every declared export must be documented somewhere.
   const declared = new Set(
     Object.keys(exports).map((subpath) =>
-      subpath.replace(/^\.\//, "@squaredlemons/canvas-panels/"),
+      subpath.replace(/^\.\//, "@squared-lemons-ltd/canvas-panels/"),
     ),
   );
   // Only subpath imports are claims about the exports map. Naming the package
   // itself — in a dependency entry, or in prose — is not.
   const documented = new Set(
     [
-      ...readme.matchAll(/["'](@squaredlemons\/canvas-panels\/[^"']+)["']/g),
+      ...readme.matchAll(
+        /["'](@squared-lemons-ltd\/canvas-panels\/[^"']+)["']/g,
+      ),
     ].map(([, specifier]) => specifier),
   );
 
@@ -317,7 +322,7 @@ async function assertTarballLockfile(consumerDirectory) {
     await readFile(join(consumerDirectory, "package-lock.json"), "utf8"),
   );
   const installed =
-    lockfile.packages?.["node_modules/@squaredlemons/canvas-panels"];
+    lockfile.packages?.["node_modules/@squared-lemons-ltd/canvas-panels"];
 
   if (!installed?.resolved?.endsWith(".tgz") || !installed.integrity) {
     throw new Error(
@@ -329,7 +334,7 @@ async function assertTarballLockfile(consumerDirectory) {
 try {
   await run(
     "pnpm",
-    ["--filter", "@squaredlemons/canvas-panels", "build"],
+    ["--filter", "@squared-lemons-ltd/canvas-panels", "build"],
     root,
   );
 
@@ -382,7 +387,7 @@ try {
     private: true,
     type: "module",
     dependencies: {
-      "@squaredlemons/canvas-panels": tarballDependency,
+      "@squared-lemons-ltd/canvas-panels": tarballDependency,
       react: "19.2.8",
       "react-dom": "19.2.8",
     },
@@ -395,14 +400,14 @@ try {
     `import { readFile } from "node:fs/promises";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { createPanelEngine, definePanel, defineRootPanel } from "@squaredlemons/canvas-panels/core";
-import { createPanelEditor, editorGuardMessages, resolveEditorGuard } from "@squaredlemons/canvas-panels/extensions/editor";
-import { createPanelResource, createResourceExchange, resolveResourceDeferral } from "@squaredlemons/canvas-panels/extensions/resources";
-import { createOverlayWorkspace, defineOverlayWorkspace, overlayNavigationParameterPrefix, overlayPresentation } from "@squaredlemons/canvas-panels/overlay";
-import { buildNavigationDocument, buildPanelStack, createTestClock, createTestFocusTarget, createTestHistory, createTestIdentities, createTestLifecycle, createTestRestore, createTestViewport } from "@squaredlemons/canvas-panels/testing";
-import { canvasBreakpointQueries, createCanvasModule, defineCanvasContext } from "@squaredlemons/canvas-panels/ui";
+import { createPanelEngine, definePanel, defineRootPanel } from "@squared-lemons-ltd/canvas-panels/core";
+import { createPanelEditor, editorGuardMessages, resolveEditorGuard } from "@squared-lemons-ltd/canvas-panels/extensions/editor";
+import { createPanelResource, createResourceExchange, resolveResourceDeferral } from "@squared-lemons-ltd/canvas-panels/extensions/resources";
+import { createOverlayWorkspace, defineOverlayWorkspace, overlayNavigationParameterPrefix, overlayPresentation } from "@squared-lemons-ltd/canvas-panels/overlay";
+import { buildNavigationDocument, buildPanelStack, createTestClock, createTestFocusTarget, createTestHistory, createTestIdentities, createTestLifecycle, createTestRestore, createTestViewport } from "@squared-lemons-ltd/canvas-panels/testing";
+import { canvasBreakpointQueries, createCanvasModule, defineCanvasContext } from "@squared-lemons-ltd/canvas-panels/ui";
 
-await import("@squaredlemons/canvas-panels/react");
+await import("@squared-lemons-ltd/canvas-panels/react");
 
 const root = defineRootPanel({ kind: "classes", title: "Classes" });
 const classPanel = definePanel({
@@ -581,7 +586,7 @@ const closedMarkup = renderCanvas();
 if (!closedMarkup.includes("Classes")) throw new Error("packed Root Panel was not retained");
 if (closedMarkup.includes("Class B")) throw new Error("packed Class Panel remained after close");
 
-const stylesheet = await readFile(new URL(import.meta.resolve("@squaredlemons/canvas-panels/styles.css")), "utf8");
+const stylesheet = await readFile(new URL(import.meta.resolve("@squared-lemons-ltd/canvas-panels/styles.css")), "utf8");
 if (!stylesheet.includes("@layer canvas-panels")) throw new Error("missing Canvas stylesheet layer");
 console.log("verified packed React Root-to-Class-to-Learner consumer");
 
@@ -862,8 +867,8 @@ console.log("verified packed testing tools consumer");
     `import { act, createElement } from "react";
 import { renderToString } from "react-dom/server";
 import { JSDOM } from "jsdom";
-import { createPanelEngine, definePanel, defineRootPanel } from "@squaredlemons/canvas-panels/core";
-import { createCanvasModule } from "@squaredlemons/canvas-panels/ui";
+import { createPanelEngine, definePanel, defineRootPanel } from "@squared-lemons-ltd/canvas-panels/core";
+import { createCanvasModule } from "@squared-lemons-ltd/canvas-panels/ui";
 
 const root = defineRootPanel({ kind: "classes", title: "Classes" });
 const classPanel = definePanel({ kind: "class", title: ({ name }) => name });
@@ -953,7 +958,7 @@ console.log("verified packed server render hydrates with matching Panel identiti
     "verified packed base entry points leave the optional subpaths optional\n",
   );
   const scanned = await assertNoSecretMaterial(
-    join(reactConsumer, "node_modules/@squaredlemons/canvas-panels"),
+    join(reactConsumer, "node_modules/@squared-lemons-ltd/canvas-panels"),
   );
   process.stdout.write(
     `verified packed artifact carries no secret material across ${scanned} files\n`,
@@ -961,11 +966,11 @@ console.log("verified packed server render hydrates with matching Panel identiti
   await assertSingleReactInstallation(reactConsumer);
   process.stdout.write("verified packed consumer resolves a single React\n");
   await assertInstalledArtifactShape(
-    join(reactConsumer, "node_modules/@squaredlemons/canvas-panels"),
+    join(reactConsumer, "node_modules/@squared-lemons-ltd/canvas-panels"),
   );
   await assertPrivateDeepImportsAreRefused(reactConsumer);
   await assertDocumentationIsComplete(
-    join(reactConsumer, "node_modules/@squaredlemons/canvas-panels"),
+    join(reactConsumer, "node_modules/@squared-lemons-ltd/canvas-panels"),
     packageJson.exports,
   );
   const reactResult = await run(process.execPath, ["probe.mjs"], reactConsumer);
@@ -984,7 +989,7 @@ console.log("verified packed server render hydrates with matching Panel identiti
     type: "module",
     scripts: { build: "next build" },
     dependencies: {
-      "@squaredlemons/canvas-panels": tarballDependency,
+      "@squared-lemons-ltd/canvas-panels": tarballDependency,
       next: "16.3.0",
       react: "19.2.8",
       "react-dom": "19.2.8",
@@ -1023,7 +1028,7 @@ console.log("verified packed server render hydrates with matching Panel identiti
   await mkdir(join(nextConsumer, "app"), { recursive: true });
   await writeFile(
     join(nextConsumer, "app/layout.tsx"),
-    `import "@squaredlemons/canvas-panels/styles.css";
+    `import "@squared-lemons-ltd/canvas-panels/styles.css";
 import type { ReactNode } from "react";
 
 export default function Layout({ children }: { children: ReactNode }) {
@@ -1035,13 +1040,13 @@ export default function Layout({ children }: { children: ReactNode }) {
     join(nextConsumer, "app/client-probe.tsx"),
     `"use client";
 
-import * as editor from "@squaredlemons/canvas-panels/extensions/editor";
-import * as nextAdapter from "@squaredlemons/canvas-panels/next";
-import * as overlay from "@squaredlemons/canvas-panels/overlay";
-import * as canvasReact from "@squaredlemons/canvas-panels/react";
-import * as resources from "@squaredlemons/canvas-panels/extensions/resources";
-import * as testing from "@squaredlemons/canvas-panels/testing";
-import * as ui from "@squaredlemons/canvas-panels/ui";
+import * as editor from "@squared-lemons-ltd/canvas-panels/extensions/editor";
+import * as nextAdapter from "@squared-lemons-ltd/canvas-panels/next";
+import * as overlay from "@squared-lemons-ltd/canvas-panels/overlay";
+import * as canvasReact from "@squared-lemons-ltd/canvas-panels/react";
+import * as resources from "@squared-lemons-ltd/canvas-panels/extensions/resources";
+import * as testing from "@squared-lemons-ltd/canvas-panels/testing";
+import * as ui from "@squared-lemons-ltd/canvas-panels/ui";
 
 export function ClientProbe() {
   const entries = [editor, nextAdapter, overlay, canvasReact, resources, testing, ui];
@@ -1051,8 +1056,8 @@ export function ClientProbe() {
   );
   await writeFile(
     join(nextConsumer, "app/page.tsx"),
-    `import * as core from "@squaredlemons/canvas-panels/core";
-import * as nextServer from "@squaredlemons/canvas-panels/next/server";
+    `import * as core from "@squared-lemons-ltd/canvas-panels/core";
+import * as nextServer from "@squared-lemons-ltd/canvas-panels/next/server";
 import { ClientProbe } from "./client-probe";
 
 export default function Page() {

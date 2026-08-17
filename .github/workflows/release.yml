@@ -1,6 +1,6 @@
 name: Release
 
-# The only path that may publish @squaredlemons/canvas-panels.
+# The only path that may publish @squared-lemons-ltd/canvas-panels.
 #
 # It runs on `main` and nowhere else. There is deliberately no
 # `workflow_dispatch` here: a manual trigger can be aimed at any ref, which
@@ -9,10 +9,11 @@ name: Release
 # publishing job re-checks the ref anyway, so a trigger added later cannot
 # quietly widen it.
 #
-# The job that publishes holds no long-lived credential: npm authenticates the
-# run itself through OIDC trusted publishing, registered against this repository
-# and this workflow filename, so there is no token to leak and no token to
-# rotate.
+# The package is published to GitHub Packages, whose registry authenticates a
+# run with the automatic `GITHUB_TOKEN`: minted for this workflow run, scoped by
+# the `packages: write` permission below, and expired the moment the job ends.
+# No long-lived publishing credential exists anywhere in this repository, and
+# none is stored as a secret.
 #
 # Nothing is published without the complete Package Gate passing first. The gate
 # runs twice on purpose: once across the supported Node versions, and once more
@@ -69,8 +70,8 @@ jobs:
       contents: write
       # And opens the Version Packages pull request that reviews them.
       pull-requests: write
-      # The publish credential. Nothing else in this repository asks for it.
-      id-token: write
+      # The publish credential, and the only place it is granted.
+      packages: write
 
     steps:
       - name: Check out repository
@@ -86,12 +87,8 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-          registry-url: https://registry.npmjs.org
-
-      # Trusted publishing needs an npm new enough to exchange the OIDC token.
-      # The pinned floor is the version that introduced it.
-      - name: Install a publishing npm
-        run: npm install --global npm@^11.5.1
+          registry-url: https://npm.pkg.github.com
+          scope: "@squared-lemons-ltd"
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -105,6 +102,9 @@ jobs:
           title: "chore: version packages"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # No NODE_AUTH_TOKEN and no NPM_TOKEN. If OIDC cannot authenticate the
-          # run, the publish fails — it does not fall back to a secret.
+          # The registry credential is the same run-scoped token, which is what
+          # `actions/setup-node` wrote the .npmrc for. It is not a stored secret
+          # and it cannot outlive this job.
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # GitHub Packages does not serve npm provenance attestations.
           NPM_CONFIG_PROVENANCE: "false"

@@ -16,11 +16,11 @@
 import type {
   PanelInstanceRef,
   RestoreStackOutcome,
-} from "@squaredlemons/canvas-panels/core";
+} from "@squared-lemons-ltd/canvas-panels/core";
 import {
   type CanvasPanelRenderProps,
   createCanvasModule,
-} from "@squaredlemons/canvas-panels/ui";
+} from "@squared-lemons-ltd/canvas-panels/ui";
 import {
   ChevronsLeftIcon,
   HistoryIcon,

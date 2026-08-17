@@ -21,7 +21,7 @@
  *  what descriptors-are-ids buys, made visible.
  * ------------------------------------------------------------------------ */
 
-import type { PanelInstanceRef } from "@squaredlemons/canvas-panels/core";
+import type { PanelInstanceRef } from "@squared-lemons-ltd/canvas-panels/core";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { PipelineCanvas } from "./pipeline-canvas";

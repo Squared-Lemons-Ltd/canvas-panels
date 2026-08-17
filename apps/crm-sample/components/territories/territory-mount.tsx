@@ -10,18 +10,18 @@
  *  announcements it never makes would look like it did something.
  * ------------------------------------------------------------------------ */
 
-import { createPanelEngine } from "@squaredlemons/canvas-panels/core";
+import { createPanelEngine } from "@squared-lemons-ltd/canvas-panels/core";
 import {
   createResourceExchange,
   type ResourceInvalidation,
   ResourceExchangeProvider,
   useResourceSubscription,
-} from "@squaredlemons/canvas-panels/extensions/resources";
+} from "@squared-lemons-ltd/canvas-panels/extensions/resources";
 import {
   type CanvasNavigationState,
   seedCanvasNavigation,
   useCanvasNavigationSync,
-} from "@squaredlemons/canvas-panels/next";
+} from "@squared-lemons-ltd/canvas-panels/next";
 import { ArrowDownIcon, RadioTowerIcon } from "lucide-react";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useState } from "react";

@@ -1,12 +1,12 @@
 import {
   definePanel,
   defineRootPanel,
-} from "@squaredlemons/canvas-panels/core";
-import "@squaredlemons/canvas-panels/styles.css";
+} from "@squared-lemons-ltd/canvas-panels/core";
+import "@squared-lemons-ltd/canvas-panels/styles.css";
 import {
   type CanvasPanelRenderProps,
   createCanvasModule,
-} from "@squaredlemons/canvas-panels/ui";
+} from "@squared-lemons-ltd/canvas-panels/ui";
 import {
   createContext,
   type ReactNode,

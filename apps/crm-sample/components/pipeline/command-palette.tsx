@@ -22,15 +22,15 @@ import {
   createPanelEngine,
   definePanel,
   defineRootPanel,
-} from "@squaredlemons/canvas-panels/core";
+} from "@squared-lemons-ltd/canvas-panels/core";
 import {
   createOverlayWorkspace,
   defineOverlayWorkspace,
-} from "@squaredlemons/canvas-panels/overlay";
+} from "@squared-lemons-ltd/canvas-panels/overlay";
 import {
   type CanvasPanelRenderProps,
   createCanvasModule,
-} from "@squaredlemons/canvas-panels/ui";
+} from "@squared-lemons-ltd/canvas-panels/ui";
 import {
   BriefcaseIcon,
   BuildingIcon,

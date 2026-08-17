@@ -18,16 +18,16 @@
 import {
   createPanelEngine,
   type PanelEngineSnapshot,
-} from "@squaredlemons/canvas-panels/core";
+} from "@squared-lemons-ltd/canvas-panels/core";
 import {
   type CanvasNavigationState,
   seedCanvasNavigation,
   useCanvasNavigationSync,
-} from "@squaredlemons/canvas-panels/next";
+} from "@squared-lemons-ltd/canvas-panels/next";
 import {
   canvasAnnouncementTemplates,
   type PanelSizingBounds,
-} from "@squaredlemons/canvas-panels/ui";
+} from "@squared-lemons-ltd/canvas-panels/ui";
 import { usePathname, useSearchParams } from "next/navigation";
 import type { RefObject } from "react";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";

@@ -12,16 +12,16 @@
 import {
   createPanelEngine,
   type PanelEngineSnapshot,
-} from "@squaredlemons/canvas-panels/core";
+} from "@squared-lemons-ltd/canvas-panels/core";
 import {
   createResourceExchange,
   ResourceExchangeProvider,
-} from "@squaredlemons/canvas-panels/extensions/resources";
+} from "@squared-lemons-ltd/canvas-panels/extensions/resources";
 import {
   type CanvasNavigationState,
   seedCanvasNavigation,
   useCanvasNavigationSync,
-} from "@squaredlemons/canvas-panels/next";
+} from "@squared-lemons-ltd/canvas-panels/next";
 import { usePathname, useSearchParams } from "next/navigation";
 import type { RefObject } from "react";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";

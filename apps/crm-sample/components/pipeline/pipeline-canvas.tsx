@@ -14,15 +14,15 @@
 import {
   type EditorStatus,
   usePanelEditor,
-} from "@squaredlemons/canvas-panels/extensions/editor";
+} from "@squared-lemons-ltd/canvas-panels/extensions/editor";
 import {
   usePanelResource,
   useResourceExchange,
-} from "@squaredlemons/canvas-panels/extensions/resources";
+} from "@squared-lemons-ltd/canvas-panels/extensions/resources";
 import {
   type CanvasPanelRenderProps,
   createCanvasModule,
-} from "@squaredlemons/canvas-panels/ui";
+} from "@squared-lemons-ltd/canvas-panels/ui";
 import { ArrowRightIcon, UsersIcon } from "lucide-react";
 import {
   useEffect,

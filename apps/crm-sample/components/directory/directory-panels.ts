@@ -15,8 +15,8 @@ import {
   createPanelEngine,
   definePanel,
   defineRootPanel,
-} from "@squaredlemons/canvas-panels/core";
-import { applyCanvasNavigationParameter } from "@squaredlemons/canvas-panels/next/server";
+} from "@squared-lemons-ltd/canvas-panels/core";
+import { applyCanvasNavigationParameter } from "@squared-lemons-ltd/canvas-panels/next/server";
 
 import {
   contactsForCompany,
