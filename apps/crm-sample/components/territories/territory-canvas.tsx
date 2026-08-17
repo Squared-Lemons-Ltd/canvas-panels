@@ -26,11 +26,11 @@
 import {
   usePanelResource,
   useResourceExchange,
-} from "@squared-lemons-ltd/canvas-panels/extensions/resources";
+} from "@squaredlemons/canvas-panels/extensions/resources";
 import {
   type CanvasPanelRenderProps,
   createCanvasModule,
-} from "@squared-lemons-ltd/canvas-panels/ui";
+} from "@squaredlemons/canvas-panels/ui";
 import { ArrowDownIcon, RadioTowerIcon, RotateCwIcon } from "lucide-react";
 import { useRef, useState } from "react";
 import { toast } from "sonner";

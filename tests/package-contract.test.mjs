@@ -29,7 +29,7 @@ test("the private workspace declares the package and both clean-consumer fixture
   assert.match(workspaceRoot.packageManager, /^pnpm@/);
   assert.match(workspace, /packages\/\*/);
   assert.match(workspace, /apps\/\*/);
-  assert.equal(canvasPackage.name, "@squared-lemons-ltd/canvas-panels");
+  assert.equal(canvasPackage.name, "@squaredlemons/canvas-panels");
   // The workspace stays private; the package does not. `private: true` is what
   // npm refuses to publish, so the one package that is meant to be published
   // must not carry it — and every other workspace member must.
@@ -37,11 +37,11 @@ test("the private workspace declares the package and both clean-consumer fixture
   assert.equal(reactFixture.private, true);
   assert.equal(nextFixture.private, true);
   assert.equal(
-    reactFixture.dependencies["@squared-lemons-ltd/canvas-panels"],
+    reactFixture.dependencies["@squaredlemons/canvas-panels"],
     "workspace:*",
   );
   assert.equal(
-    nextFixture.dependencies["@squared-lemons-ltd/canvas-panels"],
+    nextFixture.dependencies["@squaredlemons/canvas-panels"],
     "workspace:*",
   );
 });
@@ -61,8 +61,11 @@ test("the package exposes only the approved ESM entry points and compiled styles
   ];
 
   assert.equal(canvasPackage.type, "module");
-  assert.equal(canvasPackage.publishConfig.access, "restricted");
-  assert.equal(canvasPackage.publishConfig.provenance, false);
+  assert.equal(canvasPackage.publishConfig.access, "public");
+  // Nothing pins provenance off any more: trusted publishing generates an
+  // attestation on its own, and a `provenance: false` left behind here would
+  // silently suppress it.
+  assert.equal(canvasPackage.publishConfig.provenance, undefined);
   assert.ok(canvasPackage.exports, "package exports must be declared");
   assert.equal(canvasPackage.exports["."], undefined);
   assert.deepEqual(
@@ -77,7 +80,7 @@ test("the package exposes only the approved ESM entry points and compiled styles
 
   assert.equal(canvasPackage.exports["./styles.css"], "./dist/styles.css");
   assert.deepEqual(canvasPackage.sideEffects, ["./dist/styles.css"]);
-  assert.deepEqual(canvasPackage.files, ["dist", "README.md"]);
+  assert.deepEqual(canvasPackage.files, ["dist", "README.md", "LICENSE"]);
   assert.equal(canvasPackage.peerDependencies.react, ">=19 <20");
   assert.equal(canvasPackage.peerDependencies["react-dom"], ">=19 <20");
   assert.equal(canvasPackage.peerDependencies.next, ">=15 <17");
@@ -417,12 +420,12 @@ test("workspace fixtures build as applications through package subpaths only", a
   assert.ok(nextFixture.scripts.typecheck);
   assert.ok(
     fixtureSources.some((source) =>
-      source.includes("@squared-lemons-ltd/canvas-panels/core"),
+      source.includes("@squaredlemons/canvas-panels/core"),
     ),
   );
   assert.ok(
     fixtureSources.some((source) =>
-      source.includes("@squared-lemons-ltd/canvas-panels/react"),
+      source.includes("@squaredlemons/canvas-panels/react"),
     ),
   );
 
@@ -446,16 +449,13 @@ test("the Next fixture proves deep links across the server and client boundary",
 
   // The route entry stays a Server Component that decodes navigation state.
   assert.doesNotMatch(page, /^(?:"use client"|'use client');/);
-  assert.match(page, /@squared-lemons-ltd\/canvas-panels\/next\/server/);
+  assert.match(page, /@squaredlemons\/canvas-panels\/next\/server/);
   assert.match(page, /readCanvasNavigationState/);
-  assert.doesNotMatch(
-    page,
-    /@squared-lemons-ltd\/canvas-panels\/(?:ui|react)\b/,
-  );
+  assert.doesNotMatch(page, /@squaredlemons\/canvas-panels\/(?:ui|react)\b/);
 
   // The client half seeds before first render and then owns URL synchronization.
   assert.match(canvas, /^(?:"use client"|'use client');/);
-  assert.match(canvas, /@squared-lemons-ltd\/canvas-panels\/next"/);
+  assert.match(canvas, /@squaredlemons\/canvas-panels\/next"/);
   assert.match(canvas, /seedCanvasNavigation/);
   assert.match(canvas, /useCanvasNavigationSync/);
   assert.match(canvas, /from "next\/navigation"/);
@@ -879,7 +879,7 @@ test("continuous integration runs every delivery-path gate on Node 22 and 24", a
 
 /**
  * The inventory's export lists, read back out of the document: for each
- * `### `@squared-lemons-ltd/canvas-panels/<subpath>`` heading, the backticked names
+ * `### `@squaredlemons/canvas-panels/<subpath>`` heading, the backticked names
  * in the paragraph under it.
  */
 function inventoriedExports(inventory) {
@@ -888,7 +888,7 @@ function inventoriedExports(inventory) {
   for (const section of sections) {
     const [heading, ...rest] = section.split("\n");
     const subpath = heading.match(
-      /^`@squared-lemons-ltd\/canvas-panels\/([^`]+)`$/,
+      /^`@squaredlemons\/canvas-panels\/([^`]+)`$/,
     )?.[1];
     if (subpath === undefined || subpath === "styles.css") continue;
     listed.set(
@@ -934,7 +934,7 @@ test("the frozen inventory lists exactly what the package exports", async () => 
     assert.deepEqual(
       listed.get(subpath),
       Object.keys(module).sort(),
-      `the inventory and @squared-lemons-ltd/canvas-panels/${subpath} disagree`,
+      `the inventory and @squaredlemons/canvas-panels/${subpath} disagree`,
     );
   }
 });
@@ -1045,8 +1045,19 @@ test("only the release workflow can publish, and it holds no publish token", asy
 
   // The registry, named where the publish happens rather than left to whatever
   // the runner's default npmrc says.
-  assert.match(executed, /registry-url:\s*https:\/\/npm\.pkg\.github\.com/);
-  assert.match(executed, /packages:\s*write/);
+  assert.match(executed, /registry-url:\s*https:\/\/registry\.npmjs\.org/);
+
+  // Trusted publishing exchanges a workflow-run OIDC token for a short-lived
+  // registry credential, so `id-token: write` is the permission that makes a
+  // publish possible at all. `packages: write` granted nothing here any more
+  // and would only widen the job.
+  assert.match(executed, /id-token:\s*write/);
+  assert.doesNotMatch(executed, /packages:\s*write/);
+
+  // setup-node on Node 22 ships npm 10, which predates OIDC entirely: it would
+  // not fail, it would fall back to looking for a token and publish without an
+  // attestation. The floor is asserted here because nothing else would notice.
+  assert.match(executed, /npm install -g npm@\^?11\.\d+\.\d+/);
 
   // No credential outlives the run. `GITHUB_TOKEN` is minted for this workflow
   // run, scoped by the permissions above, and expires with the job — so the
@@ -1059,33 +1070,47 @@ test("only the release workflow can publish, and it holds no publish token", asy
   assert.deepEqual([...secrets], ["GITHUB_TOKEN"]);
   assert.doesNotMatch(executed, /NPM_TOKEN|_authToken\s*=/);
 
-  // Provenance attestations are not served by GitHub Packages, so the package
-  // says so once and the workflow does not quietly re-enable it.
-  assert.match(release, /NPM_CONFIG_PROVENANCE:\s*"false"/);
+  // Provenance is generated by trusted publishing without being asked, so the
+  // only way to lose it is to turn it off. Nothing may.
+  assert.doesNotMatch(executed, /NPM_CONFIG_PROVENANCE|--provenance[= ]false/);
 });
 
-test("the package is published to GitHub Packages under the owner's scope", async () => {
+test("the package is published to the public npm registry as MIT-licensed open source", async () => {
   const canvasPackage = await readJson("packages/canvas-panels/package.json");
-  const npmrc = await readFile(join(root, ".npmrc"), "utf8");
-  const registry = "https://npm.pkg.github.com";
 
-  // GitHub Packages resolves a package by the scope alone, and requires that
-  // scope to be the repository owner. `@squared-lemons-ltd` is therefore not a
-  // preference — it is the name the registry will accept for
-  // `Squared-Lemons-Ltd/canvas-panels`, and renaming either means renaming both.
+  // The scope is a choice now, not a constraint. GitHub Packages resolved a
+  // package by scope alone and required that scope to be the repository owner,
+  // which is the only reason the name ever carried the legal suffix. The public
+  // registry imposes no such rule, so the scope is free to be the short one and
+  // is decoupled from the repository name.
   const [scope] = canvasPackage.name.split("/");
-  assert.equal(scope, "@squared-lemons-ltd");
+  assert.equal(scope, "@squaredlemons");
   assert.match(
     canvasPackage.repository.url,
     /Squared-Lemons-Ltd\/canvas-panels/,
   );
 
-  // Named in the manifest, so a publish from anywhere — a workflow, a laptop —
-  // goes to the same registry without depending on an ambient config.
-  assert.equal(canvasPackage.publishConfig.registry, registry);
+  // No registry override: publishing goes to the npm default. A leftover
+  // `registry` here would send an open-source release back to a registry that
+  // demands a token to install it, which is the exact failure this migration
+  // exists to undo.
+  assert.equal(canvasPackage.publishConfig.registry, undefined);
+  assert.equal(canvasPackage.publishConfig.access, "public");
+
+  // A public package that says `UNLICENSED` grants nobody the right to use it.
+  // The licence and the file that carries its text ship together, inside the
+  // tarball, so a consumer reads the terms from the artifact rather than from a
+  // repository they may never visit.
+  assert.equal(canvasPackage.license, "MIT");
+  const licence = await readFile(
+    join(root, "packages/canvas-panels/LICENSE"),
+    "utf8",
+  );
+  assert.match(licence, /^MIT License/);
+  assert.match(licence, /Copyright \(c\) \d{4} Squared Lemons Ltd/);
   assert.ok(
-    npmrc.includes(`${scope}:registry=${registry}`),
-    "the workspace must resolve its own scope from GitHub Packages",
+    canvasPackage.files.includes("LICENSE"),
+    "the licence must ship inside the tarball",
   );
 });
 
@@ -1093,7 +1118,7 @@ test("a prerelease publishes to next and a stable release to latest", async () =
   const config = await readJson(".changeset/config.json");
   const canvasPackage = await readJson("packages/canvas-panels/package.json");
   const runbook = await readFile(
-    join(root, "docs/delivery/private-package.md"),
+    join(root, "docs/delivery/package-delivery.md"),
     "utf8",
   );
 
@@ -1102,14 +1127,18 @@ test("a prerelease publishes to next and a stable release to latest", async () =
   // Changesets takes the dist-tag from pre mode instead — `next` while
   // `.changeset/pre.json` exists, `latest` once it has been exited.
   assert.equal(canvasPackage.publishConfig.tag, undefined);
-  assert.equal(config.access, "restricted");
+  // Changesets passes this to `npm publish`, where `restricted` on a scoped
+  // package means "private" — and on a free organization npm rejects it. It has
+  // to agree with `publishConfig.access`, so the two are asserted together.
+  assert.equal(config.access, "public");
+  assert.equal(config.access, canvasPackage.publishConfig.access);
   assert.match(runbook, /changeset pre enter next/);
   assert.match(runbook, /changeset pre exit/);
 
   // And a candidate is promoted by moving a tag, never by building again: the
   // artifact that was verified has to be the artifact that becomes `latest`,
   // and `npm dist-tag add` is the only step that touches no bytes.
-  assert.match(runbook, /npm dist-tag add @squared-lemons-ltd\/canvas-panels@/);
+  assert.match(runbook, /npm dist-tag add @squaredlemons\/canvas-panels@/);
 
   // Every workspace member that is not the package is ignored, so a fixture or
   // a sample can never be versioned or published alongside it.

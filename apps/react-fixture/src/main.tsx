@@ -2,28 +2,28 @@ import {
   createPanelEngine,
   definePanel,
   defineRootPanel,
-} from "@squared-lemons-ltd/canvas-panels/core";
+} from "@squaredlemons/canvas-panels/core";
 import {
   type EditorStatus,
   usePanelEditor,
-} from "@squared-lemons-ltd/canvas-panels/extensions/editor";
+} from "@squaredlemons/canvas-panels/extensions/editor";
 import {
   createResourceExchange,
   ResourceExchangeProvider,
   usePanelResource,
   useResourceExchange,
   useResourceSubscription,
-} from "@squared-lemons-ltd/canvas-panels/extensions/resources";
+} from "@squaredlemons/canvas-panels/extensions/resources";
 import {
   createOverlayWorkspace,
   defineOverlayWorkspace,
-} from "@squared-lemons-ltd/canvas-panels/overlay";
-import "@squared-lemons-ltd/canvas-panels/styles.css";
+} from "@squaredlemons/canvas-panels/overlay";
+import "@squaredlemons/canvas-panels/styles.css";
 import {
   type CanvasPanelLifecycle,
   type CanvasPanelRenderProps,
   createCanvasModule,
-} from "@squared-lemons-ltd/canvas-panels/ui";
+} from "@squaredlemons/canvas-panels/ui";
 import type { CSSProperties } from "react";
 import {
   createContext,

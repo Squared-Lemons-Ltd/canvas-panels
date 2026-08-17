@@ -1,4 +1,4 @@
-# @squared-lemons-ltd/canvas-panels
+# @squaredlemons/canvas-panels
 
 ## 0.1.0
 
@@ -11,7 +11,7 @@
   - Panel separators are real ARIA separators, resizable by pointer and by Arrow, Shift+Arrow, Home, End, and Enter through one sizing engine (`resizePanel`), announcing only once a resize settles.
   - A reduced-motion preference can no longer be overridden by application CSS, and forced-colours modes get explicit Panel borders now that shadows are dropped.
 
-  New exports from `@squared-lemons-ltd/canvas-panels/ui`: `canvasAnnouncementTemplates`, `canvasPanelSizingBounds`, `cyclePanelRegion`, `describeStructuralChange`, `resizePanel`, `sizingCommandForKey`. `Canvas.Workspace` accepts `announcements` and `sizing`.
+  New exports from `@squaredlemons/canvas-panels/ui`: `canvasAnnouncementTemplates`, `canvasPanelSizingBounds`, `cyclePanelRegion`, `describeStructuralChange`, `resizePanel`, `sizingCommandForKey`. `Canvas.Workspace` accepts `announcements` and `sizing`.
 
 - Bring the Guarded Transition dialog and the Overlay Workspace inside the token seam, and keep every Canvas action a real pointer target.
 
@@ -112,7 +112,7 @@
   - A coordinated save joins an application save already in flight instead of writing the record twice; a failure is recorded on the editor and rethrown so the Guarded Transition dialog can report it with the Panel still open.
   - `createPanelEditor` is the same coordinator without React, and `resolveEditorGuard` with the replaceable `editorGuardMessages` is the ordering itself, for an application that renders its own editor chrome.
 
-  New subpath: `@squared-lemons-ltd/canvas-panels/extensions/editor`, exporting `usePanelEditor`, `createPanelEditor`, `resolveEditorGuard`, and `editorGuardMessages`. It is imported only from that subpath, is never re-exported by core, React, or UI, and no base entry point can reach it — a consumer that does not import it neither initializes nor bundles it.
+  New subpath: `@squaredlemons/canvas-panels/extensions/editor`, exporting `usePanelEditor`, `createPanelEditor`, `resolveEditorGuard`, and `editorGuardMessages`. It is imported only from that subpath, is never re-exported by core, React, or UI, and no base entry point can reach it — a consumer that does not import it neither initializes nor bundles it.
 
 - 9b7d64b: Add the optional official resource extension, so related Panels can tell each other that something they show has changed or gone without the package learning anything about what it is.
 
@@ -125,9 +125,9 @@
   - `createResourceExchange` and `createPanelResource` are the same coordination without React, and `resolveResourceDeferral` is the ordering itself, for an application deciding its own re-reads. A coordinator does not listen until `start()` is called, so one React created and threw away leaves nothing subscribed behind it.
   - The same Panel Engine coupling the editor extension documented applies here: a Panel holding an invalidation is not registered as dirty by this extension, so it does not on its own arm the header `dirtyLabel` or unload protection. Register a lifecycle if a held invalidation should also guard a transition.
 
-  New subpath: `@squared-lemons-ltd/canvas-panels/extensions/resources`, exporting `createResourceExchange`, `createPanelResource`, `resolveResourceDeferral`, `resourceKeyMatches`, `resourceInvalidationMatches`, `ResourceExchangeProvider`, `useResourceExchange`, `useResourceSubscription`, and `usePanelResource`. It is imported only from that subpath, is never re-exported by core, React, or UI, reaches no other extension, and no base entry point can reach it — a consumer that does not import it neither initializes nor bundles it.
+  New subpath: `@squaredlemons/canvas-panels/extensions/resources`, exporting `createResourceExchange`, `createPanelResource`, `resolveResourceDeferral`, `resourceKeyMatches`, `resourceInvalidationMatches`, `ResourceExchangeProvider`, `useResourceExchange`, `useResourceSubscription`, and `usePanelResource`. It is imported only from that subpath, is never re-exported by core, React, or UI, reaches no other extension, and no base entry point can reach it — a consumer that does not import it neither initializes nor bundles it.
 
-- f76d0b4: Add the optional overlay composition path for global and modal Panels, at the `@squared-lemons-ltd/canvas-panels/overlay` subpath.
+- f76d0b4: Add the optional overlay composition path for global and modal Panels, at the `@squaredlemons/canvas-panels/overlay` subpath.
 
   - `defineOverlayWorkspace` declares one overlay: its accessible label, its modality, and its persistence namespace. The namespace is required rather than defaulted and is minted under the reserved `canvas-overlay-` prefix, so an overlay can never take the Navigation Parameter a primary Canvas Workspace owns; a name that would collide is refused at definition time. It is an ordinary History Namespace otherwise — pass `overlay.definition.namespace` to a Navigation Adapter as its `parameterName` to persist the overlay, and the usual first-claimant rule applies.
   - `createOverlayWorkspace` binds that definition to an application-supplied Panel Engine and Bound Canvas Module, and returns the only handle that can route into it — `open`, `dismiss`, `Host`, `usePresentation`, and `useInnerLayer`. There is deliberately no context, hook, or ambient global layer: a Panel's own `useNavigation()` keeps going to its own Workspace whether an overlay is presented or not.
@@ -140,12 +140,12 @@
 
 - 6563c46: Complete the packed-package contract: public testing tools, artifact inspection, and documentation executable from the package output alone.
 
-  - Add the runner-neutral testing tools at the `@squared-lemons-ltd/canvas-panels/testing` subpath. `createTestIdentities` mints deterministic Workspace and Panel identities — the Panel Engine numbers its own from a process-wide counter, so what a Panel gets depends on how many engines a run built first — and `createTestClock` gives the application code around a Canvas a clock whose `advance()` runs each timer at its own due point, including timers those callbacks schedule.
+  - Add the runner-neutral testing tools at the `@squaredlemons/canvas-panels/testing` subpath. `createTestIdentities` mints deterministic Workspace and Panel identities — the Panel Engine numbers its own from a process-wide counter, so what a Panel gets depends on how many engines a run built first — and `createTestClock` gives the application code around a Canvas a clock whose `advance()` runs each timer at its own due point, including timers those callbacks schedule.
   - Add a fake or builder for every seam an application has to stand in for: `allowTransition`/`confirmTransition`/`blockTransition` and `createTestLifecycle` for guards, `createTestRestore` and `buildNavigationDocument` for restoration, `createTestHistory` for browser navigation, `createTestFocusTarget` for focus, `createTestViewport` for the Declared Breakpoints, and `buildPanelReadModel`/`buildPanelStack`/`buildTransitionStatus`/`buildPresentation` for the public read models.
   - `createTestLifecycle` and `createTestRestore` both accept `mode: "manual"`, which leaves each write or availability check in flight until the test settles or fails it. That is the only way to observe a Canvas while a write is outstanding, which is exactly when it must not commit.
   - `buildNavigationDocument` writes a canonical document at a _historical_ descriptor version. The engine can only ever encode the current one, so before this there was no way to exercise a migration from outside the package.
   - The testing subpath is server-safe and imports no test runner, no React, and no Canvas module. It reaches only the Declared Breakpoint queries in `core`, so it costs a consumer nothing and works unchanged under `node:test`, Vitest, or Jest.
-  - `canvasBreakpointQueries` now lives in `@squared-lemons-ltd/canvas-panels/core` alongside the breakpoints it describes, and is still re-exported unchanged from `@squared-lemons-ltd/canvas-panels/ui`. Both entry points expose the same frozen value, so the testing viewport cannot answer for a different breakpoint set than the Canvas presents by.
+  - `canvasBreakpointQueries` now lives in `@squaredlemons/canvas-panels/core` alongside the breakpoints it describes, and is still re-exported unchanged from `@squaredlemons/canvas-panels/ui`. Both entry points expose the same frozen value, so the testing viewport cannot answer for a different breakpoint set than the Canvas presents by.
   - Artifact inspection now rejects, against the package a clean consumer actually installed: secret material, a second React or React DOM, private deep imports past the exports map, a missing or stray `"use client"` directive, and an entry point that re-exports another wholesale. Against the built distribution it additionally rejects a root barrel or wildcard subpath, CommonJS or a down-levelling shim in any module, a global assignment, and any runtime dependency or install script. The packed probe drives the testing tools and a historical Navigation Document migration through the real engine.
   - The package README is restructured to cover installation, architecture, API, accessibility, navigation, theming, Next.js, extensions, testing, compatibility, migration, and rollback. The tarball ships `dist` and that one README, so the gate asserts every required area is present and that every declared subpath is documented and every documented subpath is declared.
 

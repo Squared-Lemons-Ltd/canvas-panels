@@ -55,7 +55,7 @@ test("the boundary checker rejects a core self-import from the React subpath", a
     await mkdir(join(fixture, "core"), { recursive: true });
     await writeFile(
       join(fixture, "core/index.ts"),
-      'import "@squared-lemons-ltd/canvas-panels/react";\n',
+      'import "@squaredlemons/canvas-panels/react";\n',
     );
 
     await assert.rejects(

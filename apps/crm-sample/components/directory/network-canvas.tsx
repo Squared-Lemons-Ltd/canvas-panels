@@ -19,7 +19,7 @@
 import {
   type CanvasPanelRenderProps,
   createCanvasModule,
-} from "@squared-lemons-ltd/canvas-panels/ui";
+} from "@squaredlemons/canvas-panels/ui";
 import { UsersIcon } from "lucide-react";
 import { createContext, useContext, useMemo, useRef } from "react";
 

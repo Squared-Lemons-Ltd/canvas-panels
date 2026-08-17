@@ -7,7 +7,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@squared-lemons-ltd/canvas-panels": "workspace:*",
+    "@squaredlemons/canvas-panels": "workspace:*",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },

@@ -30,4 +30,4 @@ pnpm pack:check
 
 `pnpm pack:check` builds an unpublished tarball and verifies it in clean temporary React and Next consumers. It does not publish the package.
 
-See [Private package delivery](docs/delivery/private-package.md) for the registry, clean-consumer, and trusted-publishing contract.
+See [Package delivery](docs/delivery/package-delivery.md) for the registry, clean-consumer, and trusted-publishing contract.

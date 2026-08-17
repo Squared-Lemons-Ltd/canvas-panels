@@ -1,6 +1,6 @@
 # The Canvas Panels Public Contract
 
-What `@squared-lemons-ltd/canvas-panels` promises, in one list, so that "is this a breaking change?" has an answer that does not depend on who is asked.
+What `@squaredlemons/canvas-panels` promises, in one list, so that "is this a breaking change?" has an answer that does not depend on who is asked.
 
 The **Public Contract** is the documented package exports, result discriminants, behaviours, schemas, accessibility guarantees, compatibility ranges, semantic styling hooks, and integration attributes described here and in the package README. Everything else — internal module layout, the spelling of a generated id, the DOM shape inside a Panel body, `data-testid` — is implementation detail and may change in any release.
 
@@ -16,43 +16,43 @@ Adding to the contract is a minor release. Removing from it, or narrowing what a
 
 Nine code subpaths and the stylesheet, and no root export. Every name below is public; a name reachable only through a deep import is not.
 
-### `@squared-lemons-ltd/canvas-panels/core`
+### `@squaredlemons/canvas-panels/core`
 
 `canvasBreakpointQueries`, `canvasBreakpoints`, `createPanelEngine`, `decodeNavigationParameter`, `definePanel`, `defineRootPanel`, `encodeNavigationParameter`, `maximumNavigationParameterLength`, `navigationParameterName`
 
-### `@squared-lemons-ltd/canvas-panels/react`
+### `@squaredlemons/canvas-panels/react`
 
 `CanvasProvider`, `createCanvasBindings`, `useCanvas`
 
-### `@squared-lemons-ltd/canvas-panels/ui`
+### `@squaredlemons/canvas-panels/ui`
 
 `canvasAnnouncementTemplates`, `canvasBreakpointQueries`, `canvasPanelSizingBounds`, `createCanvasModule`, `cyclePanelRegion`, `defineCanvasContext`, `describeStructuralChange`, `resizePanel`, `sizingCommandForKey`
 
-### `@squared-lemons-ltd/canvas-panels/next`
+### `@squaredlemons/canvas-panels/next`
 
 `seedCanvasNavigation`, `useCanvasNavigationSync`
 
-### `@squared-lemons-ltd/canvas-panels/next/server`
+### `@squaredlemons/canvas-panels/next/server`
 
 `applyCanvasNavigationParameter`, `canvasNavigationParameterName`, `readCanvasNavigationState`
 
-### `@squared-lemons-ltd/canvas-panels/extensions/editor`
+### `@squaredlemons/canvas-panels/extensions/editor`
 
 `createPanelEditor`, `editorGuardMessages`, `editorLifecycleDirty`, `editorStatus`, `resolveEditorGuard`, `usePanelEditor`
 
-### `@squared-lemons-ltd/canvas-panels/extensions/resources`
+### `@squaredlemons/canvas-panels/extensions/resources`
 
 `ResourceExchangeProvider`, `createPanelResource`, `createResourceExchange`, `resolveResourceDeferral`, `resourceInvalidationMatches`, `resourceKeyMatches`, `usePanelResource`, `useResourceExchange`, `useResourceSubscription`
 
-### `@squared-lemons-ltd/canvas-panels/overlay`
+### `@squaredlemons/canvas-panels/overlay`
 
 `createOverlayWorkspace`, `defineOverlayWorkspace`, `overlayNavigationParameterPrefix`, `overlayPresentation`, `resolveOverlayEscape`
 
-### `@squared-lemons-ltd/canvas-panels/testing`
+### `@squaredlemons/canvas-panels/testing`
 
 `allowTransition`, `blockTransition`, `buildNavigationDocument`, `buildPanelReadModel`, `buildPanelStack`, `buildPresentation`, `buildTransitionStatus`, `confirmTransition`, `createTestClock`, `createTestFocusTarget`, `createTestHistory`, `createTestIdentities`, `createTestLifecycle`, `createTestRestore`, `createTestViewport`
 
-### `@squared-lemons-ltd/canvas-panels/styles.css`
+### `@squaredlemons/canvas-panels/styles.css`
 
 The compiled stylesheet. One cascade layer, named `canvas-panels`; the name is part of the contract.
 

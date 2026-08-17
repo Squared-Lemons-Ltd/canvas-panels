@@ -27,12 +27,12 @@
 import type {
   GuardOutcome,
   PanelInstanceRef,
-} from "@squared-lemons-ltd/canvas-panels/core";
+} from "@squaredlemons/canvas-panels/core";
 import {
   type CanvasPanelRenderProps,
   createCanvasModule,
   defineCanvasContext,
-} from "@squared-lemons-ltd/canvas-panels/ui";
+} from "@squaredlemons/canvas-panels/ui";
 import {
   ChevronRightIcon,
   ExternalLinkIcon,

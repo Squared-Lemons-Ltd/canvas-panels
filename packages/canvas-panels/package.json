@@ -1,8 +1,8 @@
 {
-  "name": "@squared-lemons-ltd/canvas-panels",
-  "version": "0.1.0",
+  "name": "@squaredlemons/canvas-panels",
+  "version": "0.2.0-rc.0",
   "description": "Reusable Canvas Panels interaction framework for Squared Lemons applications",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "author": "Squared Lemons Ltd",
   "repository": {
     "type": "git",
@@ -14,7 +14,8 @@
   "type": "module",
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "exports": {
     "./core": {
@@ -76,8 +77,6 @@
     }
   },
   "publishConfig": {
-    "registry": "https://npm.pkg.github.com",
-    "access": "restricted",
-    "provenance": false
+    "access": "public"
   }
 }

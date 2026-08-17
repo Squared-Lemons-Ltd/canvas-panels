@@ -1,6 +1,6 @@
 name: Release
 
-# The only path that may publish @squared-lemons-ltd/canvas-panels.
+# The only path that may publish @squaredlemons/canvas-panels.
 #
 # It runs on `main` and nowhere else. There is deliberately no
 # `workflow_dispatch` here: a manual trigger can be aimed at any ref, which
@@ -9,11 +9,12 @@ name: Release
 # publishing job re-checks the ref anyway, so a trigger added later cannot
 # quietly widen it.
 #
-# The package is published to GitHub Packages, whose registry authenticates a
-# run with the automatic `GITHUB_TOKEN`: minted for this workflow run, scoped by
-# the `packages: write` permission below, and expired the moment the job ends.
-# No long-lived publishing credential exists anywhere in this repository, and
-# none is stored as a secret.
+# The package is published to the public npm registry through trusted
+# publishing: the npm CLI exchanges this run's OIDC identity token for a
+# registry credential scoped to this package, which expires with the job. No
+# npm credential is stored in this repository, and none can be. The registered
+# trusted publisher names this workflow by filename, so renaming this file
+# stops publishing until the registration on npmjs.com is updated to match.
 #
 # Nothing is published without the complete Package Gate passing first. The gate
 # runs twice on purpose: once across the supported Node versions, and once more
@@ -70,8 +71,10 @@ jobs:
       contents: write
       # And opens the Version Packages pull request that reviews them.
       pull-requests: write
-      # The publish credential, and the only place it is granted.
-      packages: write
+      # The publish credential, and the only place it is granted. This mints the
+      # OIDC token the npm CLI exchanges at the registry; there is nothing else
+      # to grant, and no stored secret it stands in for.
+      id-token: write
 
     steps:
       - name: Check out repository
@@ -87,8 +90,16 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-          registry-url: https://npm.pkg.github.com
-          scope: "@squared-lemons-ltd"
+          registry-url: https://registry.npmjs.org
+          scope: "@squaredlemons"
+
+      # setup-node on Node 22 ships npm 10, which has no idea OIDC exists. It
+      # would not fail the run — it would look for a token it cannot find and
+      # publish with no attestation, or not at all. Trusted publishing needs
+      # 11.5.1 or later, so the floor is installed explicitly rather than
+      # inherited from whatever the runner image happens to carry this month.
+      - name: Install an npm that can do trusted publishing
+        run: npm install -g npm@^11.5.1
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -101,10 +112,8 @@ jobs:
           commit: "chore: version packages"
           title: "chore: version packages"
         env:
+          # Used by Changesets to write the version commit and open its pull
+          # request. It is not a publishing credential and cannot publish: the
+          # registry credential is minted by the OIDC exchange above and never
+          # appears here.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # The registry credential is the same run-scoped token, which is what
-          # `actions/setup-node` wrote the .npmrc for. It is not a stored secret
-          # and it cannot outlive this job.
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # GitHub Packages does not serve npm provenance attestations.
-          NPM_CONFIG_PROVENANCE: "false"

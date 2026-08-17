@@ -1,30 +1,16 @@
-# @squared-lemons-ltd/canvas-panels
+# @squaredlemons/canvas-panels
 
-Private reusable Canvas Panels interaction framework for Squared Lemons applications.
+Reusable Canvas Panels interaction framework for Squared Lemons applications. MIT licensed.
 
 A **Canvas Workspace** presents an ordered **Panel Stack**: a permanent Root Panel followed by the contextual Panels a user opened from it. The package owns navigation, guarded removal, accessibility, presentation, and URL synchronisation. It owns no data fetching, cache, repository, permission model, or domain schema.
 
 ## Installation
 
-The package is published privately to **GitHub Packages**, from `Squared-Lemons-Ltd/canvas-panels`. That registry resolves a package by its scope, so a consumer has to point the scope at it and authenticate to GitHub — `pnpm add` alone will not find it.
-
-In the consuming repository:
-
-```ini
-# .npmrc
-@squared-lemons-ltd:registry=https://npm.pkg.github.com
-//npm.pkg.github.com/:_authToken=${GITHUB_PACKAGES_TOKEN}
-```
-
-Then:
-
 ```sh
-pnpm add @squared-lemons-ltd/canvas-panels
+pnpm add @squaredlemons/canvas-panels
 ```
 
-`GITHUB_PACKAGES_TOKEN` is a GitHub personal access token with the `read:packages` scope and nothing else. Inside a GitHub Actions job in the same organization, use the run's own token instead — `permissions: packages: read` and `${{ secrets.GITHUB_TOKEN }}` — so no long-lived credential is needed there at all. Commit the scope line; keep the token in the environment.
-
-> **0.1.0 has not reached the registry yet.** It is built, gated, and recorded in `docs/delivery/release-evidence.md`, and the release workflow publishes it. Until it lands, depend on the workspace copy.
+That is the whole instruction. The package is published to the public npm registry, so there is no `.npmrc` to write, no registry to map a scope to, and no token — in the consuming repository or in its CI.
 
 React 19 is a required peer; Next.js is an optional one. Install the peers the application actually uses:
 
@@ -32,20 +18,20 @@ React 19 is a required peer; Next.js is an optional one. Install the peers the a
 pnpm add react@^19 react-dom@^19
 ```
 
-**Pin an exact version while the package is `0.x`.** A minor release may contain a breaking change before 1.0 (see [Migration](#migration)), so `"@squared-lemons-ltd/canvas-panels": "0.1.0"` and a deliberate upgrade is the supported arrangement; a caret range is not.
+**Pin an exact version while the package is `0.x`.** A minor release may contain a breaking change before 1.0 (see [Migration](#migration)), so `"@squaredlemons/canvas-panels": "0.2.0"` and a deliberate upgrade is the supported arrangement; a caret range is not.
 
-Prereleases are published to the `next` dist-tag and never to `latest`, so they are reached only by asking for them — `pnpm add @squared-lemons-ltd/canvas-panels@next` — and never resolved by a range.
+Prereleases are published to the `next` dist-tag and never to `latest`, so they are reached only by asking for them — `pnpm add @squaredlemons/canvas-panels@next` — and never resolved by a range.
 
 Inside this repository the fixtures depend on the package directly, which is what keeps them honest about the workspace copy rather than a published one:
 
 ```json
-{ "dependencies": { "@squared-lemons-ltd/canvas-panels": "workspace:*" } }
+{ "dependencies": { "@squaredlemons/canvas-panels": "workspace:*" } }
 ```
 
 The package is ESM-only and ships no runtime dependencies, so it adds nothing to a lockfile beyond itself. Import the stylesheet once, as high in the application as the Canvas is rendered:
 
 ```ts
-import "@squared-lemons-ltd/canvas-panels/styles.css";
+import "@squaredlemons/canvas-panels/styles.css";
 ```
 
 ## Architecture
@@ -54,16 +40,16 @@ The package is a set of independent entry points rather than one barrel. There i
 
 | Subpath | Environment | Contains |
 | --- | --- | --- |
-| `@squared-lemons-ltd/canvas-panels/core` | server-safe | the framework-neutral Panel Engine, Panel definitions, Navigation Documents |
-| `@squared-lemons-ltd/canvas-panels/react` | client | low-level React bindings over an engine |
-| `@squared-lemons-ltd/canvas-panels/ui` | client | the Bound Canvas Module: providers, Workspace, hooks, dialog, interaction grammar |
-| `@squared-lemons-ltd/canvas-panels/next` | client | the browser-history Navigation Adapter |
-| `@squared-lemons-ltd/canvas-panels/next/server` | server-safe | reading and writing the Navigation Parameter in a Server Component |
-| `@squared-lemons-ltd/canvas-panels/extensions/editor` | client | the optional Panel Editor coordinator |
-| `@squared-lemons-ltd/canvas-panels/extensions/resources` | client | the optional Resource Exchange and Panel Resource |
-| `@squared-lemons-ltd/canvas-panels/overlay` | client | the optional Overlay Workspace composition path |
-| `@squared-lemons-ltd/canvas-panels/testing` | server-safe | runner-neutral fakes and builders |
-| `@squared-lemons-ltd/canvas-panels/styles.css` | — | the compiled stylesheet |
+| `@squaredlemons/canvas-panels/core` | server-safe | the framework-neutral Panel Engine, Panel definitions, Navigation Documents |
+| `@squaredlemons/canvas-panels/react` | client | low-level React bindings over an engine |
+| `@squaredlemons/canvas-panels/ui` | client | the Bound Canvas Module: providers, Workspace, hooks, dialog, interaction grammar |
+| `@squaredlemons/canvas-panels/next` | client | the browser-history Navigation Adapter |
+| `@squaredlemons/canvas-panels/next/server` | server-safe | reading and writing the Navigation Parameter in a Server Component |
+| `@squaredlemons/canvas-panels/extensions/editor` | client | the optional Panel Editor coordinator |
+| `@squaredlemons/canvas-panels/extensions/resources` | client | the optional Resource Exchange and Panel Resource |
+| `@squaredlemons/canvas-panels/overlay` | client | the optional Overlay Workspace composition path |
+| `@squaredlemons/canvas-panels/testing` | server-safe | runner-neutral fakes and builders |
+| `@squaredlemons/canvas-panels/styles.css` | — | the compiled stylesheet |
 
 The layer direction is enforced at build time: `core` depends on nothing, `react` on `core`, `ui` on `core` and `react`. The optional subpaths — the two extensions and the overlay — are unreachable from every base entry point, so importing the Canvas can never drag one in, and importing one costs an application nothing it had not already paid for.
 
@@ -74,7 +60,7 @@ import {
   CanvasProvider,
   createCanvasBindings,
   useCanvas,
-} from "@squared-lemons-ltd/canvas-panels/react";
+} from "@squaredlemons/canvas-panels/react";
 ```
 
 These give an engine's snapshot and commands as React hooks without the Bound Canvas Module's registry inference, its Workspace, its dialog, or its accessibility behaviour — all of which then become the host's responsibility. Prefer `createCanvasModule` unless you are replacing the chrome wholesale.
@@ -89,12 +75,12 @@ Define a Root Panel and the Panel Kinds that open from it, then close them into 
 import {
   definePanel,
   defineRootPanel,
-} from "@squared-lemons-ltd/canvas-panels/core";
-import "@squared-lemons-ltd/canvas-panels/styles.css";
+} from "@squaredlemons/canvas-panels/core";
+import "@squaredlemons/canvas-panels/styles.css";
 import {
   type CanvasPanelRenderProps,
   createCanvasModule,
-} from "@squared-lemons-ltd/canvas-panels/ui";
+} from "@squaredlemons/canvas-panels/ui";
 
 const root = defineRootPanel({ kind: "classes", title: "Classes" });
 const classPanel = definePanel({
@@ -182,7 +168,7 @@ Render `ClassesCanvas.Provider` above `ClassesCanvas.Workspace`; each Provider o
 - `Canvas.Action`, `useHeader`, and `useLifecycle` register semantic actions, visual titles, dirty labels, and focus targets against the current Panel instance, and clean up on unmount.
 - `useContextSignal` and `useContextTarget` exchange an opaque application-typed value once the module is created with `context: defineCanvasContext<Signal>()`.
 
-The Bound module deliberately exposes no engine and no raw snapshot. Hosts that need one construct it with `createPanelEngine` from `@squared-lemons-ltd/canvas-panels/core`, and may pass `onSubscriberError` to report subscriber failures; a failing subscriber never blocks the others or changes the result of a command whose snapshot has already been published.
+The Bound module deliberately exposes no engine and no raw snapshot. Hosts that need one construct it with `createPanelEngine` from `@squaredlemons/canvas-panels/core`, and may pass `onSubscriberError` to report subscriber failures; a failing subscriber never blocks the others or changes the result of a command whose snapshot has already been published.
 
 The Root Panel is permanent and never closable. A Child definition can set `closable: false`; any command or Branch Replacement that would remove it rejects atomically. Each Panel Kind chooses `reuse`, `replace`, or `allow-many`; the first two require a registered semantic Panel Key. Panel inputs are copied into deeply immutable read models and must contain only structured-cloneable plain objects, arrays, and primitives.
 
@@ -253,7 +239,7 @@ The **Navigation Parameter** is the transport form: `v<n>.<base64url-canonical-j
 The stylesheet is published as a single cascade layer named **`canvas-panels`**. Every rule the package emits is inside it and nothing else is, so an application rule written outside any layer wins without needing `!important` or higher specificity. Import it once:
 
 ```ts
-import "@squared-lemons-ltd/canvas-panels/styles.css";
+import "@squaredlemons/canvas-panels/styles.css";
 ```
 
 The layer's name is part of the Public Contract: an application may sort it, and the package will not rename it without a breaking change.
@@ -266,7 +252,7 @@ State the order once, in the entry stylesheet, above every `@import` — the fir
 @layer theme, base, canvas-panels, components, utilities;
 
 @import "tailwindcss";
-@import "@squared-lemons-ltd/canvas-panels/styles.css";
+@import "@squaredlemons/canvas-panels/styles.css";
 ```
 
 That is the recipe for **Tailwind v4**, whose own layers are `theme`, `base`, `components`, and `utilities`. `canvas-panels` belongs after `base`, so Tailwind's preflight cannot reset the Canvas, and before `components` and `utilities`, so an application utility wins: with this statement in place, `class="text-primary"` on the Workspace element beats the package's own `color`.
@@ -378,7 +364,7 @@ A Panel that the current presentation does not show is `hidden` and `inert` rath
 
 A Panel Instance ID is numbered from one **within its own Panel Engine**, and that scope is the part of the Public Contract — the `canvas-panel-<n>` spelling is not, and may change. Because the numbering depends on nothing outside the Engine, a server render and the browser that hydrates it agree about which element is which Panel; a selector or a stored id written against the server's markup still names the same Panel afterwards. What it does not give you is a document-unique value: two Workspaces on one page each number their own Panels, so scope any lookup to the Workspace you mean rather than searching the document. For the same reason a bare Panel Instance ID passed to a different Panel Engine names *that* Engine's Panel at the same position rather than being refused — pass a Panel Instance Ref, which every command that can take one does, and which no other Engine will accept.
 
-The Declared Breakpoints are `mobile`, `tablet`, and `desktop`. Their media queries are exported as `canvasBreakpointQueries` from both `@squared-lemons-ltd/canvas-panels/core` and `@squared-lemons-ltd/canvas-panels/ui`, so an application can align its own layout with the presentation the Canvas selects. A Declared Breakpoint changes presentation only: it never alters Panel instances, logical order, the Active Panel, the Stack Version, or transition history. Environments without `matchMedia` — servers and pre-hydration renders — present the desktop Canvas, which the stylesheet mirrors so the first paint never flashes the wrong presentation.
+The Declared Breakpoints are `mobile`, `tablet`, and `desktop`. Their media queries are exported as `canvasBreakpointQueries` from both `@squaredlemons/canvas-panels/core` and `@squaredlemons/canvas-panels/ui`, so an application can align its own layout with the presentation the Canvas selects. A Declared Breakpoint changes presentation only: it never alters Panel instances, logical order, the Active Panel, the Stack Version, or transition history. Environments without `matchMedia` — servers and pre-hydration renders — present the desktop Canvas, which the stylesheet mirrors so the first paint never flashes the wrong presentation.
 
 ## Next.js
 
@@ -387,7 +373,7 @@ A deep link is decoded on the server and seeded before the first client render, 
 The route entry stays a Server Component:
 
 ```tsx
-import { readCanvasNavigationState } from "@squared-lemons-ltd/canvas-panels/next/server";
+import { readCanvasNavigationState } from "@squaredlemons/canvas-panels/next/server";
 import { ClassesCanvasClient } from "./classes-canvas";
 
 export default async function Page({
@@ -405,11 +391,11 @@ The client half seeds, then owns URL synchronisation:
 ```tsx
 "use client";
 
-import { createPanelEngine } from "@squared-lemons-ltd/canvas-panels/core";
+import { createPanelEngine } from "@squaredlemons/canvas-panels/core";
 import {
   seedCanvasNavigation,
   useCanvasNavigationSync,
-} from "@squared-lemons-ltd/canvas-panels/next";
+} from "@squaredlemons/canvas-panels/next";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useState } from "react";
 
@@ -450,7 +436,7 @@ export function ClassesCanvasClient({ initialState }) {
 
 A Workspace nested inside a Panel must declare `ownership: "memory"`: React commits effects child-first, so a nested Workspace left to claim the History Namespace would take it before its host.
 
-Only `@squared-lemons-ltd/canvas-panels/core`, `@squared-lemons-ltd/canvas-panels/next/server`, and `@squared-lemons-ltd/canvas-panels/testing` are server-safe. Every other subpath carries `"use client"`.
+Only `@squaredlemons/canvas-panels/core`, `@squaredlemons/canvas-panels/next/server`, and `@squaredlemons/canvas-panels/testing` are server-safe. Every other subpath carries `"use client"`.
 
 ## Extensions
 
@@ -458,10 +444,10 @@ Two optional coordinators live behind their own subpaths. Neither is reachable f
 
 ### Panel Editor
 
-`@squared-lemons-ltd/canvas-panels/extensions/editor` turns what an application reports about its own editing into the one lifecycle its Panel registers:
+`@squaredlemons/canvas-panels/extensions/editor` turns what an application reports about its own editing into the one lifecycle its Panel registers:
 
 ```tsx
-import { usePanelEditor } from "@squared-lemons-ltd/canvas-panels/extensions/editor";
+import { usePanelEditor } from "@squaredlemons/canvas-panels/extensions/editor";
 
 function ClassEditor({ descriptor }) {
   const editor = usePanelEditor({
@@ -480,14 +466,14 @@ A write in flight blocks, because a transition must not commit over a half-writt
 
 ### Resource Exchange
 
-`@squared-lemons-ltd/canvas-panels/extensions/resources` is where the Panels of one Workspace tell each other that something they both show has changed:
+`@squaredlemons/canvas-panels/extensions/resources` is where the Panels of one Workspace tell each other that something they both show has changed:
 
 ```tsx
 import {
   createResourceExchange,
   ResourceExchangeProvider,
   usePanelResource,
-} from "@squared-lemons-ltd/canvas-panels/extensions/resources";
+} from "@squaredlemons/canvas-panels/extensions/resources";
 
 const exchange = createResourceExchange();
 
@@ -523,13 +509,13 @@ A change reaching a Panel with nothing to lose and a re-read to run is applied. 
 
 ### Overlay Workspace
 
-`@squared-lemons-ltd/canvas-panels/overlay` presents a Canvas Workspace above the application for global or modal Panels:
+`@squaredlemons/canvas-panels/overlay` presents a Canvas Workspace above the application for global or modal Panels:
 
 ```tsx
 import {
   createOverlayWorkspace,
   defineOverlayWorkspace,
-} from "@squared-lemons-ltd/canvas-panels/overlay";
+} from "@squaredlemons/canvas-panels/overlay";
 
 const help = createOverlayWorkspace({
   canvas: HelpCanvas,
@@ -544,7 +530,7 @@ A modal overlay makes the main content `inert`, traps Tab, and returns focus to 
 
 ## Testing
 
-`@squared-lemons-ltd/canvas-panels/testing` provides runner-neutral fakes and builders. It imports no test runner and registers no global hook, so it works unchanged under `node:test`, Vitest, Jest, or anything else. It is server-safe and pulls in no React.
+`@squaredlemons/canvas-panels/testing` provides runner-neutral fakes and builders. It imports no test runner and registers no global hook, so it works unchanged under `node:test`, Vitest, Jest, or anything else. It is server-safe and pulls in no React.
 
 ```ts
 import {
@@ -558,7 +544,7 @@ import {
   createTestLifecycle,
   createTestRestore,
   createTestViewport,
-} from "@squared-lemons-ltd/canvas-panels/testing";
+} from "@squaredlemons/canvas-panels/testing";
 ```
 
 | Tool | Use |
@@ -639,13 +625,13 @@ While the package is `0.x`, a minor version may contain a breaking change; each 
 
 Two things migrate independently of the package version:
 
-- **Navigation Documents.** Each Panel Kind versions its own descriptor. When a descriptor shape changes, raise that Kind's `version` and add a migration from the previous one; the ordered migration chain must be complete back to version 1. An already-current document requests no history change, while a migrated one requests replace-history normalisation, so an old URL silently becomes a current one on first load. Never remove a historical migration: a bookmarked link may be arbitrarily old. Use `buildNavigationDocument` from `@squared-lemons-ltd/canvas-panels/testing` to pin each historical version with a test.
+- **Navigation Documents.** Each Panel Kind versions its own descriptor. When a descriptor shape changes, raise that Kind's `version` and add a migration from the previous one; the ordered migration chain must be complete back to version 1. An already-current document requests no history change, while a migrated one requests replace-history normalisation, so an old URL silently becomes a current one on first load. Never remove a historical migration: a bookmarked link may be arbitrarily old. Use `buildNavigationDocument` from `@squaredlemons/canvas-panels/testing` to pin each historical version with a test.
 - **The Navigation Parameter.** Its own `v<n>.` prefix versions the transport. A parameter carrying an unrecognised version fails closed and produces a Recovery Panel rather than a partially reconstructed stack.
 
 **Upgrading**, in the order that finds problems cheapest first:
 
 ```sh
-pnpm add @squared-lemons-ltd/canvas-panels@<version>   # an exact version, not a range
+pnpm add @squaredlemons/canvas-panels@<version>   # an exact version, not a range
 pnpm install --frozen-lockfile
 pnpm typecheck                                    # the package is strict; most contract changes are type errors
 pnpm test
@@ -661,7 +647,7 @@ If the upgrade crosses a Navigation Document change, keep an old URL to hand and
 The package holds no persistent state of its own, so rolling back a version is a dependency change and nothing else:
 
 ```sh
-pnpm add @squared-lemons-ltd/canvas-panels@<previous-version>
+pnpm add @squaredlemons/canvas-panels@<previous-version>
 pnpm install --frozen-lockfile
 ```
 
@@ -671,3 +657,7 @@ Two things need checking when rolling back across a Navigation Document change:
 2. **Persisted links outlive the rollback.** Nothing in the package writes to storage, but application URLs are shared and bookmarked. Rolling back does not invalidate them; they simply degrade to recovery.
 
 No database migration, cache invalidation, or data backfill is ever required to move between versions of this package. If a release is rolled back, no cleanup step is needed beyond reinstalling the previous version.
+
+## Licence
+
+MIT. The full text ships inside the tarball as `LICENSE`, so the terms are readable from the installed artifact rather than from a repository a consumer may never visit.

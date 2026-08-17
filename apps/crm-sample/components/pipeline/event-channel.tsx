@@ -26,7 +26,7 @@
 import {
   type ResourceInvalidation,
   useResourceSubscription,
-} from "@squared-lemons-ltd/canvas-panels/extensions/resources";
+} from "@squaredlemons/canvas-panels/extensions/resources";
 import {
   CheckIcon,
   ChevronDownIcon,

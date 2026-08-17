@@ -25,8 +25,8 @@ import {
   createPanelEngine,
   definePanel,
   defineRootPanel,
-} from "@squared-lemons-ltd/canvas-panels/core";
-import { applyCanvasNavigationParameter } from "@squared-lemons-ltd/canvas-panels/next/server";
+} from "@squaredlemons/canvas-panels/core";
+import { applyCanvasNavigationParameter } from "@squaredlemons/canvas-panels/next/server";
 /*
  * The one place this application imports the package's testing entry point, and
  * it is not a test.
@@ -38,7 +38,7 @@ import { applyCanvasNavigationParameter } from "@squared-lemons-ltd/canvas-panel
  * calls the only way to exercise a migration from outside. The entry point is
  * server-safe, imports no test runner and registers no global hook.
  */
-import { buildNavigationDocument } from "@squared-lemons-ltd/canvas-panels/testing";
+import { buildNavigationDocument } from "@squaredlemons/canvas-panels/testing";
 
 import { type MetricId, isMetricId, metricLabels } from "./report-metrics";
 

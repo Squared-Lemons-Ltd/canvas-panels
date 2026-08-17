@@ -19,7 +19,7 @@
 import {
   definePanel,
   defineRootPanel,
-} from "@squared-lemons-ltd/canvas-panels/core";
+} from "@squaredlemons/canvas-panels/core";
 
 import { getContact, loadMeridianDataset } from "@/src/domain";
 

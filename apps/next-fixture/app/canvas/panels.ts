@@ -1,7 +1,7 @@
 import {
   definePanel,
   defineRootPanel,
-} from "@squared-lemons-ltd/canvas-panels/core";
+} from "@squaredlemons/canvas-panels/core";
 
 export type ClassInput = Readonly<{ classId: string; name: string }>;
 export type StudentInput = Readonly<{ studentId: string; name: string }>;

@@ -23,11 +23,11 @@
 import {
   createPanelEngine,
   type PanelInstanceRef,
-} from "@squared-lemons-ltd/canvas-panels/core";
+} from "@squaredlemons/canvas-panels/core";
 import {
   type CanvasPanelRenderProps,
   createCanvasModule,
-} from "@squared-lemons-ltd/canvas-panels/ui";
+} from "@squaredlemons/canvas-panels/ui";
 import { SearchIcon } from "lucide-react";
 import { useId, useRef, useState } from "react";
 

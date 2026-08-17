@@ -44,7 +44,7 @@ importers:
 
   apps/company-agent-prototype:
     dependencies:
-      '@squared-lemons-ltd/canvas-panels':
+      '@squaredlemons/canvas-panels':
         specifier: workspace:*
         version: link:../../packages/canvas-panels
       react:
@@ -69,7 +69,7 @@ importers:
 
   apps/crm-sample:
     dependencies:
-      '@squared-lemons-ltd/canvas-panels':
+      '@squaredlemons/canvas-panels':
         specifier: workspace:*
         version: link:../../packages/canvas-panels
       class-variance-authority:
@@ -130,7 +130,7 @@ importers:
 
   apps/next-fixture:
     dependencies:
-      '@squared-lemons-ltd/canvas-panels':
+      '@squaredlemons/canvas-panels':
         specifier: workspace:*
         version: link:../../packages/canvas-panels
       next:
@@ -158,7 +158,7 @@ importers:
 
   apps/react-fixture:
     dependencies:
-      '@squared-lemons-ltd/canvas-panels':
+      '@squaredlemons/canvas-panels':
         specifier: workspace:*
         version: link:../../packages/canvas-panels
       react:
