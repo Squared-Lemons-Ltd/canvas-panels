@@ -62,13 +62,19 @@ jobs:
         run: pnpm gate
 
   release:
-    name: Version or publish
+    name: Publish
     needs: gate
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       # Changesets pushes the release tag and creates the GitHub release.
       contents: write
+      # Read, not write. The action lists pull requests unconditionally — it
+      # looks for an existing Version Packages one even when it has no `version:`
+      # step and nothing to open — and fails with "Resource not accessible by
+      # integration" without this. `read` satisfies that query and still cannot
+      # create or approve anything, which the organization forbids anyway.
+      pull-requests: read
       # The publish credential, and the only place it is granted. This mints the
       # OIDC token the npm CLI exchanges at the registry; there is nothing else
       # to grant, and no stored secret it stands in for.
