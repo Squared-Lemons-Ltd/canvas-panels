@@ -7,10 +7,16 @@ A **Canvas Workspace** presents an ordered **Panel Stack**: a permanent Root Pan
 ## Install the package
 
 ```sh
-pnpm add @squaredlemons/canvas-panels react@^19 react-dom@^19
+pnpm add @squaredlemons/canvas-panels
 ```
 
-Published publicly to npm as [`@squaredlemons/canvas-panels`](https://www.npmjs.com/package/@squaredlemons/canvas-panels), so there is no `.npmrc` to write, no registry to map a scope to, and no token — in your repository or in its CI. Next.js is an optional peer (`>=15 <17`).
+Published publicly to npm as [`@squaredlemons/canvas-panels`](https://www.npmjs.com/package/@squaredlemons/canvas-panels), so there is no `.npmrc` to write, no registry to map a scope to, and no token — in your repository or in its CI.
+
+React and React DOM are **required peers** at `>=19 <20`, and Next.js is an optional one at `>=15 <17`. The package itself ships no runtime dependencies, so it adds nothing to a lockfile beyond itself. An existing React application already satisfies the peers and needs nothing further — only add them if you are starting from nothing:
+
+```sh
+pnpm add react@^19 react-dom@^19
+```
 
 **Pin the exact version while the package is `0.x`**: a minor release may contain a breaking change, each described in the changelog with the edit it requires.
 
