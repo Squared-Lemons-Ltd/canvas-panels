@@ -1043,9 +1043,16 @@ test("only the release workflow can publish, and it holds no publish token", asy
   assert.match(release, /run:\s*pnpm gate/);
   assert.match(release, /needs:\s*gate/);
 
-  // The registry, named where the publish happens rather than left to whatever
-  // the runner's default npmrc says.
-  assert.match(executed, /registry-url:\s*https:\/\/registry\.npmjs\.org/);
+  // `registry-url` and `scope` must stay off setup-node. Given either, it
+  // writes an .npmrc with `_authToken=${NODE_AUTH_TOKEN}` and sets that
+  // variable to the literal placeholder `XXXXX-XXXXX-XXXXX-XXXXX`. npm then
+  // believes it holds a credential, never attempts the OIDC exchange, and
+  // publishes with a junk token — which the registry rejects as `404`, not
+  // `401`, so it reads as a missing package rather than a refused credential.
+  // This cost three debugging rounds; the registry is named in the manifest's
+  // `publishConfig` instead, where it cannot fabricate a token.
+  assert.doesNotMatch(executed, /registry-url:/);
+  assert.doesNotMatch(executed, /NODE_AUTH_TOKEN/);
 
   // Trusted publishing exchanges a workflow-run OIDC token for a short-lived
   // registry credential, so `id-token: write` is the permission that makes a
@@ -1147,11 +1154,14 @@ test("the package is published to the public npm registry as MIT-licensed open s
     /Squared-Lemons-Ltd\/canvas-panels/,
   );
 
-  // No registry override: publishing goes to the npm default. A leftover
-  // `registry` here would send an open-source release back to a registry that
-  // demands a token to install it, which is the exact failure this migration
-  // exists to undo.
-  assert.equal(canvasPackage.publishConfig.registry, undefined);
+  // The registry is named here rather than on setup-node, which cannot name it
+  // without also fabricating a placeholder auth token that suppresses OIDC.
+  // A publish from anywhere — a workflow, a laptop — therefore goes to the same
+  // registry without depending on an ambient config.
+  assert.equal(
+    canvasPackage.publishConfig.registry,
+    "https://registry.npmjs.org",
+  );
   assert.equal(canvasPackage.publishConfig.access, "public");
 
   // A public package that says `UNLICENSED` grants nobody the right to use it.

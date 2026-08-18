@@ -83,13 +83,19 @@ jobs:
       - name: Install pnpm
         uses: pnpm/action-setup@v4
 
+      # Deliberately no `registry-url` or `scope`. Given either, setup-node
+      # writes an .npmrc containing `_authToken=${NODE_AUTH_TOKEN}` and sets
+      # that variable to the literal placeholder `XXXXX-XXXXX-XXXXX-XXXXX`.
+      # npm then believes it already has a credential, never attempts the OIDC
+      # exchange, and publishes with a junk token — and the registry answers an
+      # unauthorized publish with `404`, not `401`, so it reads as a missing
+      # package rather than a rejected credential. The registry is named in the
+      # manifest's `publishConfig` instead, where it cannot fabricate a token.
       - name: Install Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
-          registry-url: https://registry.npmjs.org
-          scope: "@squaredlemons"
 
       # setup-node on Node 22 ships npm 10, which has no idea OIDC exists. It
       # would not fail the run — it would look for a token it cannot find and
