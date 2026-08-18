@@ -7,7 +7,10 @@ A **Canvas Workspace** presents an ordered **Panel Stack**: a permanent Root Pan
 ## Install the package
 
 ```sh
-pnpm add @squaredlemons/canvas-panels
+npm  install @squaredlemons/canvas-panels
+pnpm add     @squaredlemons/canvas-panels
+yarn add     @squaredlemons/canvas-panels
+bun  add     @squaredlemons/canvas-panels
 ```
 
 Published publicly to npm as [`@squaredlemons/canvas-panels`](https://www.npmjs.com/package/@squaredlemons/canvas-panels), so there is no `.npmrc` to write, no registry to map a scope to, and no token — in your repository or in its CI.

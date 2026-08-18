@@ -14,10 +14,12 @@ It owns **no** data fetching, cache, repository, permission model, or domain sch
 ## Install
 
 ```sh
-pnpm add @squaredlemons/canvas-panels react@^19 react-dom@^19
+pnpm add @squaredlemons/canvas-panels     # or npm install / yarn add / bun add
 ```
 
-Public on npm — no `.npmrc`, no registry mapping, no token. React 19 is a required peer; Next.js (`>=15 <17`) is optional. Node `^22 || ^24`.
+Public on npm — no `.npmrc`, no registry mapping, no token. Node `^22 || ^24`.
+
+**Use whichever package manager the project already uses**, and do not add the peers unless they are missing. React and React DOM are required peers at `>=19 <20` and Next.js is an optional one at `>=15 <17`; an application that renders React already satisfies them, and installing `react@^19` over a deliberately pinned version is a change nobody asked for.
 
 **Pin the exact version.** While the package is `0.x` a minor release may break; `"@squaredlemons/canvas-panels": "0.2.0"` with deliberate upgrades is supported, a caret range is not.
 

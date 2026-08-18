@@ -7,15 +7,18 @@ A **Canvas Workspace** presents an ordered **Panel Stack**: a permanent Root Pan
 ## Installation
 
 ```sh
-pnpm add @squaredlemons/canvas-panels
+npm  install @squaredlemons/canvas-panels
+pnpm add     @squaredlemons/canvas-panels
+yarn add     @squaredlemons/canvas-panels
+bun  add     @squaredlemons/canvas-panels
 ```
 
 That is the whole instruction. The package is published to the public npm registry, so there is no `.npmrc` to write, no registry to map a scope to, and no token — in the consuming repository or in its CI.
 
-React 19 is a required peer; Next.js is an optional one. Install the peers the application actually uses:
+React 19 and React DOM are required peers at `>=19 <20`; Next.js is an optional one at `>=15 <17`. An existing React application already satisfies them. Only if you are starting from nothing:
 
 ```sh
-pnpm add react@^19 react-dom@^19
+npm install react@^19 react-dom@^19
 ```
 
 **Pin an exact version while the package is `0.x`.** A minor release may contain a breaking change before 1.0 (see [Migration](#migration)), so `"@squaredlemons/canvas-panels": "0.2.0"` and a deliberate upgrade is the supported arrangement; a caret range is not.
