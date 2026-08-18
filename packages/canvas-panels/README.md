@@ -4,6 +4,8 @@ Reusable Canvas Panels interaction framework for Squared Lemons applications. MI
 
 A **Canvas Workspace** presents an ordered **Panel Stack**: a permanent Root Panel followed by the contextual Panels a user opened from it. The package owns navigation, guarded removal, accessibility, presentation, and URL synchronisation. It owns no data fetching, cache, repository, permission model, or domain schema.
 
+**[Live demo →](https://canvas-panels-demo.vercel.app)** — a sample CRM built on this package. Open an account, follow a contact out of it, edit something and try to close the Panel; copy the URL into a new tab to see the whole stack restored.
+
 ## Installation
 
 ```sh

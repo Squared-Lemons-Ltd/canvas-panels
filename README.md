@@ -4,6 +4,8 @@ Reusable Canvas Panels interaction framework for React 19 and Next.js applicatio
 
 A **Canvas Workspace** presents an ordered **Panel Stack**: a permanent Root Panel followed by the contextual Panels a user opened from it. The package owns navigation, guarded removal, accessibility, presentation, and URL synchronisation — and owns no data fetching, cache, repository, permission model, or domain schema.
 
+**[Live demo →](https://canvas-panels-demo.vercel.app)** — a sample CRM built on the package. Open an account, follow a contact out of it, edit something and try to close the Panel; copy the URL and open it in a new tab to see the whole stack restored. It deploys from `apps/crm-sample` on every push to `main`, so it cannot drift from the package it demonstrates.
+
 ## Install the package
 
 ```sh
@@ -47,7 +49,8 @@ The skill deliberately restates none of the package's frozen lists — exports, 
 
 ## Interactive showcase
 
-Run the polished React showcase to explore typed panel navigation, semantic reuse,
+The [live demo](https://canvas-panels-demo.vercel.app) is the sample CRM. For the
+feature-by-feature showcase, run it locally — typed panel navigation, semantic reuse,
 branch replacement, nested Workspace isolation, and guarded Save / Discard / Stay
 transitions:
 
