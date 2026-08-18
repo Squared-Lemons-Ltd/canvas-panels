@@ -17,6 +17,18 @@ import {
   createCanvasModule,
 } from "../packages/canvas-panels/dist/ui/index.js";
 
+// Read before a single `test()` is registered, and deliberately not further
+// down beside the tests that use it. A top-level `await` suspends module
+// evaluation, and the runner is free to start tests that were already
+// registered while it waits — so a binding declared after the await is still in
+// its temporal dead zone when an earlier test reaches for it. That failed as
+// `ReferenceError: Cannot access 'stylesheet' before initialization`, on one
+// Node version, in one run out of several, from a file that had not changed.
+const stylesheet = await readFile(
+  new URL("../packages/canvas-panels/dist/styles.css", import.meta.url),
+  "utf8",
+);
+
 const dom = new JSDOM("<!doctype html><html><body></body></html>", {
   url: "https://canvas-panels.test/",
 });
@@ -706,11 +718,6 @@ test("a failed decision moves focus to the explanation", async () => {
   assert.equal(dom.window.document.activeElement, alert);
   rendered.unmount();
 });
-
-const stylesheet = await readFile(
-  new URL("../packages/canvas-panels/dist/styles.css", import.meta.url),
-  "utf8",
-);
 
 test("a reduced-motion preference cannot be overridden by the application", () => {
   const block = stylesheet.match(

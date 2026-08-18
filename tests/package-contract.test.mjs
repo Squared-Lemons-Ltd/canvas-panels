@@ -18,6 +18,17 @@ async function readJson(path) {
   return JSON.parse(await readFile(join(root, path), "utf8"));
 }
 
+// Read before a single `test()` is registered. A top-level `await` suspends
+// module evaluation and the runner may start already-registered tests while it
+// waits, so a binding declared further down — beside the tests that use it,
+// which is where it wants to live — is still in its temporal dead zone when an
+// earlier test reaches for it. Nothing above currently reads these, so this is
+// the latent form of the failure that `canvas-accessibility.test.mjs` hit for
+// real: one Node version, one run in several, from a file that had not changed.
+// `styleRules` is a function declaration and hoists, so calling it here is safe.
+const stylesheet = await readFile(join(distribution, "styles.css"), "utf8");
+const stylesheetRules = styleRules(stylesheet);
+
 test("the private workspace declares the package and both clean-consumer fixtures", async () => {
   const workspaceRoot = await readJson("package.json");
   const workspace = await readFile(join(root, "pnpm-workspace.yaml"), "utf8");
@@ -550,9 +561,6 @@ function styleRules(css) {
 
   return rules;
 }
-
-const stylesheet = await readFile(join(distribution, "styles.css"), "utf8");
-const stylesheetRules = styleRules(stylesheet);
 
 test("the stylesheet scanner reads the rules it is about to assert an absence in", () => {
   // The two tests below both assert that something is *not* in the stylesheet,
