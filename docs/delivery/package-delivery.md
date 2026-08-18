@@ -59,7 +59,18 @@ Three requirements are load-bearing and easy to lose:
 - **npm 11.5.1 or later.** `actions/setup-node` on Node 22 installs npm 10, which predates OIDC. It would not fail — it would fall back to looking for a token and publish *without* an attestation. The workflow upgrades npm explicitly, and the contract suite asserts the floor, because nothing else would notice.
 - **Nothing may set `NPM_CONFIG_PROVENANCE`.** Attestations are generated without being asked under trusted publishing; the only way to lose one is to turn it off. The suite asserts nothing does.
 
-The trusted publisher is registered in the package's settings on npmjs.com against this organization, this repository, and the filename `release.yml`. Renaming that workflow file breaks publishing until the registration is updated to match.
+The trusted publisher is registered in the package's settings on npmjs.com — `npmjs.com/package/@squaredlemons/canvas-panels/access` — with these values, all matched exactly:
+
+| Field | Value |
+| --- | --- |
+| Publisher | GitHub Actions |
+| Organization or user | `Squared-Lemons-Ltd` — the GitHub organization, not the npm one |
+| Repository | `canvas-panels` |
+| Workflow filename | `release.yml` — the filename, not the display name and not the path |
+| Environment name | empty, because the workflow declares none |
+| Allowed actions | `npm publish` only; staged publishing is not used |
+
+Renaming that workflow file breaks publishing until the registration is updated to match. **An absent or mismatched registration is reported as `ENEEDAUTH`**, which is indistinguishable from any other missing credential and says nothing about trusted publishing — npm simply never attempts the exchange. To check the registration without publishing a version, attempt to publish one that already exists: `You cannot publish over the previously published versions` proves the exchange succeeded, while `ENEEDAUTH` proves it never happened.
 
 ## Release runbook
 

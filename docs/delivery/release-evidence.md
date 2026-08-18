@@ -88,7 +88,11 @@ Trusted publishing was configured but never reached. Three faults sat on top of 
 2. With that removed the error became an honest `ENEEDAUTH`, which is npm correctly reporting that it has no credential and is not exchanging one.
 3. A latent temporal-dead-zone race in `canvas-accessibility.test.mjs` failed the Node 22 gate in between, skipping the publish job entirely and costing a round.
 
-`0.2.0` was published by hand to move `latest` off the release candidate, which nothing else could do. Resolving the remaining OIDC fault is `0.3.0`'s work.
+4. And underneath all of it, the trusted publisher had never been saved. The form on npmjs.com was empty. npm attempts the OIDC exchange only when it finds a registration matching the running workflow, and reports its absence as `ENEEDAUTH` — indistinguishable from any other missing credential.
+
+`0.2.0` was published by hand to move `latest` off the release candidate, which nothing else could do.
+
+**Resolved on 18 August 2026.** With the registration saved — `Squared-Lemons-Ltd` / `canvas-panels` / `release.yml`, no environment, `npm publish` allowed — a publish attempt from CI was refused with `You cannot publish over the previously published versions: 0.2.0` rather than `ENEEDAUTH`. That refusal is the proof: npm authenticated through the OIDC exchange and declined only because the version already existed. `0.3.0` will be the first release to carry an attestation.
 
 ### Verified against the registry
 
