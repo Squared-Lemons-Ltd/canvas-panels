@@ -1102,6 +1102,26 @@ test("only the release workflow can publish, and it holds no publish token", asy
   assert.match(executed, /run:\s*pnpm release:publish/);
 });
 
+test("the repository distributes exactly one skill, and it is the consumer's", async () => {
+  // `npx skills add <repo>` installs every skill it discovers, and it looks in
+  // `skills/` *and* in agent directories like `.claude/skills/`. A maintainer
+  // procedure left in either would be handed to every consumer who installs the
+  // canvas-panels skill — a `/release` command that publishes this package has
+  // no business on someone else's machine. Measured before this was written:
+  // with the release procedure in `.claude/skills/`, the CLI reported "Found 2
+  // skills" and installed both. It lives in `.claude/commands/` instead, which
+  // is not scanned.
+  const files = await collectFiles(root);
+  const skills = files
+    .map((file) => relative(root, file))
+    .filter(
+      (path) => path.endsWith("SKILL.md") && !path.startsWith("node_modules"),
+    )
+    .sort();
+
+  assert.deepEqual(skills, ["skills/canvas-panels/SKILL.md"]);
+});
+
 test("the agent skill names only subpaths the package actually exports", async () => {
   const skill = await readFile(
     join(root, "skills/canvas-panels/SKILL.md"),
