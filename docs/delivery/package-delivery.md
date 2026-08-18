@@ -134,6 +134,14 @@ npm registers a trusted publisher through an existing package's settings, so a p
 
 The trusted publisher was then registered, the token revoked, and `0.2.0` published from CI with an attestation. Every version after it takes the ordinary path.
 
+**`--tag next` did not keep `latest` unclaimed, and cannot.** The intent was that the release candidate reach `next` only, leaving `latest` for the first stable version. npm published it to both:
+
+```json
+"dist-tags": { "next": "0.2.0-rc.0", "latest": "0.2.0-rc.0" }
+```
+
+A package must have a `latest`, so the *first* version published takes it whatever tag is requested. This is specific to the inaugural publish — every later prerelease does stay off `latest`, which is why the prerelease section above is correct as written. There is no way to correct it in place either, because there is no other version for the tag to point at; it resolves when the first stable version publishes and claims `latest` in the ordinary way. Between those two moments `pnpm add @squaredlemons/canvas-panels` resolves to a release candidate, so keep the gap short and do not announce the package inside it.
+
 Do not reintroduce that token. Beyond it being a stored publishing credential, npm [restricted 2FA-bypass granular tokens](https://github.blog/changelog/2026-07-31-restricting-npm-bypass-2fa-granular-access-tokens/) from account and package management on 31 July 2026, and targets January 2027 for removing their direct-publish capability entirely — after which such a token can only stage a publish for a maintainer to approve interactively.
 
 ### Installing

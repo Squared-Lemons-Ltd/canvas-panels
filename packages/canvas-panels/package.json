@@ -1,6 +1,6 @@
 {
   "name": "@squaredlemons/canvas-panels",
-  "version": "0.2.0-rc.0",
+  "version": "0.2.0",
   "description": "Reusable Canvas Panels interaction framework for Squared Lemons applications",
   "license": "MIT",
   "author": "Squared Lemons Ltd",
