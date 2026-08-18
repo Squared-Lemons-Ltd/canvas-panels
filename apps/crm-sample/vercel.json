@@ -1,0 +1,6 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "buildCommand": "pnpm --filter @squaredlemons/canvas-panels build && pnpm --filter @canvas-panels/crm-sample build",
+  "installCommand": "pnpm install --frozen-lockfile"
+}
