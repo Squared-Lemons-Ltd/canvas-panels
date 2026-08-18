@@ -1087,6 +1087,51 @@ test("only the release workflow can publish, and it holds no publish token", asy
   assert.match(executed, /run:\s*pnpm release:publish/);
 });
 
+test("the agent skill names only subpaths the package actually exports", async () => {
+  const skill = await readFile(
+    join(root, "skills/canvas-panels/SKILL.md"),
+    "utf8",
+  );
+  const canvasPackage = await readJson("packages/canvas-panels/package.json");
+
+  // The skill is distributed by `npx skills add` from this repository, so it is
+  // read straight from source and nothing rebuilds it. Its frontmatter name is
+  // what the CLI installs it as.
+  assert.match(skill, /^---\nname: canvas-panels\n/);
+
+  // It has to install the package it documents. A rename that missed this file
+  // would ship agents an install command for a package that no longer exists.
+  assert.ok(
+    skill.includes(`pnpm add ${canvasPackage.name}`),
+    "the skill must install the current package name",
+  );
+
+  // And every subpath it mentions must be one the package declares. This is the
+  // drift that matters: prose can go stale quietly, but a skill that sends an
+  // agent to an entry point which was renamed or removed produces code that
+  // cannot resolve. The README pointer is not a subpath and is excluded.
+  const named = new Set(
+    [...skill.matchAll(/@squaredlemons\/canvas-panels(\/[\w./-]+)/g)]
+      .map(([, subpath]) => `.${subpath}`)
+      .filter((subpath) => subpath !== "./README.md"),
+  );
+  assert.ok(named.size > 0, "the skill must name at least one subpath");
+  for (const subpath of named) {
+    assert.ok(
+      subpath in canvasPackage.exports,
+      `the skill names ${subpath}, which the package does not export`,
+    );
+  }
+
+  // The skill points at the shipped README for everything frozen rather than
+  // restating it. A second copy of the export inventory or the token table
+  // would drift silently, and only the README's copy is enforced.
+  assert.match(
+    skill,
+    /node_modules\/@squaredlemons\/canvas-panels\/README\.md/,
+  );
+});
+
 test("the package is published to the public npm registry as MIT-licensed open source", async () => {
   const canvasPackage = await readJson("packages/canvas-panels/package.json");
 

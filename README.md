@@ -1,6 +1,40 @@
 # Canvas Panels
 
-Reusable Canvas Panels interaction framework for Squared Lemons React applications.
+Reusable Canvas Panels interaction framework for React 19 and Next.js applications. MIT licensed.
+
+A **Canvas Workspace** presents an ordered **Panel Stack**: a permanent Root Panel followed by the contextual Panels a user opened from it. The package owns navigation, guarded removal, accessibility, presentation, and URL synchronisation — and owns no data fetching, cache, repository, permission model, or domain schema.
+
+## Install the package
+
+```sh
+pnpm add @squaredlemons/canvas-panels react@^19 react-dom@^19
+```
+
+Published publicly to npm as [`@squaredlemons/canvas-panels`](https://www.npmjs.com/package/@squaredlemons/canvas-panels), so there is no `.npmrc` to write, no registry to map a scope to, and no token — in your repository or in its CI. Next.js is an optional peer (`>=15 <17`).
+
+**Pin the exact version while the package is `0.x`**: a minor release may contain a breaking change, each described in the changelog with the edit it requires.
+
+Then import from a subpath — there is deliberately no root export — and load the stylesheet once:
+
+```ts
+import { definePanel, defineRootPanel } from "@squaredlemons/canvas-panels/core";
+import { createCanvasModule } from "@squaredlemons/canvas-panels/ui";
+import "@squaredlemons/canvas-panels/styles.css";
+```
+
+The full API, the theming tokens, the accessibility guarantees, and the compatibility matrix are in [the package README](packages/canvas-panels/README.md), which ships inside the tarball.
+
+## Install the agent skill
+
+Coding agents get a skill that teaches the wiring order, which subpath to reach for, and the failure modes that bite first:
+
+```sh
+npx skills add Squared-Lemons-Ltd/canvas-panels
+```
+
+Add `-g` to install it globally rather than into the current project. It lands in `.claude/skills/` (or your agent's equivalent) and is read from [`skills/canvas-panels/SKILL.md`](skills/canvas-panels/SKILL.md) in this repository, so it versions with the source rather than drifting from it.
+
+The skill deliberately restates none of the package's frozen lists — exports, tokens, integration attributes — because a second copy would drift silently and the contract suite only enforces the first. It points agents at the shipped README for those, and spends its own words on the sequencing and judgement the README does not cover.
 
 ## Interactive showcase
 
