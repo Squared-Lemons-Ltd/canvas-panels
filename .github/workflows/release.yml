@@ -124,6 +124,25 @@ jobs:
       # same scrutiny at the same moment, through a mechanism that exists.
       # A pending Changeset is now inert: this publishes whatever the manifest
       # already says, and a version already on the registry is a no-op.
+      # TEMPORARY diagnostic, to be removed once it has answered. Attempting to
+      # publish a version already on the registry cannot overwrite it, and the
+      # refusal says which of two things is wrong: `ENEEDAUTH` means npm never
+      # obtained a credential and the trusted publisher registration is not
+      # matching this workflow, while "cannot publish over the previously
+      # published versions" means OIDC succeeded and the Changesets/pnpm chain
+      # is what was swallowing it.
+      #
+      # Default verbosity on purpose. This repository is public, so its Actions
+      # logs are world-readable, and a silly-level publish can print the bearer
+      # token obtained from the OIDC exchange.
+      - name: Diagnose the OIDC exchange
+        continue-on-error: true
+        working-directory: packages/canvas-panels
+        run: |
+          echo "npm version: $(npm --version)"
+          echo "OIDC request URL present: ${ACTIONS_ID_TOKEN_REQUEST_URL:+yes}"
+          npm publish 2>&1 | tail -20
+
       - name: Publish
         run: pnpm release:publish
 
