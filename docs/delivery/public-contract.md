@@ -94,7 +94,7 @@ The persisted contract is versioned separately from the package, and outlives it
 - **Limits**: 16 KiB, 32 Panels, 32 levels of descriptor nesting. Unknown fields, duplicate keys, unsafe property names, transient or unknown Kinds, unsupported future versions, malformed descriptors, and codec failures all fail closed.
 - **Fixtures**: `buildNavigationDocument` from the testing subpath is the only way to construct a *historical* descriptor version from outside the engine, which can encode the current one only. Pin each historical version with a test that migrates it forward; that test is the fixture, and it is what makes "never remove a migration" checkable.
 
-Restoration is a Guarded Transition: `restoreStack({ references })` moves the stack in one operation, and Panels shared with the current stack keep their identity and are never guarded.
+Restoration is a Guarded Transition: `restoreStack({ references })` moves the stack in one operation, and Panels shared with the current stack keep their identity and are never guarded. **Shared** is the leading run of Panels whose Kind, semantic Panel Key, and encoded descriptor all match the targets — persisted identity, not the whole in-memory Panel input, because a restoration target carries only what its codec encodes. A transient Kind has no descriptor, and for one of those the whole input is the identity.
 
 ## Compatibility and the runtime support matrix
 
