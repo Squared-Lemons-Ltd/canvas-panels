@@ -89,7 +89,7 @@ Then **read what it produced** — the new version number in `packages/canvas-pa
 pnpm gate               # must exit 0
 ```
 
-The gate is 427 contract tests plus 3 packed-consumer tests, and it runs the whole thing: format, lint, dependency boundaries, typecheck, build, and a clean pack-and-install into temporary React and Next consumers.
+The gate runs the whole thing: format, lint, dependency boundaries, typecheck, the contract suite, the build, and a clean pack-and-install into temporary React and Next consumers. Read the count off the run rather than expecting one — it moves with almost every commit, which is why it is not written here.
 
 ## 6. Open the pull request
 

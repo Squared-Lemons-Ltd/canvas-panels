@@ -1,6 +1,6 @@
 # @squaredlemons/canvas-panels
 
-Reusable Canvas Panels interaction framework for Squared Lemons applications. MIT licensed.
+Reusable Canvas Panels interaction framework for React 19 and Next.js applications. MIT licensed.
 
 A **Canvas Workspace** presents an ordered **Panel Stack**: a permanent Root Panel followed by the contextual Panels a user opened from it. The package owns navigation, guarded removal, accessibility, presentation, and URL synchronisation. It owns no data fetching, cache, repository, permission model, or domain schema.
 

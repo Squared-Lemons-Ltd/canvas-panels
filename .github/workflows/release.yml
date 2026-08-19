@@ -29,11 +29,31 @@ permissions:
   contents: read
 
 concurrency:
-  # Never cancelled: a half-run release is worse than a queued one.
-  group: release-${{ github.ref }}
+  # Grouped by commit, so no two runs ever share a group and nothing queues.
+  #
+  # Grouping by ref looked safer and was not. `cancel-in-progress: false`
+  # protects the run that is already going; it says nothing about the one behind
+  # it, and GitHub keeps only one pending run per group — so a third push evicts
+  # the second before it starts a single job. That is exactly what happened to
+  # run 32115487062, which is `cancelled` with no jobs at all. It carried a
+  # repository-only change and so cost nothing; had it carried the version bump,
+  # the release would simply not have happened, with `main` green and every
+  # check passing and nothing anywhere reporting a missing publish.
+  #
+  # Nothing needs to queue, because publishing is already idempotent: a version
+  # the registry already has is a no-op, and two commits cannot carry the same
+  # version anyway.
+  group: release-${{ github.sha }}
   cancel-in-progress: false
 
 jobs:
+  # Every third-party action below is pinned to a commit, not a tag. A tag is
+  # mutable and a major tag is deliberately mutable, so `@v4` names whatever its
+  # owner last moved it to — and this workflow grants `id-token: write`, which is
+  # the whole publish credential. Having gone to the trouble of storing no npm
+  # token anywhere, a moved tag would be the one remaining route to publishing
+  # rights. Dependabot proposes the bumps; the comment after each `#` records
+  # which release the commit is.
   gate:
     name: Package Gate on Node ${{ matrix.node-version }}
     runs-on: ubuntu-latest
@@ -44,13 +64,13 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
 
       - name: Install Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ matrix.node-version }}
           cache: pnpm
@@ -76,12 +96,12 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
 
       # Deliberately no `registry-url` or `scope`. Given either, setup-node
       # writes an .npmrc containing `_authToken=${NODE_AUTH_TOKEN}` and sets
@@ -92,7 +112,7 @@ jobs:
       # package rather than a rejected credential. The registry is named in the
       # manifest's `publishConfig` instead, where it cannot fabricate a token.
       - name: Install Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: pnpm

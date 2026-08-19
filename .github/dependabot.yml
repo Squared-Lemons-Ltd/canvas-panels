@@ -1,0 +1,23 @@
+# Only the actions, and only because they are pinned.
+#
+# Pinning to a commit is what stops a moved tag reaching the job that holds
+# `id-token: write`; a pin nobody moves is a pin that goes stale, so the two
+# belong together. The workspace's own devDependencies are left out on purpose:
+# this repository lands finished work directly on `main`, and a standing stream
+# of dependency pull requests would be a workflow nobody here uses. The package
+# itself declares no runtime dependency, so there is no consumer-facing supply
+# chain for Dependabot to watch.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      # One pull request, not three. These move together with the runner image
+      # and reviewing them apart teaches nothing extra.
+      actions:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "chore"

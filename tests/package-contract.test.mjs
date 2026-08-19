@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -16,6 +16,27 @@ const distribution = join(root, "packages/canvas-panels/dist");
 
 async function readJson(path) {
   return JSON.parse(await readFile(join(root, path), "utf8"));
+}
+
+/**
+ * Every workspace member's package name, read off disk. Listing them by hand
+ * is what lets an app be added, or removed, without the thing that is supposed
+ * to account for all of them noticing.
+ */
+async function workspacePackageNames() {
+  const names = [];
+  for (const directory of ["apps", "packages"]) {
+    const entries = await readdir(join(root, directory), {
+      withFileTypes: true,
+    });
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      names.push(
+        (await readJson(join(directory, entry.name, "package.json"))).name,
+      );
+    }
+  }
+  return names;
 }
 
 // Read before a single `test()` is registered. A top-level `await` suspends
@@ -989,6 +1010,38 @@ test("the frozen inventory lists every result discriminant the types declare", a
   }
 });
 
+test("the gate runs every test file that exists", async () => {
+  const workspaceRoot = await readJson("package.json");
+
+  // `node --test` is given its files by name, because one of them must be left
+  // out and the runner has no way to exclude. Naming them is therefore correct
+  // and also silent: a test file added to `tests/` and forgotten here runs
+  // nowhere — not locally, not in the gate, not in CI — and nothing goes red.
+  // That is the one failure a test suite cannot report about itself, so it is
+  // reported here.
+  const named = new Set(
+    (workspaceRoot.scripts.test.match(/tests\/[\w-]+\.test\.mjs/g) ?? []).map(
+      (path) => path.slice("tests/".length),
+    ),
+  );
+  const onDisk = (await readdir(join(root, "tests"))).filter((name) =>
+    name.endsWith(".test.mjs"),
+  );
+
+  // The single deliberate omission. It packs the package and installs it into
+  // temporary React and Next consumers, which is minutes rather than seconds,
+  // so it is its own script — and the gate runs both.
+  const packed = "packed-consumers.test.mjs";
+  assert.ok(workspaceRoot.scripts["pack:check"].includes(packed));
+  assert.ok(!named.has(packed));
+
+  assert.deepEqual(
+    [...named].sort(),
+    onDisk.filter((name) => name !== packed).sort(),
+    "every file in `tests/` must be run by `pnpm test` or by `pnpm pack:check`",
+  );
+});
+
 test("the complete Package Gate is one command, and it is what CI runs", async () => {
   const workspaceRoot = await readJson("package.json");
   const gate = workspaceRoot.scripts.gate;
@@ -1236,11 +1289,13 @@ test("a prerelease publishes to next and a stable release to latest", async () =
   assert.match(runbook, /npm dist-tag add @squaredlemons\/canvas-panels@/);
 
   // Every workspace member that is not the package is ignored, so a fixture or
-  // a sample can never be versioned or published alongside it.
-  assert.deepEqual([...config.ignore].sort(), [
-    "@canvas-panels/company-agent-prototype",
-    "@canvas-panels/crm-sample",
-    "@canvas-panels/next-fixture",
-    "@canvas-panels/react-fixture",
-  ]);
+  // a sample can never be versioned or published alongside it. Derived from the
+  // workspace rather than listed here: a hand-written list agrees with the repo
+  // on the day it is written and silently stops the moment an app is added.
+  const members = await workspacePackageNames();
+  assert.ok(members.includes(canvasPackage.name));
+  assert.deepEqual(
+    [...config.ignore].sort(),
+    members.filter((name) => name !== canvasPackage.name).sort(),
+  );
 });

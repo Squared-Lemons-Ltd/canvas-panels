@@ -1,7 +1,23 @@
 {
   "name": "@squaredlemons/canvas-panels",
   "version": "0.2.0",
-  "description": "Reusable Canvas Panels interaction framework for Squared Lemons applications",
+  "description": "Canvas Panel Stack UI for React 19 and Next.js: typed panel navigation, guarded unsaved-changes transitions, deep-linkable URL state, and accessible region cycling",
+  "keywords": [
+    "canvas",
+    "panels",
+    "panel-stack",
+    "master-detail",
+    "drill-down",
+    "react",
+    "react-19",
+    "nextjs",
+    "navigation",
+    "deep-linking",
+    "unsaved-changes",
+    "accessibility",
+    "ui",
+    "typescript"
+  ],
   "license": "MIT",
   "author": "Squared Lemons Ltd",
   "repository": {
