@@ -1432,6 +1432,12 @@ export function createCanvasModule<
     const signalStore = useContext(SignalStoreContext);
     if (!signalStore)
       throw new Error("Canvas Workspace requires a Canvas Provider");
+    // The Workspace's own element, which is what "inside this Workspace" is
+    // measured against when focus has to be put somewhere. It is deliberately
+    // the Workspace rather than the application element: the mobile Back
+    // control and the breadcrumbs are Workspace chrome outside the Panels, and
+    // a transition they initiated must still be able to return focus to them.
+    const workspace = useRef<HTMLDivElement>(null);
     const application = useRef<HTMLDivElement>(null);
     const returnFocus = useRef<HTMLElement | null>(null);
     const focusedPanelId = useRef<PanelInstanceId | null>(null);
@@ -1595,23 +1601,47 @@ export function createCanvasModule<
       });
     }, [snapshot.panels]);
 
+    // Where focus goes when a Guarded Transition resolves, however it resolved.
+    // It lands back inside this Workspace: on the control that initiated the
+    // transition while that control is still somewhere focus can go, and on the
+    // retained Active Panel's own heading otherwise.
+    //
+    // Each candidate is judged by where focus actually ended up rather than by
+    // `isConnected`, which answers a different question. `rememberFocus` records
+    // `document.activeElement`, and that is `document.body` whenever the control
+    // that initiated the navigation never took DOM focus — a row that is not
+    // focusable, a browser that does not focus a button when it is clicked, a
+    // keyboard shortcut. The body is an `HTMLElement` and is always connected,
+    // so believing `isConnected` "returned" focus to the body and never reached
+    // the heading behind it. The same went for a control that survived into a
+    // Panel the presentation had just hidden, where `focus()` is refused and
+    // says nothing. An Overlay Workspace paid for it immediately: its Escape is
+    // a handler on the layer, and focus left on the body means the next Escape
+    // arrives nowhere.
     useEffect(() => {
       if (previousTransition.current && !snapshot.transition) {
         const preferred = returnFocus.current;
+        returnFocus.current = null;
         const activeHeaders = headerRegistrations.get(snapshot.activePanelId);
         const registeredFallback = activeHeaders
           ? [...activeHeaders.values()].find(
               ({ fallbackFocus }) => fallbackFocus?.current?.isConnected,
             )?.fallbackFocus?.current
           : null;
-        const fallback = application.current?.querySelector<HTMLElement>(
-          ":scope > [data-active] h2",
-        );
-        (preferred?.isConnected
-          ? preferred
-          : (registeredFallback ?? fallback)
-        )?.focus();
-        returnFocus.current = null;
+        // The retained Active Panel's own heading, which the package renders
+        // for every Panel and which is always inside the current presentation,
+        // so the chain always has a last candidate that can be reached.
+        const heading =
+          application.current?.querySelector<HTMLElement>(
+            ":scope > [data-active] > [data-canvas-panel-header] > h2",
+          ) ?? null;
+        const inside = (node: Element | null) =>
+          node !== null && workspace.current?.contains(node) === true;
+        for (const candidate of [preferred, registeredFallback, heading]) {
+          if (!candidate || !inside(candidate)) continue;
+          candidate.focus();
+          if (inside(document.activeElement)) break;
+        }
       }
       previousTransition.current = snapshot.transition;
     }, [headerRegistrations, snapshot.activePanelId, snapshot.transition]);
@@ -1976,6 +2006,7 @@ export function createCanvasModule<
             "data-canvas-breakpoint": snapshot.breakpoint,
             "data-canvas-workspace": "",
             onKeyDown: cycleRegions,
+            ref: workspace,
             role: "region",
           },
           // A bare live region, deliberately without `role="status"`: that role

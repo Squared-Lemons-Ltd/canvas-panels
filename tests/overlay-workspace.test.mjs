@@ -9,7 +9,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { JSDOM } from "jsdom";
-import { createElement, StrictMode, useRef, useState } from "react";
+import { createElement, StrictMode, useEffect, useRef, useState } from "react";
 
 import {
   createPanelEngine,
@@ -168,11 +168,17 @@ function buildOverlayFixture(options = {}) {
     title: "Overlay root",
   });
   const help = definePanel({ kind: "help", title: ({ topic }) => topic });
+  // A list Panel, which is what an application usually leaves behind the Panel
+  // a reader is working in. It registers no `initialFocus`, because there is
+  // nothing in a list to put a reader on — which is precisely when where focus
+  // goes after a transition is the Workspace's own decision.
+  const topics = definePanel({ kind: "topics", title: () => "Help topics" });
   let OverlayCanvas;
   let overlay;
   function HelpRenderer({ descriptor }) {
     const initialFocus = useRef(null);
     const [menuOpen, setMenuOpen] = useState(false);
+    const closePanel = OverlayCanvas.useNavigation().close;
     OverlayCanvas.useLifecycle({
       dirty: options.dirtyHelp ?? false,
       initialFocus,
@@ -189,6 +195,18 @@ function buildOverlayFixture(options = {}) {
       open: menuOpen,
       onEscape: () => setMenuOpen(false),
     });
+    // An application whose editor owns Escape: the key closes this Panel rather
+    // than dismissing the whole overlay. It is handled on the document, because
+    // that is where a browser sends a keypress when the last control the reader
+    // used never took DOM focus.
+    useEffect(() => {
+      if (!options.applicationEscape) return;
+      const onKeyDown = (event) => {
+        if (event.key === "Escape") closePanel();
+      };
+      document.addEventListener("keydown", onKeyDown);
+      return () => document.removeEventListener("keydown", onKeyDown);
+    }, [closePanel]);
     return createElement(
       "div",
       null,
@@ -218,12 +236,16 @@ function buildOverlayFixture(options = {}) {
   }
   OverlayCanvas = createCanvasModule({
     root: overlayRoot,
-    panels: [help],
-    renderers: { "overlay-root": () => null, help: HelpRenderer },
+    panels: [help, topics],
+    renderers: {
+      "overlay-root": () => null,
+      help: HelpRenderer,
+      topics: () => createElement("p", null, "Pick a help topic"),
+    },
   });
   const overlayEngine = createPanelEngine({
     root: overlayRoot,
-    panels: [help],
+    panels: [help, topics],
   });
   overlay = createOverlayWorkspace({
     canvas: OverlayCanvas,
@@ -274,6 +296,7 @@ function buildOverlayFixture(options = {}) {
     overlay,
     overlayEngine,
     record,
+    topics,
     rendered,
   };
 }
@@ -528,6 +551,77 @@ test("dismissing an overlay runs the ordinary guards, and the dialog owns Escape
     fireEvent.click(rendered.getByRole("button", { name: "Discard" }));
   });
   await waitFor(() => assert.equal(rendered.queryByRole("dialog"), null));
+  assert.equal(overlayEngine.getSnapshot().panels.length, 1);
+
+  rendered.unmount();
+});
+
+test("a Guarded Transition resolved by Discard leaves focus inside the layer, so the next Escape still dismisses the overlay", async () => {
+  const { help, overlay, overlayEngine, rendered, topics } =
+    buildOverlayFixture({ applicationEscape: true, dirtyHelp: true });
+
+  // A list Panel with the reader's unsaved work open in front of it, which is
+  // the shape a Discard has to leave somewhere to stand.
+  await act(async () => {
+    overlay.open(topics.reference({}));
+  });
+  await act(async () => {
+    overlay.open(help.reference({ topic: "Draft" }));
+  });
+  const layer = rendered.container.querySelector("[data-canvas-overlay]");
+  assert.equal(overlayEngine.getSnapshot().panels.length, 3);
+
+  // The reader has since been back in the list Panel behind the editor, and has
+  // clicked something there that cannot take focus — which is a browser
+  // blurring to the document body. Two things follow, and the reported failure
+  // needs both. The Workspace last saw focus in a Panel that the editor closing
+  // does not remove, so nothing about the transition looks like focus being
+  // stranded out of a Panel. And the document body is what the Workspace
+  // records as the control that initiated the transition, because that is what
+  // `document.activeElement` is when the transition begins.
+  const listHeading = rendered.getByRole("heading", { name: "Help topics" });
+  act(() => listHeading.focus());
+  act(() => listHeading.blur());
+  assert.equal(document.activeElement?.tagName, "BODY");
+
+  // Escape. The application's editor closes itself, its unsaved work raises the
+  // dialog, and the overlay stays exactly where it is.
+  await act(async () => {
+    fireEvent.keyDown(document, { key: "Escape" });
+  });
+  await rendered.findByRole("alertdialog", { name: /Draft/ });
+  assert.ok(rendered.getByRole("dialog", { name: "Help" }));
+
+  // Discard commits the close. The editor goes, the list Panel behind it is
+  // retained, and the overlay is still presented.
+  await act(async () => {
+    fireEvent.click(rendered.getByRole("button", { name: "Discard" }));
+  });
+  await waitFor(() => assert.equal(rendered.queryByRole("alertdialog"), null));
+  assert.equal(overlayEngine.getSnapshot().panels.length, 2);
+  assert.ok(rendered.getByRole("dialog", { name: "Help" }));
+
+  // Focus is back inside the layer, on the retained Active Panel's heading. The
+  // document body is connected and is an element, but it is not somewhere a
+  // reader can be left: the overlay's Escape is a handler on the layer, so
+  // focus outside it means no further keypress ever arrives.
+  assert.equal(
+    document.activeElement?.tagName,
+    "H2",
+    "a resolved transition must not leave focus on the document body",
+  );
+  assert.equal(document.activeElement?.textContent, "Help topics");
+  assert.equal(
+    layer.contains(document.activeElement),
+    true,
+    "focus must land inside the overlay layer",
+  );
+
+  // Which is what the next Escape needs, delivered where a browser delivers it.
+  await act(async () => {
+    fireEvent.keyDown(document.activeElement, { key: "Escape" });
+  });
+  assert.equal(rendered.queryByRole("dialog"), null);
   assert.equal(overlayEngine.getSnapshot().panels.length, 1);
 
   rendered.unmount();
