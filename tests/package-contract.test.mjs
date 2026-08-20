@@ -852,6 +852,21 @@ test("every integration attribute the package emits is named in the contract", a
   );
 });
 
+test("the README states how deep a Context Signal is compared", async () => {
+  const readme = await readFile(
+    join(root, "packages/canvas-panels/README.md"),
+    "utf8",
+  );
+
+  // "compared structurally" is itself a promise a consumer plans around: it
+  // decides whether they memoise the signal, and how they shape it. So the
+  // depth is written down rather than left to be inferred from how a version
+  // happens to behave. The behaviour itself is asserted against the built
+  // package in tests/react-canvas.test.mjs; this is what keeps the sentence
+  // from drifting away from it.
+  assert.match(readme, /held and compared one level deep/);
+});
+
 test("the stylesheet is one named cascade layer, and says so where a consumer reads", async () => {
   const readme = await readFile(
     join(root, "packages/canvas-panels/README.md"),

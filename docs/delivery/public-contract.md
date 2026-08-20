@@ -79,6 +79,7 @@ These live in the package README, which ships inside the tarball, and each is en
 | Area | Where | What is frozen |
 | --- | --- | --- |
 | Navigation and guards | README "API", "Navigation" | Branch Replacement, Guard Outcomes, atomic commit, document limits and fail-closed rules |
+| Context Signals | README "API" | a published Context Signal is held and compared one level deep, so a structurally equal signal neither republishes nor wakes a Context Target; nested objects and every non-plain value compare by identity |
 | Accessibility | README "Accessibility" | F6 region cycling as the only claimed key, one polite live region, the single Panel Focus Owner, dialog inertness and focus return, reduced motion |
 | Custom properties | README "Theming" | every `--canvas-*` token the package reads, its default, and the three override positions. The suite fails on a token the stylesheet knows and the table does not, and on a documented default that has drifted from the one declared |
 | Integration attributes | README "Theming" | the complete `data-canvas-*` table; an attribute the package emits and that table does not name fails the gate |

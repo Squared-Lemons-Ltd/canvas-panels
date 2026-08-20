@@ -591,6 +591,59 @@ function GuardedTransitionDialog({
   );
 }
 
+/**
+ * Whether two Context Signals are the same signal, compared **one level deep**:
+ * the same value by `Object.is`, or two plain objects — or two arrays — with
+ * the same own enumerable entries, each compared by `Object.is`.
+ *
+ * The depth is the whole design. A Context Signal is an opaque
+ * application-typed value, so it may be arbitrarily nested, hold functions,
+ * `Date`s, or class instances, and contain cycles; a comparison that walked it
+ * would cost O(document) on every render of every publisher, and would hang or
+ * throw on the values it was never told about. Nothing here recurses, so the
+ * comparison costs the signal's own entry count, cannot loop on a cyclic value,
+ * and cannot throw. Anything that is not a plain object or an array — including
+ * a `Date`, a `Map`, or a class instance — is compared by identity, and so is a
+ * nested object: a signal that rebuilds one every render republishes every
+ * render, which is what `useMemo` at the call site is still for.
+ */
+function sameContextSignal(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true;
+  if (
+    typeof left !== "object" ||
+    typeof right !== "object" ||
+    left === null ||
+    right === null
+  ) {
+    return false;
+  }
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return (
+      Array.isArray(left) &&
+      Array.isArray(right) &&
+      left.length === right.length &&
+      left.every((value, index) => Object.is(value, right[index]))
+    );
+  }
+  // Plain objects only. Two class instances with matching fields are two
+  // instances, and deciding otherwise would mean answering for a `Map`, a
+  // `Date`, or a proxy the package has never seen by reading its properties.
+  const plain = (value: object) => {
+    const prototype = Object.getPrototypeOf(value);
+    return prototype === Object.prototype || prototype === null;
+  };
+  if (!plain(left) || !plain(right)) return false;
+  const entries = Object.entries(left);
+  return (
+    entries.length === Object.keys(right).length &&
+    entries.every(
+      ([key, value]) =>
+        Object.hasOwn(right, key) &&
+        Object.is(value, (right as Record<string, unknown>)[key]),
+    )
+  );
+}
+
 export function createCanvasModule<
   const Root extends RootPanelDefinition,
   const Definitions extends readonly PanelDefinitionShape[],
@@ -726,9 +779,19 @@ export function createCanvasModule<
         "Canvas Context Signals must run inside a Panel renderer",
       );
     }
+    // The signal is held rather than keyed on its object identity. The natural
+    // call site builds it inline from props — which is exactly what derived
+    // state looks like — and handing a fresh object to the dependency array
+    // republished it on every render, waking every Context Target reader for a
+    // value that had not changed. `sameContextSignal` decides that instead, one
+    // level deep; a signal it calls different is published immediately, and the
+    // effect still returns `publish`'s own cleanup, so unmounting unpublishes.
+    const held = useRef(signal);
+    if (!sameContextSignal(held.current, signal)) held.current = signal;
+    const published = held.current;
     useEffect(
-      () => store.publish(scope.panel.instanceRef, signal),
-      [scope, signal, store],
+      () => store.publish(scope.panel.instanceRef, published),
+      [published, scope, store],
     );
   }
 
