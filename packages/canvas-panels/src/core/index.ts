@@ -561,6 +561,13 @@ export type PanelEngine<Reference extends PanelReference = PanelReference> =
      * every affected Transition Guard as one Guarded Transition and committing
      * atomically. Panels shared with the current stack keep their identity and
      * their guards are never consulted.
+     *
+     * Sharing is decided on persisted identity: the leading Panels whose Kind,
+     * semantic Panel Key, and encoded descriptor match are the shared ones. A
+     * restoration target has been through its Kind's codec, so anything the
+     * codec leaves behind — a fetched title, a render hint — is not identity
+     * and does not rebuild the Panel that carries it. A transient Kind has no
+     * descriptor, and there its whole input is the identity.
      */
     restoreStack: (command: {
       references: readonly Reference[];
@@ -1053,6 +1060,49 @@ function panelReferencesEqual(
     );
   };
   return equal(left.input, right.input);
+}
+
+/**
+ * Decides whether a Panel already open is the same Panel a restoration target
+ * names, and so keeps its identity instead of being torn down and rebuilt.
+ *
+ * The comparison is on *persisted* identity — Kind, semantic Panel Key, and the
+ * descriptor the Kind's codec writes — because a restoration target has been
+ * through that codec and carries only what the codec encodes. A codec is
+ * required to persist the minimal identifier and view state and nothing else,
+ * so a live Panel input is routinely richer than its own decoded reference: it
+ * may carry a fetched record's title, a render hint, or merely a property whose
+ * value is `undefined`. Comparing whole inputs would call every one of those a
+ * different Panel, rebuilding Panels a traversal never left and raising a
+ * Guarded Transition for work the user is not walking away from.
+ *
+ * A transient Kind has no persisted form to compare and cannot arrive from a
+ * Navigation Document at all, so for one of those the whole input is identity.
+ */
+function panelSharesRestorationIdentity(
+  panel: OpenPanel,
+  target: PanelReference,
+  persistence: PanelPersistence<unknown>,
+): boolean {
+  const current = panel.reference;
+  if (current === target) return true;
+  if (current.kind !== target.kind || current.panelKey !== target.panelKey) {
+    return false;
+  }
+  if (persistence.mode === "transient") {
+    return panelReferencesEqual(current, target);
+  }
+  try {
+    return (
+      canonicalJson(persistence.codec.encode(current.input)) ===
+      canonicalJson(persistence.codec.encode(target.input))
+    );
+  } catch {
+    // A codec that cannot encode one of the two inputs has decided nothing, and
+    // a question about sameness is not the place to surface its failure. Fall
+    // back to the in-memory comparison; encoding the stack for real reports it.
+    return panelReferencesEqual(current, target);
+  }
 }
 
 export function defineRootPanel<const Kind extends string>(options: {
@@ -2651,14 +2701,18 @@ export function createPanelEngine<
       // and are never guarded: restoration only disturbs what actually changes.
       const contextualPanels = snapshot.panels.slice(1);
       let sharedCount = 0;
-      while (
-        sharedCount < contextualPanels.length &&
-        sharedCount < targets.length &&
-        panelReferencesEqual(
-          (contextualPanels[sharedCount] as OpenPanel).reference,
-          (targets[sharedCount] as { reference: PanelReference }).reference,
-        )
-      ) {
+      while (sharedCount < contextualPanels.length) {
+        const target = targets[sharedCount];
+        if (
+          !target ||
+          !panelSharesRestorationIdentity(
+            contextualPanels[sharedCount] as OpenPanel,
+            target.reference,
+            target.definition.persistence,
+          )
+        ) {
+          break;
+        }
         sharedCount += 1;
       }
 

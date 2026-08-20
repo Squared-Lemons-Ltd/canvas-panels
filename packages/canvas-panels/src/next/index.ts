@@ -230,9 +230,11 @@ export function seedCanvasNavigation<Reference extends PanelReference>(
  * Keeps the URL-Owning Canvas Workspace and the Next.js App Router URL in step.
  *
  * The Canvas only claims its parameter once it has contextual Panels open, so
- * unrelated routes stay delegated to the application. Every write uses replace
- * semantics: meaningful history entries are the browser-history adapter's
- * responsibility, not the deep-link contract's.
+ * unrelated routes stay delegated to the application. A write carries the
+ * navigation intent the engine published with the stack it is writing, so an
+ * `open` pushes an entry and Back pops exactly one Panel; only a repair the
+ * user never asked for — trimming a Panel the Canvas could not verify —
+ * replaces instead.
  */
 export function useCanvasNavigationSync<Reference extends PanelReference>(
   options: CanvasNavigationSyncOptions<Reference>,

@@ -3003,3 +3003,192 @@ test("restoration refuses a Panel Kind the registry does not know", () => {
     panelKind: "foreign",
   });
 });
+
+// A codec persists the minimal identifier and nothing else, exactly as the
+// navigation rule requires, so every live Panel input below is richer than its
+// own decoded reference — the shape a traversal actually hands `restoreStack`.
+function openPersistedStack(makeInput = (id) => ({ id })) {
+  const root = defineRootPanel({ kind: "root", title: "Root" });
+  const item = definePanel({
+    kind: "item",
+    deduplication: "reuse",
+    key: ({ id }) => id,
+    title: (input) => input.title ?? input.id,
+    persistence: {
+      mode: "navigation",
+      version: 1,
+      codec: {
+        encode: ({ id }) => ({ id }),
+        validate: (value) =>
+          typeof value === "object" &&
+          value !== null &&
+          typeof value.id === "string" &&
+          Object.keys(value).length === 1,
+        decode: ({ id }) => ({ id }),
+        migrations: [],
+      },
+    },
+  });
+  const engine = createPanelEngine({ root, panels: [item] });
+  engine.open({ panel: item.reference(makeInput("a")) });
+  engine.open({ panel: item.reference(makeInput("b")) });
+  const decoded = engine.decodeNavigationDocument(
+    engine.encodeNavigationDocument(),
+  );
+  assert.equal(decoded.status, "decoded");
+  return { engine, item, references: decoded.references };
+}
+
+for (const [shape, makeInput] of [
+  ["carries nothing the codec omits", (id) => ({ id })],
+  ["carries a fetched record's title", (id) => ({ id, title: `Item ${id}` })],
+  ["carries an undefined-valued property", (id) => ({ id, title: undefined })],
+]) {
+  test(`restoration keeps a Panel whose live input ${shape}`, () => {
+    const { engine, references } = openPersistedStack(makeInput);
+    const retainedId = engine.getSnapshot().panels[1].instanceId;
+    const removedId = engine.getSnapshot().panels[2].instanceId;
+
+    const outcome = engine.restoreStack({
+      references: references.slice(0, 1),
+    });
+
+    assert.equal(outcome.status, "restored");
+    assert.deepEqual(outcome.removedPanelIds, [removedId]);
+    assert.deepEqual(outcome.openedPanelIds, []);
+    assert.deepEqual(
+      engine.getSnapshot().panels.map(({ instanceId }) => instanceId),
+      [engine.getSnapshot().panels[0].instanceId, retainedId],
+    );
+  });
+}
+
+test("a retained Panel keeps the live input the codec could not carry", () => {
+  const { engine, references } = openPersistedStack((id) => ({
+    id,
+    title: `Item ${id}`,
+  }));
+
+  engine.restoreStack({ references: references.slice(0, 1) });
+
+  const retained = engine.getSnapshot().panels[1];
+  assert.equal(retained.title, "Item a");
+  assert.deepEqual(retained.reference.input, { id: "a", title: "Item a" });
+});
+
+test("a retained Panel's Transition Guard is never consulted", () => {
+  const { engine, references } = openPersistedStack((id) => ({
+    id,
+    title: `Item ${id}`,
+  }));
+  let guarded = 0;
+  engine.registerLifecycle({
+    target: engine.getSnapshot().panels[1].instanceRef,
+    lifecycle: {
+      dirty: true,
+      guard: () => {
+        guarded += 1;
+        return { status: "confirm", message: "Unsaved work" };
+      },
+      save: async () => ({ status: "saved" }),
+      discard: async () => ({ status: "discarded" }),
+    },
+  });
+
+  const outcome = engine.restoreStack({ references: references.slice(0, 1) });
+
+  assert.equal(outcome.status, "restored");
+  assert.equal(guarded, 0);
+  assert.equal(engine.getSnapshot().transition, null);
+});
+
+test("restoration rebuilds a Panel whose persisted view state changed", () => {
+  const root = defineRootPanel({ kind: "root", title: "Root" });
+  const record = definePanel({
+    kind: "record",
+    deduplication: "allow-many",
+    key: ({ id }) => id,
+    title: ({ id, tab }) => `${id}/${tab}`,
+    persistence: {
+      mode: "navigation",
+      version: 1,
+      codec: {
+        encode: ({ id, tab }) => ({ id, tab }),
+        validate: (value) =>
+          typeof value === "object" &&
+          value !== null &&
+          typeof value.id === "string" &&
+          typeof value.tab === "string",
+        decode: ({ id, tab }) => ({ id, tab }),
+        migrations: [],
+      },
+    },
+  });
+  const engine = createPanelEngine({ root, panels: [record] });
+  engine.open({ panel: record.reference({ id: "a", tab: "notes" }) });
+  const staleId = engine.getSnapshot().panels[1].instanceId;
+
+  const outcome = engine.restoreStack({
+    references: [record.reference({ id: "a", tab: "files" })],
+  });
+
+  assert.equal(outcome.status, "restored");
+  assert.deepEqual(outcome.removedPanelIds, [staleId]);
+  assert.equal(outcome.openedPanelIds.length, 1);
+  assert.equal(engine.getSnapshot().panels[1].title, "a/files");
+});
+
+test("restoration compares whole inputs for a transient Panel Kind", () => {
+  const root = defineRootPanel({ kind: "root", title: "Root" });
+  const note = definePanel({
+    kind: "note",
+    title: ({ body }) => body,
+  });
+  const engine = createPanelEngine({ root, panels: [note] });
+  engine.open({ panel: note.reference({ body: "First" }) });
+  const staleId = engine.getSnapshot().panels[1].instanceId;
+
+  const outcome = engine.restoreStack({
+    references: [note.reference({ body: "Second" })],
+  });
+
+  assert.equal(outcome.status, "restored");
+  assert.deepEqual(outcome.removedPanelIds, [staleId]);
+  assert.equal(engine.getSnapshot().panels[1].title, "Second");
+});
+
+test("a throwing codec leaves restoration comparing whole inputs", () => {
+  const root = defineRootPanel({ kind: "root", title: "Root" });
+  const item = definePanel({
+    kind: "item",
+    title: ({ id }) => id,
+    persistence: {
+      mode: "navigation",
+      version: 1,
+      codec: {
+        encode: () => {
+          throw new Error("Codec is broken");
+        },
+        validate: () => true,
+        decode: ({ id }) => ({ id }),
+        migrations: [],
+      },
+    },
+  });
+  const engine = createPanelEngine({ root, panels: [item] });
+  engine.open({ panel: item.reference({ id: "a" }) });
+  engine.open({ panel: item.reference({ id: "b" }) });
+  const retainedId = engine.getSnapshot().panels[1].instanceId;
+  const removedId = engine.getSnapshot().panels[2].instanceId;
+
+  const outcome = engine.restoreStack({
+    references: [item.reference({ id: "a" })],
+  });
+
+  assert.equal(outcome.status, "restored");
+  assert.deepEqual(outcome.removedPanelIds, [removedId]);
+  assert.deepEqual(
+    engine.getSnapshot().panels.map(({ instanceId }) => instanceId),
+    [engine.getSnapshot().panels[0].instanceId, retainedId],
+  );
+});
