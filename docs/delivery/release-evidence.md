@@ -59,6 +59,64 @@ node --input-type=module -e '
 
 `pnpm pack:check` already does the equivalent against the local tarball for every subpath, both consumers, and a Next production build. The commands above are the part it cannot do: proving that the *registry* holds the same bytes, and that an install with no workspace resolution reaches them.
 
+## 0.3.0
+
+Five reports from the first external adopter's migration onto `0.2.x`, each fixed in its own worktree behind its own gate and merged together. Two additions to the Public Contract, and one published type narrowed with them.
+
+| Field | Value |
+| --- | --- |
+| Version | `0.3.0` |
+| Tarball | `canvas-panels-0.3.0.tgz` |
+| Integrity, as published | `sha512-jtRsA0VzsI7OOw9NeEGV1Wvn2T8drrdZm0eR5SiCGQZZ09fO/JuBLNVJegIeT1ifBhvfu/CFLElbi7CZ+wTmoA==` |
+| Shasum, as published | `feb8d4afac94ada1e7b40a12a5c6e3e1919f1bb0` |
+| Integrity, local pack | `sha512-ySQXen8wbJ315YdJicxQCLWvBZOYKf8afWwmf+z4pUfmSl32usHrDc1/rCXM/3Z0qwxRts+f7pttaeKfaV01LA==` (`65fdfd9a…`) — differs only by the Changesets `package.json` rewrite; see "How to reproduce" |
+| Packed size | 52 entries, 144,549 bytes packed, 632,067 bytes unpacked |
+| Registry | Public npm, `https://registry.npmjs.org` |
+| Licence | MIT, shipped in the tarball |
+| Provenance | **Attested.** `https://slsa.dev/provenance/v1` plus npm's publish attestation, naming workflow `.github/workflows/release.yml` on `refs/heads/main` and source commit `68cdeeae…` |
+| Visibility | Public |
+| dist-tag | `latest`; `next` left on `0.2.0-rc.0` |
+| Source commit | `68cdeeae40be1b5c3b3bc53067159c382f8e9cd2`, tagged `@squaredlemons/canvas-panels@0.3.0` |
+| Workflow run | [32351946241](https://github.com/Squared-Lemons-Ltd/canvas-panels/actions/runs/32351946241), 20 August 2026 |
+| Toolchain | Node 22.23.2, npm `^11.5.1` installed in the job, pnpm 9.15.9 |
+| Gate | `pnpm gate` passed on the cut commit and again in CI: 457 contract tests, 3 packed-consumer tests, 0 failures, on Node 22 and Node 24 |
+
+### What shipped
+
+Minor, both additions to the Public Contract:
+
+- **A Panel Kind can declare its own width** ([#57](https://github.com/Squared-Lemons-Ltd/canvas-panels/issues/57)). `definePanel({ width: { resting, active } })`, either half alone, validated at definition time so a malformed or hostile value throws a `TypeError` on the line that wrote it rather than rendering wrongly on the first surface that opens the Panel. A declared width is resolved onto the two existing custom properties on the Panel element, so it outranks a stylesheet rule for that Kind; the narrow presentations and a Panel Separator drag still outrank it.
+- **A Canvas Action can carry application content in the Panel header** ([#59](https://github.com/Squared-Lemons-Ltd/canvas-panels/issues/59)). Registered through the same path a button uses rather than portalled, so no application DOM races the package's re-renders. Adds the `data-canvas-action-content` attribute.
+
+Patch:
+
+- **The breadcrumb trail is one scrolling line** ([#58](https://github.com/Squared-Lemons-Ltd/canvas-panels/issues/58)). It was a wrapping row of full Panel titles, so its height was unbounded in title length — 284px on a 390×844 viewport at three deep, against real data. Measured in Chromium at 54px after, with no horizontal overflow at 320, 390, 480, or 767px.
+- **A Context Signal is compared by value** ([#60](https://github.com/Squared-Lemons-Ltd/canvas-panels/issues/60)). It was keyed on object identity, so the natural inline literal republished every render and woke every Context Target reader. Held and compared one level deep, non-recursive, so a cyclic signal is safe rather than a hang.
+- **A resolved Guarded Transition leaves focus inside the Workspace** ([#61](https://github.com/Squared-Lemons-Ltd/canvas-panels/issues/61)). It was returning focus to `document.body`, which passes `isConnected`, so the retained Active Panel heading was never reached and the next Escape did not dismiss an Overlay Workspace. The primary Canvas Workspace had the same defect and is fixed by the same change.
+
+### One published type narrowed
+
+`CanvasActionProps` became the union `CanvasActionButtonProps | CanvasActionContentProps`, so `label` and `onSelect` are no longer unconditionally present on it. Checked against the built declarations rather than reasoned about: constructing an action and holding a `readonly CanvasActionProps[]` are unaffected; reading one of those members off the type fails with `error TS18048`. The freeze policy permits a `0.x` minor to carry a breaking change only where the consumer's exact edit is recorded, and the changelog carries it.
+
+### The publish left no `gitHead`, and again did not push its tag
+
+The same two gaps as `0.2.1`, now seen twice and therefore properties of this path rather than accidents:
+
+- **`npm view @squaredlemons/canvas-panels@0.3.0 gitHead` is empty.** The tie to source is the attestation, which is signed and names `68cdeeae…`.
+- **`changeset publish` created the tag and the workflow's own `git push --tags` did not push it.** The run log shows both: `🦋 New tag: @squaredlemons/canvas-panels@0.3.0`, then `Everything up-to-date` from the push step, and the tag was absent from the remote afterwards. It was created here from the attested commit and pushed by hand. The step is not merely redundant, it reports success while doing nothing — worth fixing rather than continuing to compensate for by hand.
+
+### Verified against the registry
+
+Run on 20 August 2026, unauthenticated — the package is public:
+
+- `npm view` reports `dist.integrity sha512-jtRsA0Vz…` and `dist.shasum feb8d4af…`, matching the row above, with `latest` resolving to `0.3.0` and `next` still on `0.2.0-rc.0`.
+- **The attestation covers the bytes npm serves.** Both the SLSA provenance and npm's publish attestation carry a subject digest that decodes to exactly the `dist.integrity` above, so the tarball on the registry is the one the workflow built, from `68cdeeae…`, in run 32351946241.
+- The published tarball was downloaded and compared against a local pack of the same tree: `diff -r` over `dist/` is **empty**, the file lists are identical, and `package.json` is semantically equal.
+- A clean consumer outside this workspace — `npm init`, then `npm add @squaredlemons/canvas-panels@0.3.0 react@^19 react-dom@^19` with no `.npmrc` and no token — installed it and recorded `sha512-jtRsA0Vz…` in its own lockfile.
+- In that consumer all nine subpaths import and `styles.css` resolves to `@squaredlemons/canvas-panels/dist/styles.css`.
+- **The `#57` addition was exercised against the published artifact**, not the local build: `definePanel({ width })` round-trips `{ resting, active }` onto the definition, and a width carrying a second declaration (`"28rem; color: red"`) is refused with a `TypeError` at definition time.
+- `npm audit signatures` reports verified registry signatures for all four packages and verified attestations for three, this package among them.
+
 ## 0.2.1
 
 The first release published by the workflow end to end — trusted publishing, an attestation, and no human holding a credential. Three patch changes, no movement on the Public Contract.
