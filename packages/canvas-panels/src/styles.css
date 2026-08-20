@@ -289,12 +289,46 @@
     font-weight: 600;
   }
 
-  [data-canvas-panel-header] button {
+  /*
+   * The action row is pushed to the trailing edge by giving its first control
+   * the automatic margin and taking it back off every control after that.
+   *
+   * Both selectors are direct-child on purpose. A content Action may hold
+   * buttons of its own, and a descendant selector would hand one of those the
+   * margin that lays out the row — pushing an application's embedded control
+   * to the far side of its own readout.
+   */
+  [data-canvas-panel-header] > button {
     margin-inline-start: auto;
   }
 
-  [data-canvas-panel-header] button + button {
+  [data-canvas-panel-header] > button + button,
+  [data-canvas-panel-header] > [data-canvas-action-content] + button,
+  [data-canvas-panel-header] > button + [data-canvas-action-content],
+  [data-canvas-panel-header]
+    > [data-canvas-action-content]
+    + [data-canvas-action-content] {
     margin-inline-start: 0;
+  }
+
+  /*
+   * What the package owns of a content Action is where it sits and how it lays
+   * out: a row item, centred with the buttons beside it, spacing its own parts
+   * the way the header spaces its controls. What it holds is the
+   * application's, and takes no styling from here.
+   *
+   * It may shrink, unlike a button. A button that shrinks stops being a
+   * pointer target, but a readout that cannot shrink is a readout that pushes
+   * the row off the end of the header — and truncating its own text is exactly
+   * what this kind of content is for.
+   */
+  [data-canvas-panel-header] > [data-canvas-action-content] {
+    align-items: center;
+    display: flex;
+    flex: 0 1 auto;
+    gap: 0.5rem;
+    margin-inline-start: auto;
+    min-inline-size: 0;
   }
 
   [data-canvas-panel-header] button:hover,

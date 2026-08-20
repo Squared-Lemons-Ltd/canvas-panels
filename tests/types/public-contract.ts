@@ -1,3 +1,5 @@
+import type { ComponentProps } from "react";
+
 import {
   createPanelEngine,
   definePanel,
@@ -167,6 +169,61 @@ void BoundConsumer;
 Canvas.createEngine();
 // @ts-expect-error Bound Canvas modules expose narrow hooks, not raw snapshots.
 Canvas.useCanvas();
+
+// An Action is a button or it is content, and the compiler is what holds the
+// two apart: neither invalid combination is left to be discovered at runtime.
+type BoundActionProps = ComponentProps<typeof Canvas.Action>;
+
+const buttonAction: BoundActionProps = {
+  id: "rename",
+  label: "Rename",
+  onSelect: () => {},
+  priority: 20,
+  destructive: false,
+  disabled: false,
+};
+const contentAction: BoundActionProps = {
+  id: "job-status",
+  priority: 10,
+  content: "Encoding, 41s elapsed",
+};
+// Content with nothing to show says so with `null`.
+const idleContentAction: BoundActionProps = { id: "job-status", content: null };
+// @ts-expect-error An Action is a button or content, never both.
+const bothShapes: BoundActionProps = {
+  id: "both",
+  label: "Rename",
+  onSelect: () => {},
+  content: "Encoding, 41s elapsed",
+};
+// @ts-expect-error An Action must be one of the two shapes, not neither.
+const neitherShape: BoundActionProps = { id: "neither" };
+// @ts-expect-error Content carries no handler: it renders its own controls.
+const contentWithHandler: BoundActionProps = {
+  id: "handled",
+  content: "Encoding, 41s elapsed",
+  onSelect: () => {},
+};
+// @ts-expect-error Content owns its own presentation, including this.
+const contentWithButtonPresentation: BoundActionProps = {
+  id: "loud",
+  content: "Encoding, 41s elapsed",
+  destructive: true,
+};
+// @ts-expect-error `undefined` is not content; the presence of `content` is
+// what tells the two shapes apart, and content with nothing to show is `null`.
+const contentWithoutContent: BoundActionProps = {
+  id: "absent",
+  content: undefined,
+};
+void buttonAction;
+void contentAction;
+void idleContentAction;
+void bothShapes;
+void neitherShape;
+void contentWithHandler;
+void contentWithButtonPresentation;
+void contentWithoutContent;
 
 const engine = createPanelEngine({
   root,
