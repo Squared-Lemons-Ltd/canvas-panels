@@ -1,5 +1,77 @@
 # @squaredlemons/canvas-panels
 
+## 0.2.1
+
+### Patch Changes
+
+- 59d2bb4: Say what the package is on its own npm listing.
+
+  The description read "Reusable Canvas Panels interaction framework for Squared
+  Lemons applications" — written while the package was private, and still the line
+  under the name in npm search results after it went public under MIT. It now
+  describes the thing rather than its former owner, and the first line of the
+  shipped README matches it.
+
+  The package also carried no `keywords`, which is npm's only search signal beyond
+  the name: nobody could find it without already knowing what it was called.
+
+  No code changed. Both are metadata, and both only reach the registry on a
+  release, which is why they are worth one.
+
+- 4e64572: Keep a Panel across a restoration when its live input carries more than its
+  codec persists.
+
+  `restoreStack` decided which Panels the target stack shared with the current one
+  by deep-equality of the whole in-memory Panel input. A restoration target has
+  been through the Kind's codec and carries only what the codec encodes, and the
+  navigation rule requires a codec to encode the minimal identifier and view state
+  and nothing else — so a Panel titled from a fetched record was never equal to its
+  own decoded reference. Following the documented rule was what broke retention.
+
+  The cost was paid on every Back on a stack three or more deep: each Panel the
+  user was not leaving unmounted and rebuilt, losing its local state and re-reading
+  its data, and — because it was collected as a _removed_ Panel — raised an
+  unsaved-changes dialog for work nobody was walking away from. A property whose
+  value was merely `undefined` was enough to trigger it, so a consumer could not
+  reliably dodge it by leaving a field out.
+
+  Sharing is now decided on persisted identity: the leading run of Panels whose
+  Kind, semantic Panel Key, and encoded descriptor match the targets. A transient
+  Kind has no descriptor, and for one of those the whole input is still the
+  identity, unchanged.
+
+  **What changes for a consumer.** Nothing to edit. If you adopted the workaround
+  of keeping each Panel input exactly equal to what its codec persists, you can
+  drop it and put the title back where it belongs. One behaviour is genuinely
+  different: `restoreStack` no longer rebuilds a Panel to pick up a change the
+  codec does not encode. Panel input that the codec omits is presentational by
+  definition, and `engine.update` is how it changes.
+
+- 32380ed: Make the README useful to someone who has just landed on the npm page.
+
+  The README is the package page, and it was written for a reader who already had
+  the repository open. Three things changed for the one who does not.
+
+  **There is somewhere to look before installing.** A sample CRM built on the
+  package is linked from the top, with the two minutes' worth of it that show what
+  the package is for: open an account, follow a contact out of it, try to close a
+  Panel with unsaved work in it, then copy the URL into a new tab and watch the
+  whole stack come back.
+
+  **The install instruction no longer assumes pnpm.** All four package managers are
+  given. `pnpm add` as the only line asked a reader on npm or yarn to translate it
+  before they could start, which is a strange thing to do to someone deciding
+  whether to bother.
+
+  **The peers are stated as ranges rather than as a command.** `react@^19` in an
+  install command reads like an instruction to run it, and running it rewrites the
+  React range of an application that already had one. The requirement is
+  `>=19 <20` for React and React DOM and `>=15 <17` for Next.js — which an existing
+  React application already satisfies, so there is usually nothing to run at all.
+
+  No code changed, and the ranges themselves are exactly what the manifest has
+  always declared. This is the listing catching up with the package.
+
 ## 0.2.0
 
 ### Minor Changes
