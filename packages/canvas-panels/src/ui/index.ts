@@ -1083,6 +1083,7 @@ export function createCanvasModule<
     const returnFocus = useRef<HTMLElement | null>(null);
     const focusedPanelId = useRef<PanelInstanceId | null>(null);
     const panelScrollOffsets = useRef(new Map<PanelInstanceId, number>());
+    const breadcrumbTrail = useRef<HTMLOListElement>(null);
     const previouslyVisiblePanelIds = useRef<readonly PanelInstanceId[]>([]);
     const previousTransition = useRef(snapshot.transition);
     const initiallyFocusedPanel = useRef<PanelInstanceId | null>(null);
@@ -1436,6 +1437,37 @@ export function createCanvasModule<
       }
     }, [visiblePanelIds, ownPanelElement]);
 
+    // The breadcrumb trail is one scrolling line, and where it rests is a
+    // decision, not a default: the crumb for the Active Panel is the last one
+    // the trail renders, so a trail left at its inline start hides the very
+    // crumb that says where you are. It is put at its inline end whenever the
+    // Active Panel changes — which is the same position a trail short enough to
+    // fit already has, so nothing moves until something is actually out of
+    // view. Closing a deeper Panel leaves the trail alone, because the trail
+    // ends at the Active Panel and never showed that Panel in the first place.
+    //
+    // Written directly rather than scrolled to: `scrollIntoView` would scroll
+    // every ancestor that could scroll, including the document, and this is
+    // one element's own offset. The write is instant, so there is no motion
+    // for a reduced-motion preference to have an opinion about; an application
+    // that has asked for `scroll-behavior: smooth` is honoured here as it is
+    // anywhere else, and the package's own reduced-motion block already forces
+    // that back to `auto`.
+    useLayoutEffect(() => {
+      const trail = breadcrumbTrail.current;
+      // Only a narrow presentation renders a trail, and only a Canvas with an
+      // Active Panel has a crumb to rest on.
+      if (!trail || snapshot.breakpoint !== "mobile" || activeIndex < 0) return;
+      // In a right-to-left Canvas the inline end is the negative extreme; the
+      // browser clamps either request to the real scroll range.
+      const inlineEnd =
+        typeof window !== "undefined" &&
+        window.getComputedStyle(trail).direction === "rtl"
+          ? -trail.scrollWidth
+          : trail.scrollWidth;
+      trail.scrollLeft = inlineEnd;
+    }, [activeIndex, snapshot.breakpoint]);
+
     const rememberFocus = useCallback(() => {
       returnFocus.current =
         typeof document !== "undefined" &&
@@ -1631,7 +1663,7 @@ export function createCanvasModule<
                   : null,
                 createElement(
                   "ol",
-                  { "data-canvas-breadcrumbs": "" },
+                  { "data-canvas-breadcrumbs": "", ref: breadcrumbTrail },
                   ...snapshot.panels
                     .slice(0, activeIndex + 1)
                     .map((panel, breadcrumbIndex) =>
