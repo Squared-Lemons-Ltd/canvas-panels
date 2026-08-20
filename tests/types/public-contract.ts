@@ -328,6 +328,45 @@ engine.close({
   },
 });
 
+// A Panel Kind may declare its own default presentation. Both halves are
+// optional on their own, and a declaration that declares neither is refused by
+// the type rather than accepted and silently ignored.
+const widePanel = definePanel({
+  kind: "wide-student",
+  title: (input: { name: string }) => input.name,
+  width: { resting: "28rem", active: "min(48rem, 92vw)" },
+});
+definePanel({
+  kind: "resting-width-student",
+  title: (input: { name: string }) => input.name,
+  width: { resting: "22rem" },
+});
+definePanel({
+  kind: "active-width-student",
+  title: (input: { name: string }) => input.name,
+  width: { active: "40rem" },
+});
+const declaredWidth: string | undefined = widePanel.width?.resting;
+void declaredWidth;
+definePanel({
+  kind: "empty-width-student",
+  title: (input: { name: string }) => input.name,
+  // @ts-expect-error A declared width must name a resting or an active width.
+  width: {},
+});
+definePanel({
+  kind: "numeric-width-student",
+  title: (input: { name: string }) => input.name,
+  // @ts-expect-error Panel widths are CSS length strings, not numbers.
+  width: { resting: 320 },
+});
+definePanel({
+  kind: "unknown-width-student",
+  title: (input: { name: string }) => input.name,
+  // @ts-expect-error A declared width names only the two documented positions.
+  width: { resting: "22rem", collapsed: "8rem" },
+});
+
 const helpRoot = defineRootPanel({ kind: "help-root", title: "Help" });
 const shortcuts = definePanel({
   kind: "shortcuts",

@@ -11,6 +11,7 @@ import {
   defineRootPanel,
 } from "../packages/canvas-panels/dist/core/index.js";
 import {
+  canvasPanelSizingBounds,
   createCanvasModule,
   defineCanvasContext,
 } from "../packages/canvas-panels/dist/ui/index.js";
@@ -1746,4 +1747,111 @@ test("focus inside a Panel settles the Workspace instead of re-opening its focus
   );
   assert.equal(document.activeElement, elsewhere);
   rendered.unmount();
+});
+
+function renderDeclaredWidthCanvas() {
+  const root = defineRootPanel({ kind: "classes", title: "Classes" });
+  const wide = definePanel({
+    kind: "wide",
+    title: () => "Wide",
+    width: { resting: "28rem", active: "min(48rem, 92vw)" },
+  });
+  const restingOnly = definePanel({
+    kind: "resting-only",
+    title: () => "Resting only",
+    width: { resting: "22rem" },
+  });
+  const activeOnly = definePanel({
+    kind: "active-only",
+    title: () => "Active only",
+    width: { active: "40rem" },
+  });
+  const themed = definePanel({ kind: "themed", title: () => "Themed" });
+  const panels = [wide, restingOnly, activeOnly, themed];
+  const Canvas = createCanvasModule({
+    root,
+    panels,
+    renderers: {
+      classes: () => null,
+      wide: () => null,
+      "resting-only": () => null,
+      "active-only": () => null,
+      themed: () => null,
+    },
+  });
+  const engine = createPanelEngine({ root, panels });
+  const result = render(
+    createElement(
+      Canvas.Provider,
+      { engine },
+      createElement(Canvas.Workspace, { label: "Classes Canvas" }),
+    ),
+  );
+  for (const definition of panels) {
+    act(() => {
+      engine.open({ panel: definition.reference({}) });
+    });
+  }
+  const panelFor = (kind) =>
+    result.container.querySelector(`[data-panel-kind="${kind}"]`);
+  return { engine, panelFor, result };
+}
+
+test("a Panel Kind that declares a width renders at it", () => {
+  const { panelFor } = renderDeclaredWidthCanvas();
+
+  // Resolved onto the two custom properties the stylesheet already reads, on
+  // the Panel element itself, so the width the Kind declared is the width the
+  // Panel rules see.
+  const wide = panelFor("wide");
+  assert.equal(wide.style.getPropertyValue("--canvas-panel-width"), "28rem");
+  assert.equal(
+    wide.style.getPropertyValue("--canvas-panel-active-width"),
+    "min(48rem, 92vw)",
+  );
+
+  // Each half is independent: declaring one leaves the other inherited, so the
+  // stylesheet still answers for it.
+  const restingOnly = panelFor("resting-only");
+  assert.equal(
+    restingOnly.style.getPropertyValue("--canvas-panel-width"),
+    "22rem",
+  );
+  assert.equal(
+    restingOnly.style.getPropertyValue("--canvas-panel-active-width"),
+    "",
+  );
+
+  const activeOnly = panelFor("active-only");
+  assert.equal(activeOnly.style.getPropertyValue("--canvas-panel-width"), "");
+  assert.equal(
+    activeOnly.style.getPropertyValue("--canvas-panel-active-width"),
+    "40rem",
+  );
+});
+
+test("a Panel Kind that declares no width is unchanged", () => {
+  const { panelFor } = renderDeclaredWidthCanvas();
+
+  // No style attribute at all — not an empty one — so a Canvas whose Kinds say
+  // nothing about presentation produces exactly the markup it always has, and
+  // the only width seam is still the stylesheet.
+  for (const kind of ["classes", "themed"]) {
+    assert.equal(panelFor(kind).hasAttribute("style"), false);
+  }
+});
+
+test("a Panel Separator drag still outranks the width its Kind declared", () => {
+  const { panelFor } = renderDeclaredWidthCanvas();
+  const panel = panelFor("wide");
+  const handle = panel.querySelector("[data-canvas-panel-separator]");
+
+  act(() => {
+    fireEvent.keyDown(handle, { key: "End" });
+  });
+
+  assert.equal(panel.style.flexBasis, `${canvasPanelSizingBounds.max}px`);
+  // The declaration stays where it was: a drag replaces the resolved width, not
+  // the Kind's own default, so releasing it would restore the declared one.
+  assert.equal(panel.style.getPropertyValue("--canvas-panel-width"), "28rem");
 });

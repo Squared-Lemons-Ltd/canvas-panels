@@ -81,6 +81,7 @@ These live in the package README, which ships inside the tarball, and each is en
 | Navigation and guards | README "API", "Navigation" | Branch Replacement, Guard Outcomes, atomic commit, document limits and fail-closed rules |
 | Accessibility | README "Accessibility" | F6 region cycling as the only claimed key, one polite live region, the single Panel Focus Owner, dialog inertness and focus return, reduced motion |
 | Custom properties | README "Theming" | every `--canvas-*` token the package reads, its default, and the three override positions. The suite fails on a token the stylesheet knows and the table does not, and on a documented default that has drifted from the one declared |
+| Panel width | README "API", "Theming" | the optional `width` on `definePanel` — `resting`, `active`, at least one of the two — the two custom properties it resolves onto, the values it accepts, and that a declared width outranks the tokens for that Panel Kind |
 | Integration attributes | README "Theming" | the complete `data-canvas-*` table; an attribute the package emits and that table does not name fails the gate |
 | Cascade layer | README "Theming" | the layer name `canvas-panels`, and that nothing is emitted outside it |
 | Testing tools | README "Testing" | a fake or builder for every published seam |
