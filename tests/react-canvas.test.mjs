@@ -1393,6 +1393,243 @@ test("scoped composition registers actions, titles, focus targets, lifecycle lab
   rendered.unmount();
 });
 
+test("a Context Signal built inline wakes a Context Target only when its own entries change", async () => {
+  const editor = definePanel({ kind: "editor", title: ({ name }) => name });
+  let Canvas;
+  let readerRenders = 0;
+
+  function Reader() {
+    readerRenders += 1;
+    const target = Canvas.useContextTarget("active");
+    return createElement(
+      "output",
+      null,
+      target.signal
+        ? `${target.signal.entityId}: ${target.signal.title}`
+        : "No context",
+    );
+  }
+
+  function Editor({ descriptor }) {
+    const [keystrokes, setKeystrokes] = useState(0);
+    const [title, setTitle] = useState("Ada Lovelace");
+    // The shape the defect was filed about: a fresh object literal every
+    // render, built from props and local state, holding only primitives.
+    // Nothing about it is memoised, and nothing about it needs to be.
+    Canvas.useContextSignal({
+      entityType: "contact",
+      entityId: descriptor.name,
+      title,
+    });
+    return createElement(
+      "div",
+      null,
+      createElement(
+        "button",
+        { onClick: () => setKeystrokes((count) => count + 1), type: "button" },
+        "Type a keystroke",
+      ),
+      createElement("span", { "data-testid": "keystrokes" }, `${keystrokes}`),
+      createElement(
+        "button",
+        { onClick: () => setTitle("Grace Hopper"), type: "button" },
+        "Rename",
+      ),
+    );
+  }
+
+  Canvas = createCanvasModule({
+    context: defineCanvasContext(),
+    root: defineRootPanel({ kind: "root", title: "Home" }),
+    panels: [editor],
+    renderers: {
+      root: () => {
+        const navigation = Canvas.useNavigation();
+        return createElement(
+          "button",
+          {
+            onClick: () => navigation.open(editor, { name: "Draft" }),
+            type: "button",
+          },
+          "Open editor",
+        );
+      },
+      editor: Editor,
+    },
+  });
+  const rendered = render(
+    createElement(
+      Canvas.Provider,
+      null,
+      createElement(Reader),
+      createElement(Canvas.Workspace, { label: "Signals" }),
+    ),
+  );
+
+  fireEvent.click(rendered.getByRole("button", { name: "Open editor" }));
+  await waitFor(() =>
+    assert.equal(
+      rendered.getByRole("status").textContent,
+      "Draft: Ada Lovelace",
+    ),
+  );
+
+  // The measurement the defect is about. Re-rendering the publishing Panel —
+  // one keystroke in a field the Context Target knows nothing about — used to
+  // republish the signal and wake every reader, because the effect was keyed on
+  // the literal's object identity.
+  readerRenders = 0;
+  for (let count = 0; count < 3; count += 1) {
+    fireEvent.click(rendered.getByRole("button", { name: "Type a keystroke" }));
+  }
+  assert.equal(rendered.getByTestId("keystrokes").textContent, "3");
+  assert.equal(readerRenders, 0);
+  assert.equal(rendered.getByRole("status").textContent, "Draft: Ada Lovelace");
+
+  // A value that genuinely changed still publishes, promptly.
+  fireEvent.click(rendered.getByRole("button", { name: "Rename" }));
+  await waitFor(() =>
+    assert.equal(
+      rendered.getByRole("status").textContent,
+      "Draft: Grace Hopper",
+    ),
+  );
+  assert.ok(readerRenders > 0);
+
+  // And holding the signal must not cost the unpublish: the effect still
+  // returns the store's own cleanup, so closing the Panel clears the Context
+  // Target rather than leaving a signal behind for an unmounted Panel.
+  fireEvent.click(rendered.getByRole("button", { name: "Close Draft" }));
+  await waitFor(() =>
+    assert.equal(rendered.getByRole("status").textContent, "No context"),
+  );
+  rendered.unmount();
+});
+
+test("a Context Signal is compared one level deep, so cycles are safe and rebuilt values republish", async () => {
+  const editor = definePanel({ kind: "editor", title: ({ name }) => name });
+  // Cyclic, and published every render. Nothing in the comparison recurses, so
+  // this is compared and dismissed by identity rather than walked.
+  const cyclic = { label: "Cyclic" };
+  cyclic.self = cyclic;
+  const signals = {
+    cyclic: () => cyclic,
+    // A fresh array literal of primitives every render: the same own entries,
+    // so the same signal.
+    array: () => ["array", "Ada Lovelace"],
+    // Non-plain values, rebuilt every render. Each is compared by identity, so
+    // this signal is a different signal every time — the documented cost, and
+    // the case `useMemo` at the call site is still for.
+    rebuilt: () => ({ label: "Rebuilt", at: new Date(0), open: () => {} }),
+  };
+  const describe = (signal) =>
+    signal === undefined
+      ? "No context"
+      : Array.isArray(signal)
+        ? signal.join(": ")
+        : signal.label;
+  let Canvas;
+  let readerRenders = 0;
+
+  function Reader() {
+    readerRenders += 1;
+    const target = Canvas.useContextTarget("active");
+    return createElement("output", null, describe(target.signal));
+  }
+
+  function Editor() {
+    const [mode, setMode] = useState("cyclic");
+    const [tick, setTick] = useState(0);
+    Canvas.useContextSignal(signals[mode]());
+    return createElement(
+      "div",
+      null,
+      createElement("span", { "data-testid": "ticks" }, `${tick}`),
+      createElement(
+        "button",
+        { onClick: () => setTick((count) => count + 1), type: "button" },
+        "Re-render",
+      ),
+      ...Object.keys(signals).map((name) =>
+        createElement(
+          "button",
+          { key: name, onClick: () => setMode(name), type: "button" },
+          `Publish ${name}`,
+        ),
+      ),
+    );
+  }
+
+  Canvas = createCanvasModule({
+    context: defineCanvasContext(),
+    root: defineRootPanel({ kind: "root", title: "Home" }),
+    panels: [editor],
+    renderers: {
+      root: () => {
+        const navigation = Canvas.useNavigation();
+        return createElement(
+          "button",
+          {
+            onClick: () => navigation.open(editor, { name: "Draft" }),
+            type: "button",
+          },
+          "Open editor",
+        );
+      },
+      editor: Editor,
+    },
+  });
+  const rendered = render(
+    createElement(
+      Canvas.Provider,
+      null,
+      createElement(Reader),
+      createElement(Canvas.Workspace, { label: "Signals" }),
+    ),
+  );
+
+  const rerenderPanel = (times) => {
+    readerRenders = 0;
+    for (let count = 0; count < times; count += 1) {
+      fireEvent.click(rendered.getByRole("button", { name: "Re-render" }));
+    }
+  };
+
+  fireEvent.click(rendered.getByRole("button", { name: "Open editor" }));
+  await waitFor(() =>
+    assert.equal(rendered.getByRole("status").textContent, "Cyclic"),
+  );
+
+  // Reaching the assertion at all is most of the point: a comparison that
+  // walked the value would not return from the first render.
+  rerenderPanel(3);
+  assert.equal(rendered.getByTestId("ticks").textContent, "3");
+  assert.equal(readerRenders, 0);
+  assert.equal(rendered.getByRole("status").textContent, "Cyclic");
+
+  fireEvent.click(rendered.getByRole("button", { name: "Publish array" }));
+  await waitFor(() =>
+    assert.equal(
+      rendered.getByRole("status").textContent,
+      "array: Ada Lovelace",
+    ),
+  );
+  rerenderPanel(3);
+  assert.equal(readerRenders, 0);
+
+  fireEvent.click(rendered.getByRole("button", { name: "Publish rebuilt" }));
+  await waitFor(() =>
+    assert.equal(rendered.getByRole("status").textContent, "Rebuilt"),
+  );
+  // Documented rather than silently different: a `Date` and a function are
+  // compared by identity, so a signal that rebuilds them republishes on every
+  // render, exactly as it did before the comparison landed.
+  rerenderPanel(3);
+  assert.ok(readerRenders >= 3);
+  assert.equal(rendered.getByRole("status").textContent, "Rebuilt");
+  rendered.unmount();
+});
+
 test("a registered visual title replaces the heading rather than printing beside it", () => {
   const editor = definePanel({ kind: "editor", title: ({ name }) => name });
   let Canvas;
