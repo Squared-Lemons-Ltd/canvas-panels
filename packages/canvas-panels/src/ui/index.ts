@@ -131,14 +131,105 @@ export function defineCanvasContext<Signal>(): CanvasContextDefinition<Signal> {
   return Object.freeze({}) as CanvasContextDefinition<Signal>;
 }
 
-export type CanvasActionProps = Readonly<{
+/**
+ * What a content Action may render. `undefined` is excluded on purpose: the
+ * presence of `content` is what tells the two Action shapes apart, so a
+ * control with nothing to show says so with `null` rather than by briefly
+ * becoming a button registration with no label.
+ */
+export type CanvasActionContent = Exclude<ReactNode, undefined>;
+
+export type CanvasActionButtonProps = Readonly<{
   id: string;
   label: string;
   priority?: number;
   disabled?: boolean;
   destructive?: boolean;
   onSelect: () => void;
+  content?: never;
 }>;
+
+/**
+ * The header control no label string describes: a live readout, a status
+ * composite, something with its own embedded button. It registers through the
+ * same path a button Action does and sorts into the same row under the same
+ * `priority` rules — the package decides where it goes, the application
+ * decides what renders.
+ *
+ * The `never`s are the whole point of splitting the shape in two. A
+ * registration carrying both a `label`/`onSelect` pair and content, or
+ * neither, is rejected by the compiler rather than discovered at runtime.
+ */
+export type CanvasActionContentProps = Readonly<{
+  id: string;
+  priority?: number;
+  content: CanvasActionContent;
+  label?: never;
+  onSelect?: never;
+  disabled?: never;
+  destructive?: never;
+}>;
+
+export type CanvasActionProps =
+  | CanvasActionButtonProps
+  | CanvasActionContentProps;
+
+/**
+ * Where a content Action's current render lives between the Panel body that
+ * produced it and the header that shows it.
+ *
+ * Application content is a new element on every render, so putting it in the
+ * registration itself would re-register the Action every time the application
+ * re-rendered — the Workspace's action map is keyed on registration identity,
+ * and a ticking readout would churn it once a second. The registration holds
+ * this store instead: its identity never moves, the header subscribes to it,
+ * and only the one header slot re-renders.
+ */
+type HeaderContentStore = Readonly<{
+  subscribe: (listener: () => void) => () => void;
+  read: () => CanvasActionContent;
+  write: (content: CanvasActionContent) => void;
+}>;
+
+function createHeaderContentStore(): HeaderContentStore {
+  let content: CanvasActionContent = null;
+  const listeners = new Set<() => void>();
+  return Object.freeze({
+    subscribe: (listener: () => void) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    read: () => content,
+    write: (next: CanvasActionContent) => {
+      if (Object.is(next, content)) return;
+      content = next;
+      for (const listener of listeners) listener();
+    },
+  });
+}
+
+/**
+ * What the Workspace holds for one registered Action. The public props are the
+ * application's spelling of this; the button member keeps `content` declared
+ * and absent so the two can be told apart by reading one property.
+ */
+type ActionRegistration =
+  | Readonly<{
+      id: string;
+      label: string;
+      priority?: number;
+      disabled?: boolean;
+      destructive?: boolean;
+      onSelect: () => void;
+      content?: undefined;
+    }>
+  | Readonly<{
+      id: string;
+      priority?: number;
+      content: HeaderContentStore;
+    }>;
 
 export type CanvasPanelLifecycle = PanelLifecycle &
   Readonly<{
@@ -214,6 +305,63 @@ class PanelRendererBoundary extends Component<
         "Retry panel",
       ),
     );
+  }
+}
+
+/**
+ * A content Action's own containment. Application content in the header is the
+ * one piece of application rendering that happens outside the Panel body, and
+ * so outside the boundary that keeps a renderer failure inside its own Panel;
+ * without this, a throw in a ticking readout would take the whole Workspace
+ * down with it.
+ *
+ * A header is no place for a failure notice — the body's notice already tells
+ * the reader that something went wrong — so a failure drops the content from
+ * the row and is reported through the same `onRendererError` a body failure
+ * uses. The next content the application renders is attempted again: the reset
+ * is driven by new children arriving, so content that throws every time
+ * settles at blank instead of looping.
+ */
+class HeaderContentBoundary extends Component<
+  Readonly<{
+    children?: ReactNode;
+    kind: string;
+    panel: PanelInstanceRef;
+    onError?: (report: RendererErrorReport) => void;
+  }>,
+  Readonly<{ failed: boolean }>
+> {
+  state = Object.freeze({ failed: false });
+
+  /**
+   * The content this boundary last handed to React, which is the content that
+   * threw. Comparing against the *previous* props instead would compare the
+   * failure to the render before it, find them different, and retry the same
+   * content that had just failed — one extra render and one duplicate report
+   * for every failure.
+   */
+  attempted: ReactNode = null;
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  componentDidCatch() {
+    this.props.onError?.(
+      Object.freeze({ kind: this.props.kind, panel: this.props.panel }),
+    );
+  }
+
+  componentDidUpdate() {
+    if (this.state.failed && this.props.children !== this.attempted) {
+      this.setState({ failed: false });
+    }
+  }
+
+  render() {
+    if (this.state.failed) return null;
+    this.attempted = this.props.children;
+    return this.props.children;
   }
 }
 
@@ -620,7 +768,7 @@ export function createCanvasModule<
   }>;
   type PanelScope = Readonly<{
     panel: OpenPanel;
-    registerAction: (action: CanvasActionProps) => () => void;
+    registerAction: (action: ActionRegistration) => () => void;
     registerHeader: (header: HeaderRegistration) => () => void;
   }>;
   type SignalStore = Readonly<{
@@ -694,10 +842,15 @@ export function createCanvasModule<
     );
   }
 
-  function Action(action: CanvasActionProps): null {
+  function useActionScope(): PanelScope {
     const scope = useContext(PanelScopeContext);
     if (!scope)
       throw new Error("Canvas Actions must render inside a Panel renderer");
+    return scope;
+  }
+
+  function ButtonAction(action: CanvasActionButtonProps): null {
+    const scope = useActionScope();
     const { destructive, disabled, id, label, onSelect, priority } = action;
     const latest = useRef(onSelect);
     useLayoutEffect(() => {
@@ -716,6 +869,38 @@ export function createCanvasModule<
       [destructive, disabled, id, label, priority, scope],
     );
     return null;
+  }
+
+  function ContentAction(action: CanvasActionContentProps): null {
+    const scope = useActionScope();
+    const { content, id, priority } = action;
+    const [store] = useState(createHeaderContentStore);
+    // The same trick the handler above uses, for the same reason: what changes
+    // on every render goes into something whose identity does not, so the
+    // registration below re-runs only when `id` or `priority` actually moves.
+    useLayoutEffect(() => {
+      store.write(content);
+    }, [content, store]);
+    useEffect(
+      () =>
+        scope.registerAction({
+          content: store,
+          id,
+          ...(priority === undefined ? {} : { priority }),
+        }),
+      [id, priority, scope, store],
+    );
+    return null;
+  }
+
+  // One component per shape rather than one component with two sets of hooks:
+  // each sees only the props its own shape declares, and switching an Action
+  // from a button to content is a remount, which is what a different
+  // registration should be.
+  function Action(action: CanvasActionProps): ReactNode {
+    return action.content === undefined
+      ? createElement(ButtonAction, action)
+      : createElement(ContentAction, action);
   }
 
   function useContextSignal(signal: Signal): void {
@@ -966,7 +1151,7 @@ export function createCanvasModule<
     registerLifecycle: CanvasBinding<Reference>["registerLifecycle"];
     registerAction: (
       panel: PanelInstanceRef,
-      action: CanvasActionProps,
+      action: ActionRegistration,
     ) => () => void;
     registerHeader: (
       panel: PanelInstanceRef,
@@ -995,7 +1180,7 @@ export function createCanvasModule<
       () =>
         Object.freeze({
           panel,
-          registerAction: (action: CanvasActionProps) =>
+          registerAction: (action: ActionRegistration) =>
             registerAction(panel.instanceRef, action),
           registerHeader: (header: HeaderRegistration) =>
             registerHeader(panel.instanceRef, header),
@@ -1012,6 +1197,73 @@ export function createCanvasModule<
           descriptor: panel.reference.input,
           panel: panel.instanceRef,
         }),
+      ),
+    );
+  }
+
+  /**
+   * A content Action's place in the header action row.
+   *
+   * The wrapper is a plain `div` with no ARIA role and no `tabIndex`: it says
+   * nothing about the header's semantics, claims nothing from the Panel Focus
+   * Owner, and leaves whatever the application rendered in ordinary Tab order,
+   * where it sits in the row. A Panel the presentation is hiding is already
+   * `hidden` and `inert`, so its header content goes with it.
+   *
+   * The content renders inside the owning Panel's scope even though it renders
+   * outside that Panel's body, so a control here navigates from its own Panel
+   * rather than from whichever Panel happens to be active. It may not register
+   * anything further: a `useHeader` or a nested `Action` inside content would
+   * re-register on every render of content that changes on every render, which
+   * is a loop, so it is refused with a sentence rather than left to spin.
+   */
+  function HeaderActionContent({
+    content,
+    id,
+    panel,
+  }: Readonly<{
+    content: HeaderContentStore;
+    id: string;
+    panel: OpenPanel;
+  }>) {
+    const node = useSyncExternalStore(
+      content.subscribe,
+      content.read,
+      content.read,
+    );
+    const scope = useMemo<PanelScope>(
+      () =>
+        Object.freeze({
+          panel,
+          registerAction: () => {
+            throw new Error(
+              "A Canvas Action's content may not register a header registration of its own",
+            );
+          },
+          registerHeader: () => {
+            throw new Error(
+              "A Canvas Action's content may not register a header registration of its own",
+            );
+          },
+        }),
+      [panel],
+    );
+    return createElement(
+      "div",
+      {
+        "data-canvas-action": id,
+        "data-canvas-action-content": "",
+      },
+      createElement(
+        HeaderContentBoundary,
+        {
+          kind: panel.kind,
+          panel: panel.instanceRef,
+          ...(config.onRendererError
+            ? { onError: config.onRendererError }
+            : {}),
+        },
+        createElement(PanelScopeContext.Provider, { value: scope }, node),
       ),
     );
   }
@@ -1125,7 +1377,7 @@ export function createCanvasModule<
       ReadonlyMap<PanelInstanceId, number>
     >(() => new Map());
     const [actionRegistrations, setActionRegistrations] = useState<
-      ReadonlyMap<PanelInstanceId, ReadonlyMap<object, CanvasActionProps>>
+      ReadonlyMap<PanelInstanceId, ReadonlyMap<object, ActionRegistration>>
     >(() => new Map());
     const [pendingDescendantIds, setPendingDescendantIds] = useState<
       ReadonlySet<string>
@@ -1165,7 +1417,7 @@ export function createCanvasModule<
       });
     }, []);
     const registerAction = useCallback(
-      (panel: PanelInstanceRef, action: CanvasActionProps) => {
+      (panel: PanelInstanceRef, action: ActionRegistration) => {
         const owner = Object.freeze({});
         setActionRegistrations((current) => {
           const next = new Map(current);
@@ -1776,25 +2028,38 @@ export function createCanvasModule<
                         { "data-canvas-dirty-label": "" },
                         dirtyLabel,
                       ),
+                  // Both Action shapes come out of the one sorted list, so an
+                  // application content readout takes its place among the
+                  // buttons by the priority it registered rather than being
+                  // parked at either end of the row.
                   ...actions.map((action) =>
-                    createElement(
-                      "button",
-                      {
-                        "aria-label": action.label,
-                        // The id the application already gave this Action,
-                        // which until now the Canvas spent only as a React key.
-                        // Without it an application cannot tell its own Actions
-                        // apart in the DOM, so styling one means matching the
-                        // English in its label.
-                        "data-canvas-action": action.id,
-                        "data-destructive": action.destructive ? "" : undefined,
-                        disabled: action.disabled,
-                        key: action.id,
-                        onClick: action.onSelect,
-                        type: "button",
-                      },
-                      action.label,
-                    ),
+                    action.content === undefined
+                      ? createElement(
+                          "button",
+                          {
+                            "aria-label": action.label,
+                            // The id the application already gave this Action,
+                            // which until now the Canvas spent only as a React
+                            // key. Without it an application cannot tell its
+                            // own Actions apart in the DOM, so styling one
+                            // means matching the English in its label.
+                            "data-canvas-action": action.id,
+                            "data-destructive": action.destructive
+                              ? ""
+                              : undefined,
+                            disabled: action.disabled,
+                            key: action.id,
+                            onClick: action.onSelect,
+                            type: "button",
+                          },
+                          action.label,
+                        )
+                      : createElement(HeaderActionContent, {
+                          content: action.content,
+                          id: action.id,
+                          key: action.id,
+                          panel,
+                        }),
                   ),
                   !panel.closable
                     ? null

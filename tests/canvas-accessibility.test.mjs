@@ -915,3 +915,152 @@ test("F6 with a modifier is left to the browser", () => {
 
   assert.equal(focusedHeading(canvas.container), classes);
 });
+
+function buildContentActionCanvas() {
+  const root = defineRootPanel({ kind: "classes", title: "Classes" });
+  const classPanel = definePanel({
+    kind: "class",
+    deduplication: "reuse",
+    key: ({ classId }) => classId,
+    title: ({ name }) => name,
+  });
+  let Canvas;
+  Canvas = createCanvasModule({
+    root,
+    panels: [classPanel],
+    renderers: {
+      classes: () => createElement("p", null, "Class list"),
+      class: () =>
+        createElement(
+          "div",
+          null,
+          createElement(Canvas.Action, {
+            content: createElement(
+              "div",
+              null,
+              createElement("span", null, "Encoding, 41s elapsed"),
+              createElement(
+                "button",
+                { type: "button" },
+                "Cancel encoding job",
+              ),
+            ),
+            id: "job-status",
+            priority: 10,
+          }),
+          createElement(Canvas.Action, {
+            id: "rename",
+            label: "Rename class",
+            onSelect: () => {},
+            priority: 20,
+          }),
+          createElement("button", { type: "button" }, "Class action"),
+        ),
+    },
+  });
+  const engine = createPanelEngine({ root, panels: [classPanel] });
+  installViewport("desktop");
+  let result;
+  act(() => {
+    result = render(
+      createElement(
+        Canvas.Provider,
+        { engine },
+        createElement(Canvas.Workspace, { label: "Classes Canvas" }),
+      ),
+    );
+  });
+  act(() => {
+    engine.open({
+      originId: engine.getSnapshot().activePanelId,
+      panel: classPanel.reference({ classId: "a", name: "Class A" }),
+    });
+  });
+  return result;
+}
+
+test("application content in a header passes automated accessibility checks", async () => {
+  const canvas = buildContentActionCanvas();
+
+  const axe = (await import("axe-core")).default;
+  // Contrast is a theming concern the application owns through the documented
+  // `--canvas-*` tokens, and jsdom applies no stylesheet to measure anyway.
+  const { violations } = await axe.run(canvas.container, {
+    rules: { "color-contrast": { enabled: false } },
+  });
+
+  assert.deepEqual(
+    violations.map(({ id }) => id),
+    [],
+  );
+  canvas.unmount();
+});
+
+test("a content Action adds nothing to the header's semantics or its focus order", () => {
+  const canvas = buildContentActionCanvas();
+  const header = canvas.container
+    .querySelector("[data-canvas-panel][data-active]")
+    .querySelector("[data-canvas-panel-header]");
+  const wrapper = header.querySelector("[data-canvas-action-content]");
+
+  // The wrapper is a plain element: no role to reinterpret the header, no name
+  // of its own to read out, and no place in Tab order that the application did
+  // not put there.
+  assert.equal(wrapper.tagName.toLowerCase(), "div");
+  for (const attribute of [
+    "role",
+    "tabindex",
+    "aria-hidden",
+    "aria-label",
+    "aria-labelledby",
+    "inert",
+  ]) {
+    assert.equal(
+      wrapper.hasAttribute(attribute),
+      false,
+      `the content wrapper must not carry ${attribute}`,
+    );
+  }
+
+  // Interactive content inside it is reachable in ordinary Tab order, at the
+  // place in the row its priority earned.
+  const focusable = [...header.querySelectorAll("button")].map(
+    (button) => button.getAttribute("aria-label") ?? button.textContent,
+  );
+  assert.deepEqual(focusable, [
+    "Rename class",
+    "Cancel encoding job",
+    "Close Class A",
+  ]);
+  for (const button of header.querySelectorAll("button")) {
+    assert.equal(button.hasAttribute("aria-hidden"), false);
+  }
+  canvas.unmount();
+});
+
+test("the action row lays itself out without reaching inside application content", () => {
+  const row = stylesheet.match(
+    /\[data-canvas-panel-header\] > button \{([^}]*)\}/,
+  );
+
+  // A descendant selector here would hand the row's automatic margin to a
+  // button the application rendered inside its own content, pushing that
+  // control to the far side of the readout it belongs to.
+  assert.ok(row, "the action row must lay out its direct children only");
+  assert.match(row[1], /margin-inline-start:\s*auto;/);
+  assert.doesNotMatch(
+    stylesheet,
+    /\[data-canvas-panel-header\] button \{/,
+    "the row's own layout must not reach past its direct children",
+  );
+
+  const content = stylesheet.match(
+    /\[data-canvas-panel-header\] > \[data-canvas-action-content\] \{([^}]*)\}/,
+  );
+  assert.ok(content, "the content wrapper must be laid out by the package");
+  // Unlike a button, content may shrink: a readout that cannot shrink pushes
+  // the row off the end of the header, and truncating its own text is what
+  // this kind of content is for.
+  assert.match(content[1], /flex:\s*0 1 auto;/);
+  assert.match(content[1], /min-inline-size:\s*0;/);
+});

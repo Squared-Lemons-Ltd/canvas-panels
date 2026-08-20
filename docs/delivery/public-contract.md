@@ -79,6 +79,7 @@ These live in the package README, which ships inside the tarball, and each is en
 | Area | Where | What is frozen |
 | --- | --- | --- |
 | Navigation and guards | README "API", "Navigation" | Branch Replacement, Guard Outcomes, atomic commit, document limits and fail-closed rules |
+| Header Actions | README "API" → "Header Actions" | the two `Canvas.Action` shapes and their mutual exclusion at the type level; that both sort into one row by `priority` then `id`; that content is registered rather than portalled, and therefore re-registers nothing when it re-renders, resolves React context at the header, and runs in its own Panel's scope; that content may register nothing further; that `content` does not accept `undefined`; and that content which throws is dropped from the row and reported through `onRendererError` |
 | Accessibility | README "Accessibility" | F6 region cycling as the only claimed key, one polite live region, the single Panel Focus Owner, dialog inertness and focus return, reduced motion |
 | Custom properties | README "Theming" | every `--canvas-*` token the package reads, its default, and the three override positions. The suite fails on a token the stylesheet knows and the table does not, and on a documented default that has drifted from the one declared |
 | Integration attributes | README "Theming" | the complete `data-canvas-*` table; an attribute the package emits and that table does not name fails the gate |

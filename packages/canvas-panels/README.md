@@ -170,7 +170,7 @@ Render `ClassesCanvas.Provider` above `ClassesCanvas.Workspace`; each Provider o
 
 - `useNavigation()` gives definition-bound `open`, `update`, `activate`, `collapse`, and `close` with full inference. Calls inside a renderer default their Origin and target to their own Panel; calls outside default to the Active Panel.
 - `usePanel`, `useStack`, `useTransitionStatus`, and `usePresentation` each subscribe only to their selected read model, through `useSyncExternalStore`.
-- `Canvas.Action`, `useHeader`, and `useLifecycle` register semantic actions, visual titles, dirty labels, and focus targets against the current Panel instance, and clean up on unmount.
+- `Canvas.Action`, `useHeader`, and `useLifecycle` register semantic actions, visual titles, dirty labels, and focus targets against the current Panel instance, and clean up on unmount. An Action is either a button or application content — see "Header Actions".
 - `useContextSignal` and `useContextTarget` exchange an opaque application-typed value once the module is created with `context: defineCanvasContext<Signal>()`.
 
 The Bound module deliberately exposes no engine and no raw snapshot. Hosts that need one construct it with `createPanelEngine` from `@squaredlemons/canvas-panels/core`, and may pass `onSubscriberError` to report subscriber failures; a failing subscriber never blocks the others or changes the result of a command whose snapshot has already been published.
@@ -180,6 +180,45 @@ The Root Panel is permanent and never closable. A Child definition can set `clos
 Updates use each definition's typed update union and a pure reducer, validate both the payload and the complete result, and reject semantic Panel Key changes. They never shallow-merge arbitrary patches.
 
 Renderer exceptions are isolated inside their Panel body: package chrome stays available, the host receives only `{ kind, panel }`, and Retry remounts that renderer without replacing its Panel instance.
+
+### Header Actions
+
+The package renders a Panel's header controls itself, and `Canvas.Action` is how a Panel registers one. It takes one of two shapes, and the compiler holds them apart: a registration carrying both a `label`/`onSelect` pair and `content`, or neither, does not compile.
+
+| Shape | Props | What the package renders |
+| --- | --- | --- |
+| button | `id`, `label`, `onSelect`, and optionally `priority`, `disabled`, `destructive` | a `button` the package owns completely |
+| content | `id`, `content`, and optionally `priority` | whatever the application passed, in a wrapper the package lays out |
+
+```tsx
+function ClassRenderer({ descriptor }: ClassProps) {
+  const enrolment = useEnrolmentJob(descriptor.classId);
+  return (
+    <>
+      <ClassesCanvas.Action id="rename" label="Rename" onSelect={rename} />
+      {/* A state icon, a label, a ticking duration, and its own Cancel
+          button — none of which is a label and a handler. */}
+      <ClassesCanvas.Action
+        id="enrolment-job"
+        priority={10}
+        content={enrolment ? <EnrolmentJobStatus job={enrolment} /> : null}
+      />
+    </>
+  );
+}
+```
+
+Both shapes come out of one sorted row — `priority` descending, ties broken by `id` — so a readout takes its place among the buttons rather than being parked at one end. `id` is unique per Panel across both shapes, and a duplicate throws.
+
+**Content is registered, not portalled.** It reaches the header through the same registration a button uses, so the package renders it as part of its own tree and nothing races the package's re-renders. Three consequences follow, and each is part of the contract:
+
+- **Re-rendering content re-registers nothing.** The content of the moment is held in a store the registration owns, so a readout that ticks once a second costs one small re-render of its own slot. Registration identity moves only when `id` or `priority` does.
+- **React context resolves at the header, not at the Panel body.** Providers above the Workspace reach content; a provider an application renders *inside* a Panel renderer does not. Pass what the content needs into the element itself, or lift the provider above the Workspace.
+- **Content renders inside its own Panel's scope.** `useNavigation`, `usePanel`, and `usePresentation` called inside content default to the Panel that registered it, not to the Active Panel — so a control in a background Panel's header acts on that Panel. Content may not register anything further: a nested `Action`, `useHeader`, or `useLifecycle` inside content throws.
+
+Content that has nothing to show renders `null`; `undefined` is not a value `content` accepts, because the presence of `content` is what tells the two shapes apart. Content that throws is dropped from the row and reported through `onRendererError` exactly as a body failure is — the header shows no notice, the rest of the Canvas is untouched, and the next content the application renders is attempted again.
+
+**This is a constrained escape hatch, not a header slot.** It exists for the one header control that no label string describes: a live readout, a status composite, something with its own embedded button — the case the reporter of [#59](https://github.com/Squared-Lemons-Ltd/canvas-panels/issues/59) found once in forty-odd controls. Everything that reduces to a label and a handler should stay a button Action, which the package can lay out, disable, mark destructive, name for a screen reader, and keep as a pointer target. There is no ref, no portal target, and no way to reach the rest of the header: the package still decides where a control goes, and content that wants to be a Panel's main UI belongs in the Panel body.
 
 ### Guarded Transitions
 
@@ -217,6 +256,7 @@ The package targets WCAG 2.2 AA and owns the structural accessibility of the Can
 - Structural changes — a Panel opening or closing, a Branch Replacement, a change of presentation — are described in one polite live region. Activation, focus, and sizing are deliberately not announced: they are already conveyed by focus moving, or reported by the control that caused them. Every sentence comes from a replaceable template (`canvasAnnouncementTemplates`) so a Canvas can be localised.
 - Focus for every appearance of a Panel body has exactly one owner: the Workspace. Activating a Panel gives focus to whatever that Panel registered as `initialFocus`; a Panel that registered nothing is left as the application left it. A renderer failure gives focus to the failure notice, and a retry to the Panel's own heading. Nothing rendered inside a Panel claims that moment.
 - While the Guarded Transition dialog is open, application content is `inert`, focus is contained, and Escape means Stay. Focus returns to the initiating control or the retained Active Panel heading.
+- A content Action's wrapper is a plain `div` with no ARIA role, no label, and no `tabIndex`. It adds nothing to the header's semantics and claims nothing from the Panel Focus Owner, so interactive content inside it is reachable in ordinary Tab order at the position the row gives it, and a Panel the presentation is hiding takes its header content into `inert` with the rest of the Panel. Naming that content, and keeping its own pointer targets large enough, is the application's — the package cannot name what it did not render.
 - The Panel Separator resizes a Panel by pointer or by keyboard through one sizing engine, so the two cannot disagree about clamping; a resize is announced only once it settles.
 - Motion honours `prefers-reduced-motion`.
 
@@ -351,7 +391,8 @@ Structural state is exposed through data attributes rather than class names. The
 | `data-canvas-dirty-label` | within a Panel's header | the label a Panel's lifecycle registered for unsaved work |
 | `data-canvas-panel-separator` | the Panel Separator | the resize control |
 | `data-canvas-panel-close` | the close control | present on a closable Panel's own close button |
-| `data-canvas-action` | each Canvas Action | the `id` the application gave that Action |
+| `data-canvas-action` | each Canvas Action — the button, or the wrapper around content | the `id` the application gave that Action |
+| `data-canvas-action-content` | the wrapper around a content Action | present only on the wrapper the package puts around application-supplied header content |
 | `data-destructive` | a Canvas Action | present on an Action the application declared destructive |
 | `data-canvas-panel-notice` | within a Panel body | the renderer failure notice that replaced it |
 | `data-canvas-mobile-navigation` | within the Workspace | the narrow presentation's navigation bar |
