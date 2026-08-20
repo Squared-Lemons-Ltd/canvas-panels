@@ -797,7 +797,7 @@ test("a Canvas action keeps its pointer target beside a title that grows", () =>
   assert.ok(rule, "the stylesheet must style the Canvas actions");
 
   // Every one of these is a flex item beside something that grows — a Panel
-  // title that ellipsises, a breadcrumb trail that wraps — and the initial
+  // title that ellipsises, a breadcrumb trail that scrolls — and the initial
   // `flex-shrink: 1` let the growing thing take the space: a Close button
   // asking for 28px was measured at 16px, under the 24px WCAG 2.5.8 wants.
   assert.match(rule[1], /flex:\s*0 0 auto;/);
@@ -881,6 +881,39 @@ test("the narrowest presentation shows a single Panel so nothing sits off-screen
   // rest are retained but take no space.
   assert.equal(visible.length, 1);
   assert.equal(canvas.engine.getSnapshot().panels.length, 3);
+});
+
+test("a crumb scrolled out of the trail is still reachable without a pointer", () => {
+  const canvas = renderCanvas({ breakpoint: "mobile" });
+  openClassAndLearner(canvas);
+  const trail = canvas.container.querySelector("[data-canvas-breadcrumbs]");
+  const crumbs = [...trail.querySelectorAll("button")];
+
+  // The trail scrolls within itself rather than wrapping, so at any depth some
+  // crumbs are off the visible line. Every one of them stays an ordinary
+  // button in the document's own Tab order, which is what a browser scrolls
+  // back into view on focus — a scroll container only a pointer can move would
+  // put those crumbs out of a keyboard user's reach entirely.
+  const scrolling = stylesheet.match(
+    /^\s*\[data-canvas-breadcrumbs\] \{([^}]*)\}/m,
+  );
+  assert.ok(scrolling, "the trail must be a scroll container");
+  assert.match(scrolling[1], /overflow-x:\s*auto;/);
+
+  assert.equal(crumbs.length, 3);
+  for (const crumb of crumbs) {
+    assert.equal(crumb.tagName, "BUTTON");
+    assert.equal(crumb.getAttribute("type"), "button");
+    assert.equal(crumb.hasAttribute("tabindex"), false);
+    assert.equal(crumb.hasAttribute("disabled"), false);
+    assert.equal(crumb.hasAttribute("aria-hidden"), false);
+  }
+
+  // The trail claims no tab stop of its own: WCAG 2.1.1 asks that a scrollable
+  // region be keyboard-operable, and one whose content is focusable already is
+  // — a `tabindex` here would add a stop before every crumb instead.
+  assert.equal(trail.hasAttribute("tabindex"), false);
+  canvas.unmount();
 });
 
 test("forced colours restore the separation that shadows provided", () => {

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import { act, render } from "@testing-library/react";
@@ -14,6 +15,28 @@ import {
   canvasBreakpointQueries,
   createCanvasModule,
 } from "../packages/canvas-panels/dist/ui/index.js";
+
+const stylesheet = await readFile(
+  new URL("../packages/canvas-panels/dist/styles.css", import.meta.url),
+  "utf8",
+);
+
+/**
+ * The declarations the built stylesheet writes for one selector.
+ *
+ * The selector has to start its own line, so a rule is never answered with a
+ * mention of the same attribute inside another rule's comment or a descendant
+ * selector — `[data-canvas-breadcrumbs]` and `[data-canvas-breadcrumbs] li`
+ * are two different rules and this suite asserts about both.
+ */
+function declarationsFor(selector) {
+  const escaped = selector.replace(/[[\]]/g, "\\$&");
+  const rule = stylesheet.match(
+    new RegExp(`^\\s*${escaped} \\{([^}]*)\\}`, "m"),
+  );
+  assert.ok(rule, `the stylesheet must style ${selector}`);
+  return rule[1];
+}
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>", {
   url: "https://canvas-panels.test/",
@@ -247,6 +270,62 @@ test("mobile renders complete breadcrumbs for the contextual stack", () => {
     engine.getSnapshot().activePanelId,
     engine.getSnapshot().panels[0].instanceId,
   );
+});
+
+test("the breadcrumb trail is one scrolling line, whatever the titles are", () => {
+  const bar = declarationsFor("[data-canvas-mobile-navigation]");
+  const trail = declarationsFor("[data-canvas-breadcrumbs]");
+  const crumb = declarationsFor("[data-canvas-breadcrumbs] li button");
+
+  // jsdom does no layout, so this is asserted where the height actually comes
+  // from. The trail used to be a wrapping flex row of full Panel titles, which
+  // made its height unbounded in the length of those titles: measured in
+  // Chromium at 390px with a real application's three-deep stack, the
+  // navigation bar was 236px tall, and 54px once each crumb was clamped to a
+  // line and the trail scrolled within itself.
+  assert.match(trail, /flex-wrap:\s*nowrap;/);
+  assert.match(trail, /overflow-x:\s*auto;/);
+  // Both axes, stated: a `visible` axis computes to `auto` beside one that is
+  // not, and a trail that scrolls vertically is the wrapping trail again.
+  assert.match(trail, /overflow-y:\s*hidden;/);
+  // What lets a flex item scroll instead of widening the bar past the Canvas.
+  assert.match(trail, /min-width:\s*0;/);
+  assert.match(bar, /flex-wrap:\s*nowrap;/);
+
+  // One line per crumb, clamped, so depth costs scroll rather than height.
+  assert.match(crumb, /white-space:\s*nowrap;/);
+  assert.match(crumb, /overflow:\s*hidden;/);
+  assert.match(crumb, /text-overflow:\s*ellipsis;/);
+  assert.match(crumb, /max-inline-size:\s*[\d.]+rem;/);
+});
+
+test("the breadcrumb trail rests where the Active Panel's crumb is", () => {
+  const { container } = renderCanvas("mobile");
+  const trail = container.querySelector("[data-canvas-breadcrumbs]");
+  const crumbs = [...trail.querySelectorAll("button")];
+
+  // The crumb for the Active Panel is the last one the trail renders, which is
+  // what makes the inline end the right place for a scrolling trail to rest: a
+  // trail left at its inline start hides the crumb saying where you are.
+  assert.equal(
+    crumbs.filter((crumb) => crumb.hasAttribute("aria-current")).length,
+    1,
+  );
+  assert.equal(crumbs.at(-1).getAttribute("aria-current"), "page");
+
+  // jsdom has no layout, so a scrollable width is given to the trail rather
+  // than measured from one — the assertion is that the Canvas writes the
+  // inline-end offset when the Active Panel changes, not that a browser
+  // scrolled anywhere.
+  Object.defineProperty(trail, "scrollWidth", {
+    configurable: true,
+    value: 900,
+  });
+  assert.equal(trail.scrollLeft, 0);
+
+  act(() => crumbs[0].click());
+
+  assert.equal(trail.scrollLeft, 900);
 });
 
 test("desktop presents no Back control or breadcrumb navigation", () => {
