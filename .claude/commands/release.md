@@ -20,7 +20,14 @@ npm view @squaredlemons/canvas-panels@<version> gitHead        # the commit it w
 git tag --list '@squaredlemons/canvas-panels@*'
 ```
 
-Use the `gitHead` as the baseline commit. If a tag for the published version is missing, create it from that `gitHead` and push it — the next release depends on it.
+Use the `gitHead` as the baseline commit. **It can be empty** — `0.2.1` published from CI without one where `0.2.0` has one. When it is, read the commit off the provenance attestation instead, which is signed and names it outright:
+
+```sh
+curl -s https://registry.npmjs.org/-/npm/v1/attestations/@squaredlemons/canvas-panels@<version> \
+  | python3 -c "import sys,json,base64;d=json.load(sys.stdin);[print(json.loads(base64.b64decode(a['bundle']['dsseEnvelope']['payload']))['predicate']['buildDefinition']['resolvedDependencies'][0]['digest']) for a in d['attestations'] if 'slsa' in a['predicateType']]"
+```
+
+If a tag for the published version is missing, create it from that commit and push it — the next release depends on it.
 
 ## 2. Review every change since the baseline
 
@@ -113,7 +120,9 @@ npm view @squaredlemons/canvas-panels@<version> dist.integrity dist.shasum gitHe
 npm dist-tag ls @squaredlemons/canvas-panels
 ```
 
-Record the release in `docs/delivery/release-evidence.md` — integrity, shasum, dist-tag, source commit, workflow run, provenance, and what was verified. Confirm the tag exists; create it from the registry's `gitHead` if the publish did not.
+Record the release in `docs/delivery/release-evidence.md` — integrity, shasum, dist-tag, source commit, workflow run, provenance, and what was verified. Check the attestation's subject digest against `dist.integrity`: that is what proves the bytes npm serves are the bytes the workflow built.
+
+**Push the tag yourself.** `changeset publish` creates one inside the runner and nothing pushes it, so it does not exist on the remote. Create it from the attested commit — see step 1 for reading that when `gitHead` is empty — and push it.
 
 ## Refuse to proceed if
 

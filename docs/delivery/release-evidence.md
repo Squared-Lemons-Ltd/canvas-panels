@@ -2,7 +2,7 @@
 
 One record per published version of `@squaredlemons/canvas-panels`, so that "which artifact is in production, and what was verified about it?" is answerable from this repository without asking the registry, and so that a version can be matched to the exact source that produced it.
 
-**No published version carries a provenance attestation yet.** Trusted publishing would generate one, tying a tarball to the workflow run and commit that produced it, but no release has gone through it: `0.1.0` predates the move to npm, and `0.2.0-rc.0` and `0.2.0` were published by hand for the reasons recorded against each. So this file remains the only tie between a published artifact and its source — and it is the only record of what was *verified*, which an attestation does not say in any case.
+**`0.2.1` is the first version published by the workflow with a provenance attestation.** The three before it have none: `0.1.0` predates the move to npm, and `0.2.0-rc.0` and `0.2.0` were published by hand for the reasons recorded against each. For those three this file is the only tie between a published artifact and its source. For `0.2.1` the attestation is now the stronger tie — it is signed, and it names the commit — but this file remains the only record of what was *verified*, which an attestation does not say in any case.
 
 Every release records the immutable version, the tarball integrity, the provenance position, the source commit, the workflow run, and the verification that was performed. A release with a missing field is not a released version — and a row whose registry fields are still marked *intended* records a verified artifact, not a published one.
 
@@ -17,9 +17,9 @@ cd packages/canvas-panels && npm pack --dry-run --json
 
 `npm pack` normalises file modification times, so a local pack of the same tree gives the same `shasum` on any machine. Each row below records that **local** integrity, and a rebuild that disagrees with it means the tree disagrees.
 
-**It may or may not be the integrity the registry reports, and which depends on how the version was published.** Measured across two releases:
+**It may or may not be the integrity the registry reports, and which depends on how the version was published.** Measured across three releases:
 
-- **Via `changeset publish`** (`0.1.0`): the hashes differ. `package.json` is rewritten on the way out — key order changes and the trailing newline goes — so the published tarball differs from a locally packed one in that single file. All 49 files under `dist/` were byte-identical; `package.json` carried the same fields with the same values in a different order.
+- **Via `changeset publish`** (`0.1.0`, `0.2.1`): the hashes differ. `package.json` is rewritten on the way out — key order changes and the trailing newline goes — so the published tarball differs from a locally packed one in that single file. Every file under `dist/` was byte-identical both times; `package.json` carried the same fields with the same values, with `scripts` moved to the end.
 - **Via a direct `npm publish`** (`0.2.0-rc.0` and `0.2.0`): the hashes are **identical**. `sha512-ylTH24Z3gxOGQ…` was produced locally and is what the registry reports.
 
 So the rewrite is a property of the Changesets path, not of publishing as such. Where both integrities are recorded for a release, comparing across them is a category error; where only one is recorded, the two agreed.
@@ -59,6 +59,54 @@ node --input-type=module -e '
 
 `pnpm pack:check` already does the equivalent against the local tarball for every subpath, both consumers, and a Next production build. The commands above are the part it cannot do: proving that the *registry* holds the same bytes, and that an install with no workspace resolution reaches them.
 
+## 0.2.1
+
+The first release published by the workflow end to end — trusted publishing, an attestation, and no human holding a credential. Three patch changes, no movement on the Public Contract.
+
+| Field | Value |
+| --- | --- |
+| Version | `0.2.1` |
+| Tarball | `canvas-panels-0.2.1.tgz` |
+| Integrity, as published | `sha512-pROla/lJxYiD4Bo/QIzoG7wzOXtCM0yn4Ko6wkib32/hJIqMbqt/ePxc82bBhsU2lhE2KfsYNeGmrroyNIljtQ==` |
+| Shasum, as published | `ced77a70a3462df7a975e12b30623b326203bf8d` |
+| Integrity, local pack | `sha512-MJjtt7wvhmh/pqF6O4oiHOiZ6VrlWUfYa/3ZuDWJYs3tnHTeKp1T0DXZQCzyKlZrlvEM463z3pgtYfKiJHOPeQ==` (`585a968e…`) — differs only by the Changesets `package.json` rewrite; see "How to reproduce" |
+| Packed size | 52 entries, 131,604 bytes packed, 588,558 bytes unpacked |
+| Registry | Public npm, `https://registry.npmjs.org` |
+| Licence | MIT, shipped in the tarball |
+| Provenance | **Attested.** `https://slsa.dev/provenance/v1` plus npm's publish attestation, naming workflow `.github/workflows/release.yml` on `refs/heads/main` and source commit `e1b8e4bd…` |
+| Visibility | Public |
+| dist-tag | `latest`; `next` left on `0.2.0-rc.0` |
+| Source commit | `e1b8e4bd9c104bd7d779f49987bfc347ca1ca457`, tagged `@squaredlemons/canvas-panels@0.2.1` |
+| Workflow run | [32336258899](https://github.com/Squared-Lemons-Ltd/canvas-panels/actions/runs/32336258899), 20 August 2026 |
+| Toolchain | Node 22.23.2, npm `^11.5.1` installed in the job, pnpm 9.15.9 |
+| Gate | `pnpm gate` passed on the cut commit and again in CI: 437 contract tests, 3 packed-consumer tests, 0 failures, on Node 22 and Node 24 |
+
+### What shipped
+
+- **`restoreStack` decides sharing on persisted identity** ([#53](https://github.com/Squared-Lemons-Ltd/canvas-panels/issues/53), [#55](https://github.com/Squared-Lemons-Ltd/canvas-panels/pull/55)). It had compared whole in-memory Panel inputs against references that had been through the codec, so a Panel titled from a fetched record — which the navigation rule requires a codec to leave out — was never equal to its own decoded reference. Sharing is now Kind, semantic Panel Key, and encoded descriptor.
+- The npm listing's description and keywords, and a README that assumes nothing about the reader's package manager.
+
+Nothing on the Public Contract moved: no export, `status` or `reason` discriminant, `--canvas-*` property, `data-canvas-*` attribute, peer range, or Navigation Document limit differs from `0.2.0`.
+
+### The publish left no `gitHead`, and did not push its tag
+
+Two gaps worth knowing about before the next release, because step 1 of the release procedure starts from both:
+
+- **`npm view @squaredlemons/canvas-panels@0.2.1 gitHead` is empty**, where `0.2.0` reports one. The tie to the source commit is the attestation instead, which is signed and therefore better: `e1b8e4bd…`, read from the SLSA predicate.
+- **`changeset publish` created the tag and nothing pushed it.** The workflow does not push tags, so `@squaredlemons/canvas-panels@0.2.1` existed only inside the runner. It was created here from the attested commit and pushed by hand.
+
+### Verified against the registry
+
+Run on 20 August 2026, unauthenticated — the package is public:
+
+- `npm view` reports `dist.integrity sha512-pROla/lJ…` and `dist.shasum ced77a70…`, matching the row above, with `latest` resolving to `0.2.1`.
+- **The attestation covers the bytes npm serves.** The SLSA predicate's subject digest decodes to exactly the `dist.integrity` above, so the tarball on the registry is the one the workflow built, from `e1b8e4bd…`, in run 32336258899.
+- The published tarball was downloaded and compared against a local pack of the same tree: `diff -r` over `dist/` is **empty**, the file lists are identical, and `package.json` is semantically equal with `scripts` reordered to the end.
+- A clean consumer outside this workspace — `npm init`, then `npm add @squaredlemons/canvas-panels@0.2.1 react@^19 react-dom@^19` with no `.npmrc` and no token — installed it and recorded the same integrity in its own lockfile.
+- In that consumer all nine subpaths import and `styles.css` resolves to `@squaredlemons/canvas-panels/dist/styles.css`.
+- **The `#53` fix was exercised against the published artifact**, not the local build: a `reuse` Kind whose codec persists only the identifier retains its Panel across a decode-and-restore for all three input shapes from the issue — `{ id }`, `{ id, title }`, and `{ id, title: undefined }`. On `0.2.0` the last two rebuild the Panel.
+- `npm audit signatures` reports verified registry signatures for all four packages and **verified attestations for three**, this package among them.
+
 ## 0.2.0
 
 The first public release, and the first under the npm name. Content-identical to `0.2.0-rc.0`; only the version and the dist-tag differ.
@@ -92,7 +140,7 @@ Trusted publishing was configured but never reached. Three faults sat on top of 
 
 `0.2.0` was published by hand to move `latest` off the release candidate, which nothing else could do.
 
-**Resolved on 18 August 2026.** With the registration saved — `Squared-Lemons-Ltd` / `canvas-panels` / `release.yml`, no environment, `npm publish` allowed — a publish attempt from CI was refused with `You cannot publish over the previously published versions: 0.2.0` rather than `ENEEDAUTH`. That refusal is the proof: npm authenticated through the OIDC exchange and declined only because the version already existed. `0.3.0` will be the first release to carry an attestation.
+**Resolved on 18 August 2026.** With the registration saved — `Squared-Lemons-Ltd` / `canvas-panels` / `release.yml`, no environment, `npm publish` allowed — a publish attempt from CI was refused with `You cannot publish over the previously published versions: 0.2.0` rather than `ENEEDAUTH`. That refusal is the proof: npm authenticated through the OIDC exchange and declined only because the version already existed. `0.2.1` was the first release to carry an attestation, and it did.
 
 ### Verified against the registry
 
