@@ -1,5 +1,192 @@
 # @squaredlemons/canvas-panels
 
+## 0.3.0
+
+### Minor Changes
+
+- cd26998: Let a Panel Kind declare its own width: `definePanel({ width })`.
+
+  A Panel's width used to resolve only from `--canvas-panel-width` and
+  `--canvas-panel-active-width`, which meant it lived in a stylesheet, physically
+  separated from the `definePanel` call that names the Kind. A Kind no width rule
+  mentioned inherited the package default with nothing raised — no type error, no
+  warning, and nothing visibly broken. `definePanel` now takes an optional
+  `width`:
+
+  ```ts
+  const classPanel = definePanel({
+    kind: "class",
+    title: (input: { name: string }) => input.name,
+    width: { resting: "28rem", active: "min(48rem, 92vw)" },
+  });
+  ```
+
+  `resting` is the Panel's width in the stack, `active` its width as the Active
+  Panel. They are two separate custom properties, so either half stands alone —
+  declare one and the other stays themed — but a `width` that declares neither is
+  a type error rather than a declaration that quietly does nothing. Values are CSS
+  lengths, percentages, `calc()`, `min()`, `max()`, `clamp()`, or `var()`
+  references; anything else throws a `TypeError` from `definePanel`, on the line
+  that wrote it rather than on the first surface that opens that Panel.
+
+  **A declared width wins over the stylesheet for that Kind.** It is resolved onto
+  those same two custom properties on the Panel element itself, and a value
+  declared on an element beats one inherited into it from `:root`, from an
+  ancestor, or from the Workspace. Declare a Kind's width, or theme it in CSS, not
+  both. Two things still outrank it, and both should: the narrow presentations,
+  which set `flex-basis` directly so a wide Kind never carries its desktop column
+  onto a phone, and a Panel Separator drag, because a person moved it.
+
+  Additive throughout. A Kind that declares nothing renders exactly the markup it
+  did before, with no style attribute at all, and the CSS seam is unchanged for
+  it. `defineRootPanel` takes no `width`; a Root Panel is still themed in CSS.
+
+- fd7e2d7: **A Canvas Action can now render application content in the Panel header.** Until now `Canvas.Action` took a label and a handler and the package rendered a button, which covered every header control but one: the composite that no label string describes — a live status readout with a state icon, a ticking duration, truncated error text and its own embedded Cancel button, which hides itself when there is nothing to report. Across a forty-control migration exactly one control could not convert, and the package's own reference application hit the same wall. It had to go in a toolbar at the top of the Panel body, visually separated from every other Panel-level control.
+
+  `Canvas.Action` now takes one of two shapes:
+
+  ```tsx
+  <Canvas.Action id="rename" label="Rename" onSelect={rename} />
+  <Canvas.Action id="job-status" priority={10} content={job ? <JobStatus job={job} /> : null} />
+  ```
+
+  The compiler holds the two apart: a registration carrying both a `label`/`onSelect` pair and `content`, or neither, does not compile. Both shapes come out of one sorted row — `priority` descending, ties broken by `id` — so a readout takes its place among the buttons instead of being parked at one end, and `id` stays unique per Panel across both.
+
+  Content is **registered, not portalled**. It reaches the header through the same registration path a button uses, so the package renders it as part of its own tree and no application DOM races the package's re-renders. What that buys, and what it costs:
+
+  - Re-rendering content re-registers nothing. The current render is held in a store the registration owns, so a readout ticking once a second costs one small re-render of its own slot; registration identity moves only when `id` or `priority` does.
+  - React context resolves at the header. Providers above the Workspace reach content; a provider rendered _inside_ a Panel renderer does not — pass what the content needs into the element, or lift the provider.
+  - Content runs in its own Panel's scope, so `useNavigation`, `usePanel`, and `usePresentation` inside it default to the Panel that registered it rather than to the Active Panel. It may register nothing further: a nested `Action`, `useHeader`, or `useLifecycle` inside content throws.
+  - Content that throws is dropped from the row and reported through `onRendererError`, exactly as a body failure is. The header shows no notice, the rest of the Canvas is untouched, and the next content the application renders is attempted again.
+
+  The wrapper the package puts around content is a plain `div` with no ARIA role and no `tabIndex`, so the header's semantics, the single Panel Focus Owner, and normal Tab order are unchanged, and interactive content inside it is reachable at the position the row gives it. Naming that content is the application's job — the package cannot name what it did not render.
+
+  This is a constrained escape hatch and not a header slot: there is still no ref, no portal target, and no way to reach the rest of the header. Anything that reduces to a label and a handler should stay a button Action, which the package can lay out, disable, mark destructive, name, and keep as a pointer target. The boundary is now written down in the README rather than found mid-migration.
+
+  **Additions to the Public Contract**: the `content` shape of `Canvas.Action`, its ordering and scoping rules, and the `data-canvas-action-content` attribute. Nothing is removed: every existing button Action registration compiles and renders exactly as before, and a `readonly CanvasActionProps[]` still holds them. One stylesheet rule is narrowed to match: the automatic margin that pushes the action row to the trailing edge is now a direct-child selector, so a button an application renders _inside_ header content is no longer given the margin that lays out the row. An application styling the package's own header buttons is unaffected.
+
+  **One published type narrowed, and reading it needs an edit.** `CanvasActionProps` is now the union `CanvasActionButtonProps | CanvasActionContentProps`, so `label` and `onSelect` are no longer unconditionally present on it. Building an action is unaffected — that is the overwhelmingly common use, and it was checked — but reading one of those members straight off the type stops compiling with `error TS18048: 'action.label' is possibly 'undefined'`:
+
+  ```diff
+   function labelOf(action: CanvasActionProps) {
+  -  return action.label.toUpperCase();
+  +  return "content" in action ? "" : action.label.toUpperCase();
+   }
+  ```
+
+  Narrow with `"content" in action`, or name the half you mean: `CanvasActionButtonProps` is exported for it. This is written down because a published type that changes shape is a change to the Public Contract, whether or not anyone is reading that member.
+
+  Closes #59.
+
+### Patch Changes
+
+- 0d8222f: Clamp the narrow presentation's breadcrumb trail to one scrolling line.
+
+  `[data-canvas-breadcrumbs]` was a wrapping flex row carrying each retained
+  Panel's full title, which made the trail's height unbounded in the length of
+  those titles. A fixture never shows it — "Class A" fits three-abreast on one row
+  — and a real application always does: the first consumer to render the mobile
+  presentation against its own data measured a **three-deep stack at 284px tall on
+  a 390×844 viewport**, roughly a third of the screen spent on breadcrumbs before
+  any Panel content.
+
+  The trail is now one line that scrolls within itself. Each crumb is clamped to a
+  line, ellipsised, and capped at `12rem`; the trail is the only flex item in the
+  navigation bar that may take or lose the leftover width, so the bar no longer
+  wraps either. Height is now the same at every depth and for any title — measured
+  in Chromium at 390px with a three-deep stack of application-length titles, the
+  navigation bar went from **236px to 54px**, and the document gained no
+  horizontal scrollbar at 320, 390, 480, or 767px.
+
+  Two details of how it rests, both deliberate:
+
+  - **The trail rests at the crumb for the Active Panel**, which is the last one it
+    renders. A scrolling trail parked at its inline start would hide the crumb that
+    says where you are, which is a worse defect than the one being fixed. The
+    offset is written directly, so there is no motion to reduce, and a right-to-left
+    Canvas is scrolled to its own inline end.
+  - **Every crumb stays an ordinary button in Tab order.** A crumb scrolled out of
+    view is reached by Tab, and the browser scrolls it back in on focus; the trail
+    itself claims no tab stop, so nothing is added in front of the crumbs.
+
+  **If you have already styled the trail yourself**, your override now sits on top
+  of a different default. Check it before upgrading: rules that undid the wrap —
+  `flex-wrap: nowrap`, `overflow-x: auto`, `white-space: nowrap` on a crumb — are
+  now what the package does, and are harmless to keep or delete. A rule that
+  _depended_ on the wrap, or that set a height on `[data-canvas-breadcrumbs]`, is
+  the one to look at. To show more of each title, raise the cap on the same
+  documented attribute:
+
+  ```css
+  [data-canvas-breadcrumbs] li button {
+    max-inline-size: 20rem;
+  }
+  ```
+
+  No attribute, custom property, or export changed, and nothing narrow moved
+  outside the trail.
+
+  This also corrects a row in the README's known limitations. "The narrow
+  presentations are verified by test, not by eye" said that nothing narrow had been
+  seen rendering in a real application — no longer true, and it produced this
+  defect the moment it stopped being true. The row now says what a consumer has
+  actually rendered, what held, and what is still unseen: the tablet presentation,
+  a dialog or Overlay Workspace at either narrow width, and any of it on a real
+  phone rather than a resized browser.
+
+- de8e998: Publish a Context Signal by value, so an inline literal is cheap.
+
+  `useContextSignal` kept the signal in its effect's dependency array, where it was
+  compared by object identity. The natural call site builds the signal inline from
+  props — it _is_ derived state — so a fresh object arrived on every render, the
+  effect tore down and republished, and every `useContextTarget` reader in the
+  application re-rendered. A keystroke in an unrelated Panel was enough. The
+  published value was correct throughout; what it cost was renders.
+
+  The signal is now held and compared **one level deep**: two signals are the same
+  when `Object.is` says so, or when both are plain objects — or both arrays — with
+  the same own entries, each compared by `Object.is`. Nothing recurses, so the
+  comparison costs the signal's own entry count however large the value behind it
+  is, a cyclic signal is safe rather than a hang, and a `Date`, `Map`, class
+  instance, function, or nested object is compared by identity. A signal that
+  genuinely changed still publishes immediately, targeting is untouched, and
+  unmounting still unpublishes.
+
+  **What changes for a consumer.** Nothing to edit. If you wrapped
+  `useContextSignal` in a `useMemo` or a memo helper to stop it churning, that
+  wrapper is no longer necessary and can be deleted — a plain inline literal of
+  primitives now republishes only when one of its fields actually changes. Keeping
+  the wrapper is harmless, and is still the right thing where the signal carries a
+  freshly built nested object, array of arrays, or `Date`, since those compare by
+  identity and republish on every render without it.
+
+- deb3f66: Put focus back inside the Workspace when a Guarded Transition resolves, instead
+  of on the document body.
+
+  In an Overlay Workspace the sequence was: make a Panel dirty, press Escape, and
+  answer the Save / Discard / Stay dialog with **Discard**. The transition
+  committed, focus landed on `<body>` — outside the layer — and because the
+  overlay's Escape is a handler on the layer, the very next Escape reached
+  nothing and the overlay would not dismiss. Clicking inside the overlay first, or
+  using the Panel's own ✕, worked; the keyboard alone did not.
+
+  The Workspace returns focus to the control that initiated the transition, and it
+  was deciding whether that control was still usable by asking whether it was
+  connected to the document. `document.body` is connected, and it is what
+  `document.activeElement` is whenever the control that started the navigation
+  never took DOM focus — a row that is not focusable, a browser that does not focus
+  a button when it is clicked, a keyboard shortcut. So the Workspace "returned"
+  focus to the body and never reached the retained Active Panel's heading behind
+  it. The same held for a control that survived into a Panel the presentation had
+  just hidden, where `focus()` is refused and reports nothing.
+
+  A resolved transition now leaves focus inside the Workspace whichever way it
+  resolved: on the initiating control while that control is still somewhere focus
+  can go, and on the retained Active Panel's own heading otherwise. Save, Discard,
+  and Stay all keep returning focus where they already did when the control they
+  came from survives. The primary Canvas Workspace had the same defect — it is the
+  same focus-return path — and is fixed by the same change.
+
 ## 0.2.1
 
 ### Patch Changes

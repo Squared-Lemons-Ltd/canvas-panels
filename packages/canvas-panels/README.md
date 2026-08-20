@@ -170,16 +170,69 @@ Render `ClassesCanvas.Provider` above `ClassesCanvas.Workspace`; each Provider o
 
 - `useNavigation()` gives definition-bound `open`, `update`, `activate`, `collapse`, and `close` with full inference. Calls inside a renderer default their Origin and target to their own Panel; calls outside default to the Active Panel.
 - `usePanel`, `useStack`, `useTransitionStatus`, and `usePresentation` each subscribe only to their selected read model, through `useSyncExternalStore`.
-- `Canvas.Action`, `useHeader`, and `useLifecycle` register semantic actions, visual titles, dirty labels, and focus targets against the current Panel instance, and clean up on unmount.
-- `useContextSignal` and `useContextTarget` exchange an opaque application-typed value once the module is created with `context: defineCanvasContext<Signal>()`.
+- `Canvas.Action`, `useHeader`, and `useLifecycle` register semantic actions, visual titles, dirty labels, and focus targets against the current Panel instance, and clean up on unmount. An Action is either a button or application content — see "Header Actions".
+- `useContextSignal` and `useContextTarget` exchange an opaque application-typed value once the module is created with `context: defineCanvasContext<Signal>()`. A published signal is **held and compared one level deep** — the same value, or two plain objects or arrays with the same own entries, each compared by identity — so an inline literal of primitives is cheap and republishes only when a field actually changes. Nothing recurses, so a cyclic signal is safe; a nested object, `Date`, `Map`, or function is compared by identity, so a signal that rebuilds one every render republishes every render, and that is the case `useMemo` at the call site is still for.
 
 The Bound module deliberately exposes no engine and no raw snapshot. Hosts that need one construct it with `createPanelEngine` from `@squaredlemons/canvas-panels/core`, and may pass `onSubscriberError` to report subscriber failures; a failing subscriber never blocks the others or changes the result of a command whose snapshot has already been published.
+
+A Panel Kind may declare its own width, beside the definition that names the Kind rather than in a stylesheet somewhere else:
+
+```ts
+const classPanel = definePanel({
+  kind: "class",
+  title: (input: { name: string }) => input.name,
+  width: { resting: "28rem", active: "min(48rem, 92vw)" },
+});
+```
+
+`resting` is the Panel's width in the stack and `active` is its width as the Active Panel. The two are separate properties, so each half is optional on its own — declare one and the other stays themed — but a `width` that declares neither is a type error rather than a declaration that quietly does nothing. Values are CSS lengths, percentages, `calc()`, `min()`, `max()`, `clamp()`, or `var()` references; anything else — a declaration separator, a quote, a comment, a `url()`, an unbalanced bracket, or more than 128 characters — throws a `TypeError` from `definePanel`, on the line that wrote it rather than on the first surface that opens that Panel.
+
+**A declared width wins over the stylesheet for that Kind.** The package resolves it onto `--canvas-panel-width` and `--canvas-panel-active-width` on the Panel element itself, and a value declared on an element beats one inherited into it from `:root`, from an ancestor, or from the Workspace element. Declare a Kind's width, or theme it in CSS, not both. Two things still outrank it, and both should: the narrow presentations, which set `flex-basis` directly so a wide Kind never carries its desktop column onto a phone, and a Panel Separator drag, because a person moved it. `defineRootPanel` takes no `width`; a Root Panel is themed in CSS.
 
 The Root Panel is permanent and never closable. A Child definition can set `closable: false`; any command or Branch Replacement that would remove it rejects atomically. Each Panel Kind chooses `reuse`, `replace`, or `allow-many`; the first two require a registered semantic Panel Key. Panel inputs are copied into deeply immutable read models and must contain only structured-cloneable plain objects, arrays, and primitives.
 
 Updates use each definition's typed update union and a pure reducer, validate both the payload and the complete result, and reject semantic Panel Key changes. They never shallow-merge arbitrary patches.
 
 Renderer exceptions are isolated inside their Panel body: package chrome stays available, the host receives only `{ kind, panel }`, and Retry remounts that renderer without replacing its Panel instance.
+
+### Header Actions
+
+The package renders a Panel's header controls itself, and `Canvas.Action` is how a Panel registers one. It takes one of two shapes, and the compiler holds them apart: a registration carrying both a `label`/`onSelect` pair and `content`, or neither, does not compile.
+
+| Shape | Props | What the package renders |
+| --- | --- | --- |
+| button | `id`, `label`, `onSelect`, and optionally `priority`, `disabled`, `destructive` | a `button` the package owns completely |
+| content | `id`, `content`, and optionally `priority` | whatever the application passed, in a wrapper the package lays out |
+
+```tsx
+function ClassRenderer({ descriptor }: ClassProps) {
+  const enrolment = useEnrolmentJob(descriptor.classId);
+  return (
+    <>
+      <ClassesCanvas.Action id="rename" label="Rename" onSelect={rename} />
+      {/* A state icon, a label, a ticking duration, and its own Cancel
+          button — none of which is a label and a handler. */}
+      <ClassesCanvas.Action
+        id="enrolment-job"
+        priority={10}
+        content={enrolment ? <EnrolmentJobStatus job={enrolment} /> : null}
+      />
+    </>
+  );
+}
+```
+
+Both shapes come out of one sorted row — `priority` descending, ties broken by `id` — so a readout takes its place among the buttons rather than being parked at one end. `id` is unique per Panel across both shapes, and a duplicate throws.
+
+**Content is registered, not portalled.** It reaches the header through the same registration a button uses, so the package renders it as part of its own tree and nothing races the package's re-renders. Three consequences follow, and each is part of the contract:
+
+- **Re-rendering content re-registers nothing.** The content of the moment is held in a store the registration owns, so a readout that ticks once a second costs one small re-render of its own slot. Registration identity moves only when `id` or `priority` does.
+- **React context resolves at the header, not at the Panel body.** Providers above the Workspace reach content; a provider an application renders *inside* a Panel renderer does not. Pass what the content needs into the element itself, or lift the provider above the Workspace.
+- **Content renders inside its own Panel's scope.** `useNavigation`, `usePanel`, and `usePresentation` called inside content default to the Panel that registered it, not to the Active Panel — so a control in a background Panel's header acts on that Panel. Content may not register anything further: a nested `Action`, `useHeader`, or `useLifecycle` inside content throws.
+
+Content that has nothing to show renders `null`; `undefined` is not a value `content` accepts, because the presence of `content` is what tells the two shapes apart. Content that throws is dropped from the row and reported through `onRendererError` exactly as a body failure is — the header shows no notice, the rest of the Canvas is untouched, and the next content the application renders is attempted again.
+
+**This is a constrained escape hatch, not a header slot.** It exists for the one header control that no label string describes: a live readout, a status composite, something with its own embedded button — the case the reporter of [#59](https://github.com/Squared-Lemons-Ltd/canvas-panels/issues/59) found once in forty-odd controls. Everything that reduces to a label and a handler should stay a button Action, which the package can lay out, disable, mark destructive, name for a screen reader, and keep as a pointer target. There is no ref, no portal target, and no way to reach the rest of the header: the package still decides where a control goes, and content that wants to be a Panel's main UI belongs in the Panel body.
 
 ### Guarded Transitions
 
@@ -216,7 +269,8 @@ The package targets WCAG 2.2 AA and owns the structural accessibility of the Can
 - Every visible Panel is a labelled region. **F6** and **Shift+F6** cycle the Panel Regions the current presentation is showing, wrapping at both ends; a retained but hidden Panel is not a Region. Region cycling is the only key the Canvas claims — normal DOM Tab order is untouched and no arrow or letter shortcut is registered globally.
 - Structural changes — a Panel opening or closing, a Branch Replacement, a change of presentation — are described in one polite live region. Activation, focus, and sizing are deliberately not announced: they are already conveyed by focus moving, or reported by the control that caused them. Every sentence comes from a replaceable template (`canvasAnnouncementTemplates`) so a Canvas can be localised.
 - Focus for every appearance of a Panel body has exactly one owner: the Workspace. Activating a Panel gives focus to whatever that Panel registered as `initialFocus`; a Panel that registered nothing is left as the application left it. A renderer failure gives focus to the failure notice, and a retry to the Panel's own heading. Nothing rendered inside a Panel claims that moment.
-- While the Guarded Transition dialog is open, application content is `inert`, focus is contained, and Escape means Stay. Focus returns to the initiating control or the retained Active Panel heading.
+- While the Guarded Transition dialog is open, application content is `inert`, focus is contained, and Escape means Stay. However the transition then resolves — Save, Discard, or Stay — focus lands back **inside the Workspace**: on the control that initiated it while that control is still somewhere focus can go, and on the retained Active Panel's own heading otherwise. It is never left on the document body, which is what keeps Escape working in an Overlay Workspace once a dialog has been answered.
+- A content Action's wrapper is a plain `div` with no ARIA role, no label, and no `tabIndex`. It adds nothing to the header's semantics and claims nothing from the Panel Focus Owner, so interactive content inside it is reachable in ordinary Tab order at the position the row gives it, and a Panel the presentation is hiding takes its header content into `inert` with the rest of the Panel. Naming that content, and keeping its own pointer targets large enough, is the application's job — the package cannot name what it did not render.
 - The Panel Separator resizes a Panel by pointer or by keyboard through one sizing engine, so the two cannot disagree about clamping; a resize is announced only once it settles.
 - Motion honours `prefers-reduced-motion`.
 
@@ -303,8 +357,8 @@ This is the complete list, and it is part of the Public Contract: a token the pa
 | `--canvas-border` | `color-mix(in srgb, CanvasText 18%, transparent)` | Panel edges and header rules |
 | `--canvas-text` | `CanvasText` | Canvas text |
 | `--canvas-text-muted` | `color-mix(in srgb, CanvasText 65%, transparent)` | secondary text, and what an action's colour derives from |
-| `--canvas-panel-width` | `min(24rem, 84vw)` | an inactive Panel |
-| `--canvas-panel-active-width` | `min(36rem, 90vw)` | the Active Panel |
+| `--canvas-panel-width` | `min(24rem, 84vw)` | an inactive Panel, unless its Panel Kind declared a `width` |
+| `--canvas-panel-active-width` | `min(36rem, 90vw)` | the Active Panel, unless its Panel Kind declared a `width` |
 | `--canvas-panel-min-height` | `24rem` | the Canvas's own floor |
 | `--canvas-panel-gap` | `0` | the gutter between Panels |
 | `--canvas-header-min-height` | `3.5rem` | a Panel header |
@@ -326,6 +380,8 @@ This is the complete list, and it is part of the Public Contract: a token the pa
 | `--canvas-action-border` | *derived from* `--canvas-border` | a Canvas Action's edge |
 
 The last three have no default of their own. Each derives from a more general token, and the derivation is resolved **on the action itself** rather than on `:root` — so recolouring the general token recolours the actions with it, and setting the specific one takes them out of the arrangement. A default written on `:root` could not do that: a `var()` inside a custom property is substituted where the property is declared, and every descendant then inherits the answer.
+
+The two Panel width tokens have a second source, and it is nearer. A Panel Kind that declared a `width` on its `definePanel` call carries that value on its own Panel element, which beats these tokens wherever they were set — `:root`, an ancestor, or the Workspace itself. That is the trade for being able to keep a Kind's default presentation beside the Kind: for that Kind the stylesheet no longer sets the width. Theme the Kinds that declare nothing here, and leave the ones that declare a width to their definitions. What still applies to every Panel either way is everything else in this table, the narrow presentations, and a rule that sets `flex-basis` on `[data-canvas-panel][data-panel-kind="…"]` directly — a property, not a token, and so not something an inherited value competes with.
 
 `--canvas-surface-raised` reaches two elements that render outside the Panel Stack — the dialog, inside the Workspace that raised it, and the overlay, in its own Workspace element under `[data-canvas-overlay]` — so a token set on `[data-canvas-workspace]`, on any ancestor, or on `:root` reaches both.
 
@@ -351,7 +407,8 @@ Structural state is exposed through data attributes rather than class names. The
 | `data-canvas-dirty-label` | within a Panel's header | the label a Panel's lifecycle registered for unsaved work |
 | `data-canvas-panel-separator` | the Panel Separator | the resize control |
 | `data-canvas-panel-close` | the close control | present on a closable Panel's own close button |
-| `data-canvas-action` | each Canvas Action | the `id` the application gave that Action |
+| `data-canvas-action` | each Canvas Action — the button, or the wrapper around content | the `id` the application gave that Action |
+| `data-canvas-action-content` | the wrapper around a content Action | present only on the wrapper the package puts around application-supplied header content |
 | `data-destructive` | a Canvas Action | present on an Action the application declared destructive |
 | `data-canvas-panel-notice` | within a Panel body | the renderer failure notice that replaced it |
 | `data-canvas-mobile-navigation` | within the Workspace | the narrow presentation's navigation bar |
@@ -366,6 +423,8 @@ Structural state is exposed through data attributes rather than class names. The
 `data-testid` attributes also appear in the rendered Canvas. They are **not** part of the Public Contract and may change in any release; use the attributes above.
 
 A Panel that the current presentation does not show is `hidden` and `inert` rather than carrying a visibility attribute, so it is removed from the accessibility tree and from Tab order by the platform.
+
+The narrow presentation's breadcrumb trail is **one line that scrolls within itself**, so its height is the same at every depth and however long the Panel titles are, and the document never gains a horizontal scrollbar because of it. Each crumb is clamped to a line and capped at `12rem`, and the trail rests at the crumb for the Active Panel; every crumb stays an ordinary button in Tab order, so focusing one scrolls it back into view. An application that wants more of a title visible raises the cap on the documented attribute: `[data-canvas-breadcrumbs] li button { max-inline-size: 20rem; }`.
 
 A Panel Instance ID is numbered from one **within its own Panel Engine**, and that scope is the part of the Public Contract — the `canvas-panel-<n>` spelling is not, and may change. Because the numbering depends on nothing outside the Engine, a server render and the browser that hydrates it agree about which element is which Panel; a selector or a stored id written against the server's markup still names the same Panel afterwards. What it does not give you is a document-unique value: two Workspaces on one page each number their own Panels, so scope any lookup to the Workspace you mean rather than searching the document. For the same reason a bare Panel Instance ID passed to a different Panel Engine names *that* Engine's Panel at the same position rather than being refused — pass a Panel Instance Ref, which every command that can take one does, and which no other Engine will accept.
 
@@ -620,7 +679,7 @@ Two further limits are worth knowing before depending on the compatibility table
 | The Next range is half-verified | The packed Next consumer builds against Next 16. `>=15` is supported by declaration rather than by an automated build. |
 | Security and size are structural claims | The package declares no runtime dependency and no install script, and each optional subpath is proven absent from every bundle that does not import it. There is no vulnerability scanner and no size budget in the gate. |
 | `dirty` does two jobs | It both arms the Transition Guard and renders the header's dirty label and the `beforeunload` prompt. A Panel that must block while otherwise clean has to report `dirty: true` and shows the label while it does. Splitting the two is a planned Panel Engine change. |
-| The narrow presentations are verified by test, not by eye | The mobile and tablet presentations are covered by the contract suite and by axe in a simulated viewport. The most recent consumer proof could not resize its automated browser below the package's breakpoints, so nothing narrow has been seen rendering in a real application. |
+| The narrow presentations are verified by test, and once by eye | The mobile and tablet presentations are covered by the contract suite and by axe in a simulated viewport. A consumer has since rendered the **mobile** presentation at 390×844 against its own data, and most of it held: one Panel at a time, the retained Panels `hidden` and out of the Tab order, the Back control, and a document that never scrolls sideways. The breadcrumb trail did not — with real titles it wrapped to roughly a third of the viewport, and is now a single scrolling line. What remains unseen is the **tablet** presentation, a Guarded Transition dialog or an Overlay Workspace at either narrow width, and any of it on a real phone rather than a browser resized to one. |
 
 ## Migration
 

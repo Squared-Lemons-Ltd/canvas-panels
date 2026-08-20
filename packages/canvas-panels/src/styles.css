@@ -254,7 +254,7 @@
     /*
      * An action keeps its target. Every one of these is a flex item beside
      * something that grows — a Panel title that ellipsises, a breadcrumb trail
-     * that wraps — and the initial `flex-shrink: 1` let the growing thing take
+     * that scrolls — and the initial `flex-shrink: 1` let the growing thing take
      * the space: a Close button asking for 28px was measured at 16px, under the
      * 24px WCAG 2.5.8 wants of a pointer target. The title is what should give
      * way, and it already knows how.
@@ -289,12 +289,46 @@
     font-weight: 600;
   }
 
-  [data-canvas-panel-header] button {
+  /*
+   * The action row is pushed to the trailing edge by giving its first control
+   * the automatic margin and taking it back off every control after that.
+   *
+   * Both selectors are direct-child on purpose. A content Action may hold
+   * buttons of its own, and a descendant selector would hand one of those the
+   * margin that lays out the row — pushing an application's embedded control
+   * to the far side of its own readout.
+   */
+  [data-canvas-panel-header] > button {
     margin-inline-start: auto;
   }
 
-  [data-canvas-panel-header] button + button {
+  [data-canvas-panel-header] > button + button,
+  [data-canvas-panel-header] > [data-canvas-action-content] + button,
+  [data-canvas-panel-header] > button + [data-canvas-action-content],
+  [data-canvas-panel-header]
+    > [data-canvas-action-content]
+    + [data-canvas-action-content] {
     margin-inline-start: 0;
+  }
+
+  /*
+   * What the package owns of a content Action is where it sits and how it lays
+   * out: a row item, centred with the buttons beside it, spacing its own parts
+   * the way the header spaces its controls. What it holds is the
+   * application's, and takes no styling from here.
+   *
+   * It may shrink, unlike a button. A button that shrinks stops being a
+   * pointer target, but a readout that cannot shrink is a readout that pushes
+   * the row off the end of the header — and truncating its own text is exactly
+   * what this kind of content is for.
+   */
+  [data-canvas-panel-header] > [data-canvas-action-content] {
+    align-items: center;
+    display: flex;
+    flex: 0 1 auto;
+    gap: 0.5rem;
+    margin-inline-start: auto;
+    min-inline-size: 0;
   }
 
   [data-canvas-panel-header] button:hover,
@@ -335,23 +369,78 @@
     position: relative;
   }
 
+  /*
+   * The navigation bar is one line: Back, and the trail beside it. It used to
+   * wrap, which was the second half of the same defect the trail below records
+   * — a trail tall enough to need a row of its own took the whole bar with it.
+   */
   [data-canvas-mobile-navigation] {
     align-items: center;
     border-bottom: 1px solid var(--canvas-border);
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     gap: 0.5rem;
     padding: 0.5rem var(--canvas-header-padding-inline);
   }
 
+  /*
+   * The trail is one line that scrolls within itself, at every depth and
+   * whatever the titles are.
+   *
+   * It used to be a wrapping flex row of full Panel titles, which made its
+   * height unbounded in the length of the titles: a fixture's "Class A" fits
+   * beside two others on one row, and a real application's three-deep stack of
+   * episode and page names measured 284px of breadcrumbs on a 390×844 viewport
+   * — a third of the screen before any Panel content. Clamping each crumb to a
+   * line and scrolling the trail measured 127px at the same depth, with the
+   * document still 390px wide and no horizontal overflow on it.
+   *
+   * The trail is the only thing here that may take the leftover width, and the
+   * only thing that may lose it: `min-width: 0` is what lets a flex item
+   * scroll rather than push the bar wider than the Canvas.
+   */
   [data-canvas-breadcrumbs] {
     display: flex;
-    flex-wrap: wrap;
+    flex: 1 1 auto;
+    flex-wrap: nowrap;
     gap: 0.25rem;
     list-style: none;
     margin: 0;
     min-width: 0;
-    padding: 0;
+    /*
+     * Both axes, stated, for the reason `[data-canvas-application]` states
+     * them: a `visible` axis computes to `auto` as soon as the other one is
+     * not `visible`, and a trail that could scroll vertically is the wrapping
+     * trail again with a scrollbar instead of a second row.
+     *
+     * The block padding is what the clipped axis costs: overflow clips at the
+     * padding edge, so without it the focus ring of a crumb at the top or
+     * bottom of its own line is cut off.
+     */
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    padding: 0.125rem 0;
+  }
+
+  /*
+   * A crumb keeps its own width and never squeezes: the trail scrolls instead,
+   * because a row of titles compressed to two characters each names nothing.
+   * The cap is what bounds that scroll — an application whose titles want more
+   * room raises it on this documented attribute.
+   */
+  [data-canvas-breadcrumbs] li {
+    align-items: center;
+    display: flex;
+    flex: 0 0 auto;
+    min-width: 0;
+  }
+
+  [data-canvas-breadcrumbs] li button {
+    max-inline-size: 12rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   [data-canvas-breadcrumbs] li + li::before {

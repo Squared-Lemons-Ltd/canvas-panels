@@ -1,3 +1,5 @@
+import type { ComponentProps } from "react";
+
 import {
   createPanelEngine,
   definePanel,
@@ -168,6 +170,61 @@ Canvas.createEngine();
 // @ts-expect-error Bound Canvas modules expose narrow hooks, not raw snapshots.
 Canvas.useCanvas();
 
+// An Action is a button or it is content, and the compiler is what holds the
+// two apart: neither invalid combination is left to be discovered at runtime.
+type BoundActionProps = ComponentProps<typeof Canvas.Action>;
+
+const buttonAction: BoundActionProps = {
+  id: "rename",
+  label: "Rename",
+  onSelect: () => {},
+  priority: 20,
+  destructive: false,
+  disabled: false,
+};
+const contentAction: BoundActionProps = {
+  id: "job-status",
+  priority: 10,
+  content: "Encoding, 41s elapsed",
+};
+// Content with nothing to show says so with `null`.
+const idleContentAction: BoundActionProps = { id: "job-status", content: null };
+// @ts-expect-error An Action is a button or content, never both.
+const bothShapes: BoundActionProps = {
+  id: "both",
+  label: "Rename",
+  onSelect: () => {},
+  content: "Encoding, 41s elapsed",
+};
+// @ts-expect-error An Action must be one of the two shapes, not neither.
+const neitherShape: BoundActionProps = { id: "neither" };
+// @ts-expect-error Content carries no handler: it renders its own controls.
+const contentWithHandler: BoundActionProps = {
+  id: "handled",
+  content: "Encoding, 41s elapsed",
+  onSelect: () => {},
+};
+// @ts-expect-error Content owns its own presentation, including this.
+const contentWithButtonPresentation: BoundActionProps = {
+  id: "loud",
+  content: "Encoding, 41s elapsed",
+  destructive: true,
+};
+// @ts-expect-error `undefined` is not content; the presence of `content` is
+// what tells the two shapes apart, and content with nothing to show is `null`.
+const contentWithoutContent: BoundActionProps = {
+  id: "absent",
+  content: undefined,
+};
+void buttonAction;
+void contentAction;
+void idleContentAction;
+void bothShapes;
+void neitherShape;
+void contentWithHandler;
+void contentWithButtonPresentation;
+void contentWithoutContent;
+
 const engine = createPanelEngine({
   root,
   panels: [student, updatableStudent, pinnedStudent, persistentStudent],
@@ -326,6 +383,45 @@ engine.close({
     // @ts-expect-error Commands do not accept unbranded strings as instance IDs.
     instanceId: "canvas-panel-1",
   },
+});
+
+// A Panel Kind may declare its own default presentation. Both halves are
+// optional on their own, and a declaration that declares neither is refused by
+// the type rather than accepted and silently ignored.
+const widePanel = definePanel({
+  kind: "wide-student",
+  title: (input: { name: string }) => input.name,
+  width: { resting: "28rem", active: "min(48rem, 92vw)" },
+});
+definePanel({
+  kind: "resting-width-student",
+  title: (input: { name: string }) => input.name,
+  width: { resting: "22rem" },
+});
+definePanel({
+  kind: "active-width-student",
+  title: (input: { name: string }) => input.name,
+  width: { active: "40rem" },
+});
+const declaredWidth: string | undefined = widePanel.width?.resting;
+void declaredWidth;
+definePanel({
+  kind: "empty-width-student",
+  title: (input: { name: string }) => input.name,
+  // @ts-expect-error A declared width must name a resting or an active width.
+  width: {},
+});
+definePanel({
+  kind: "numeric-width-student",
+  title: (input: { name: string }) => input.name,
+  // @ts-expect-error Panel widths are CSS length strings, not numbers.
+  width: { resting: 320 },
+});
+definePanel({
+  kind: "unknown-width-student",
+  title: (input: { name: string }) => input.name,
+  // @ts-expect-error A declared width names only the two documented positions.
+  width: { resting: "22rem", collapsed: "8rem" },
 });
 
 const helpRoot = defineRootPanel({ kind: "help-root", title: "Help" });

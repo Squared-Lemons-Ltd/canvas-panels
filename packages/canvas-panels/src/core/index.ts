@@ -105,6 +105,37 @@ export type RootPanelDefinition<Kind extends string = string> = Readonly<{
   reference: PanelReference<Kind, undefined>;
 }>;
 
+/**
+ * The width a Panel Kind declares for itself. It is data here and nothing more:
+ * `core` renders no element, so the layer that renders one resolves this onto
+ * the two custom properties the stylesheet already reads —
+ * `--canvas-panel-width` for a Panel at rest, `--canvas-panel-active-width` for
+ * the Active Panel.
+ *
+ * It is an object, and not a single scalar, because those two properties are
+ * separate and neither implies the other. A Kind that wants a wider column at
+ * rest and the themed active width, or the themed resting width and a wider
+ * active one, has to be able to say exactly that; one string could only ever
+ * have meant one of them, and a positional pair reads at the call site as two
+ * anonymous strings. `width: { resting: "28rem", active: "48rem" }` says which
+ * is which where it is written.
+ *
+ * The union of the two shapes is what forbids `width: {}`. A declaration that
+ * declares nothing is precisely the silent case this field exists to remove, so
+ * the type refuses it rather than accepting it and quietly doing nothing.
+ *
+ * Values are CSS and reach the DOM through a style attribute, so `definePanel`
+ * accepts only a plain length-like value — lengths, percentages, `calc()`,
+ * `min()`, `max()`, `clamp()`, and `var()` references. Anything carrying a
+ * declaration separator, a quote, a comment, a `url()`, or an unbalanced
+ * bracket is refused at definition time, where the stack still points at the
+ * definition that wrote it, rather than being handed to a style attribute to
+ * mean whatever it turns out to mean there.
+ */
+export type PanelWidth =
+  | Readonly<{ resting: string; active?: string }>
+  | Readonly<{ resting?: string; active: string }>;
+
 export type PanelDefinition<
   Kind extends string = string,
   Input = unknown,
@@ -115,6 +146,7 @@ export type PanelDefinition<
   kind: Kind;
   deduplication: PanelDeduplication;
   closable: boolean;
+  width?: PanelWidth;
   key?: (input: DeepReadonly<Input>) => string;
   title: (input: DeepReadonly<Input>) => string;
   reference: (input: Input) => PanelReference<Kind, Input>;
@@ -587,6 +619,7 @@ type PanelDefinitionShape = Readonly<{
   kind: string;
   deduplication: PanelDeduplication;
   closable: boolean;
+  width?: PanelWidth;
   key?: (input: never) => string;
   title: (input: never) => string;
   reference: (input: never) => PanelReference<string, unknown>;
@@ -1105,6 +1138,46 @@ function panelSharesRestorationIdentity(
   }
 }
 
+/**
+ * What a declared Panel width may be made of: letters, digits, whitespace, and
+ * the punctuation CSS length arithmetic needs. Everything a style attribute
+ * could read as more than one value — `;`, `!`, quotes, angle brackets,
+ * backslashes, `@` — is absent, so a hostile or merely malformed value cannot
+ * become a second declaration on the Panel element or escape the attribute.
+ */
+const panelWidthSyntax = /^[A-Za-z0-9_\s%.,+\-*/()]+$/;
+
+function validatedPanelWidth(declared: unknown): string {
+  if (typeof declared !== "string") {
+    throw new TypeError("Panel widths must be CSS length strings");
+  }
+  const value = declared.trim();
+  // A comment sequence is built from characters `calc()` needs individually, so
+  // it is excluded as a pair rather than by the character class, and `url()` is
+  // excluded by name: it is meaningless as a width and is the one function that
+  // would make a width value fetch something.
+  if (
+    value.length === 0 ||
+    value.length > 128 ||
+    !panelWidthSyntax.test(value) ||
+    value.includes("/*") ||
+    value.includes("*/") ||
+    /url\s*\(/i.test(value)
+  ) {
+    throw new TypeError("Panel widths must be plain CSS length values");
+  }
+  let depth = 0;
+  for (const character of value) {
+    if (character === "(") depth += 1;
+    else if (character === ")") depth -= 1;
+    if (depth < 0) break;
+  }
+  if (depth !== 0) {
+    throw new TypeError("Panel widths must be plain CSS length values");
+  }
+  return value;
+}
+
 export function defineRootPanel<const Kind extends string>(options: {
   kind: Kind;
   title: string;
@@ -1132,6 +1205,7 @@ export function definePanel<
     kind: Kind;
     title: (input: DeepReadonly<Input>) => string;
     closable?: boolean;
+    width?: PanelWidth;
     persistence?: PanelPersistence<Input, Descriptor>;
     update?: Readonly<{
       validate: (value: unknown) => value is Update;
@@ -1159,6 +1233,26 @@ export function definePanel<
           apply: options.update.apply,
           navigation: options.update.navigation,
         });
+  // A declared width is checked here, at definition time, and not where it is
+  // rendered: a Kind is defined once at module scope, so a value that cannot be
+  // a width fails on the line that wrote it rather than on whichever surface
+  // first happened to open that Panel.
+  let width: PanelWidth | undefined;
+  if (options.width !== undefined) {
+    const resting = options.width.resting;
+    const active = options.width.active;
+    if (resting === undefined && active === undefined) {
+      throw new TypeError(
+        "A declared Panel width must name a resting or an active width",
+      );
+    }
+    width = Object.freeze({
+      ...(resting === undefined
+        ? {}
+        : { resting: validatedPanelWidth(resting) }),
+      ...(active === undefined ? {} : { active: validatedPanelWidth(active) }),
+    }) as PanelWidth;
+  }
   const suppliedPersistence = options.persistence;
   const suppliedMode = (
     suppliedPersistence as Readonly<{ mode?: unknown }> | undefined
@@ -1248,6 +1342,10 @@ export function definePanel<
     kind: options.kind,
     deduplication: options.deduplication ?? "allow-many",
     closable: options.closable ?? true,
+    // Absent rather than `undefined` when nothing was declared, so a definition
+    // that says nothing about presentation is the same object it has always
+    // been.
+    ...(width === undefined ? {} : { width }),
     ...(options.key === undefined ? {} : { key: options.key }),
     title: options.title,
     persistence,

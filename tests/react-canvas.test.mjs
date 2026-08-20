@@ -11,6 +11,7 @@ import {
   defineRootPanel,
 } from "../packages/canvas-panels/dist/core/index.js";
 import {
+  canvasPanelSizingBounds,
   createCanvasModule,
   defineCanvasContext,
 } from "../packages/canvas-panels/dist/ui/index.js";
@@ -1393,6 +1394,243 @@ test("scoped composition registers actions, titles, focus targets, lifecycle lab
   rendered.unmount();
 });
 
+test("a Context Signal built inline wakes a Context Target only when its own entries change", async () => {
+  const editor = definePanel({ kind: "editor", title: ({ name }) => name });
+  let Canvas;
+  let readerRenders = 0;
+
+  function Reader() {
+    readerRenders += 1;
+    const target = Canvas.useContextTarget("active");
+    return createElement(
+      "output",
+      null,
+      target.signal
+        ? `${target.signal.entityId}: ${target.signal.title}`
+        : "No context",
+    );
+  }
+
+  function Editor({ descriptor }) {
+    const [keystrokes, setKeystrokes] = useState(0);
+    const [title, setTitle] = useState("Ada Lovelace");
+    // The shape the defect was filed about: a fresh object literal every
+    // render, built from props and local state, holding only primitives.
+    // Nothing about it is memoised, and nothing about it needs to be.
+    Canvas.useContextSignal({
+      entityType: "contact",
+      entityId: descriptor.name,
+      title,
+    });
+    return createElement(
+      "div",
+      null,
+      createElement(
+        "button",
+        { onClick: () => setKeystrokes((count) => count + 1), type: "button" },
+        "Type a keystroke",
+      ),
+      createElement("span", { "data-testid": "keystrokes" }, `${keystrokes}`),
+      createElement(
+        "button",
+        { onClick: () => setTitle("Grace Hopper"), type: "button" },
+        "Rename",
+      ),
+    );
+  }
+
+  Canvas = createCanvasModule({
+    context: defineCanvasContext(),
+    root: defineRootPanel({ kind: "root", title: "Home" }),
+    panels: [editor],
+    renderers: {
+      root: () => {
+        const navigation = Canvas.useNavigation();
+        return createElement(
+          "button",
+          {
+            onClick: () => navigation.open(editor, { name: "Draft" }),
+            type: "button",
+          },
+          "Open editor",
+        );
+      },
+      editor: Editor,
+    },
+  });
+  const rendered = render(
+    createElement(
+      Canvas.Provider,
+      null,
+      createElement(Reader),
+      createElement(Canvas.Workspace, { label: "Signals" }),
+    ),
+  );
+
+  fireEvent.click(rendered.getByRole("button", { name: "Open editor" }));
+  await waitFor(() =>
+    assert.equal(
+      rendered.getByRole("status").textContent,
+      "Draft: Ada Lovelace",
+    ),
+  );
+
+  // The measurement the defect is about. Re-rendering the publishing Panel —
+  // one keystroke in a field the Context Target knows nothing about — used to
+  // republish the signal and wake every reader, because the effect was keyed on
+  // the literal's object identity.
+  readerRenders = 0;
+  for (let count = 0; count < 3; count += 1) {
+    fireEvent.click(rendered.getByRole("button", { name: "Type a keystroke" }));
+  }
+  assert.equal(rendered.getByTestId("keystrokes").textContent, "3");
+  assert.equal(readerRenders, 0);
+  assert.equal(rendered.getByRole("status").textContent, "Draft: Ada Lovelace");
+
+  // A value that genuinely changed still publishes, promptly.
+  fireEvent.click(rendered.getByRole("button", { name: "Rename" }));
+  await waitFor(() =>
+    assert.equal(
+      rendered.getByRole("status").textContent,
+      "Draft: Grace Hopper",
+    ),
+  );
+  assert.ok(readerRenders > 0);
+
+  // And holding the signal must not cost the unpublish: the effect still
+  // returns the store's own cleanup, so closing the Panel clears the Context
+  // Target rather than leaving a signal behind for an unmounted Panel.
+  fireEvent.click(rendered.getByRole("button", { name: "Close Draft" }));
+  await waitFor(() =>
+    assert.equal(rendered.getByRole("status").textContent, "No context"),
+  );
+  rendered.unmount();
+});
+
+test("a Context Signal is compared one level deep, so cycles are safe and rebuilt values republish", async () => {
+  const editor = definePanel({ kind: "editor", title: ({ name }) => name });
+  // Cyclic, and published every render. Nothing in the comparison recurses, so
+  // this is compared and dismissed by identity rather than walked.
+  const cyclic = { label: "Cyclic" };
+  cyclic.self = cyclic;
+  const signals = {
+    cyclic: () => cyclic,
+    // A fresh array literal of primitives every render: the same own entries,
+    // so the same signal.
+    array: () => ["array", "Ada Lovelace"],
+    // Non-plain values, rebuilt every render. Each is compared by identity, so
+    // this signal is a different signal every time — the documented cost, and
+    // the case `useMemo` at the call site is still for.
+    rebuilt: () => ({ label: "Rebuilt", at: new Date(0), open: () => {} }),
+  };
+  const describe = (signal) =>
+    signal === undefined
+      ? "No context"
+      : Array.isArray(signal)
+        ? signal.join(": ")
+        : signal.label;
+  let Canvas;
+  let readerRenders = 0;
+
+  function Reader() {
+    readerRenders += 1;
+    const target = Canvas.useContextTarget("active");
+    return createElement("output", null, describe(target.signal));
+  }
+
+  function Editor() {
+    const [mode, setMode] = useState("cyclic");
+    const [tick, setTick] = useState(0);
+    Canvas.useContextSignal(signals[mode]());
+    return createElement(
+      "div",
+      null,
+      createElement("span", { "data-testid": "ticks" }, `${tick}`),
+      createElement(
+        "button",
+        { onClick: () => setTick((count) => count + 1), type: "button" },
+        "Re-render",
+      ),
+      ...Object.keys(signals).map((name) =>
+        createElement(
+          "button",
+          { key: name, onClick: () => setMode(name), type: "button" },
+          `Publish ${name}`,
+        ),
+      ),
+    );
+  }
+
+  Canvas = createCanvasModule({
+    context: defineCanvasContext(),
+    root: defineRootPanel({ kind: "root", title: "Home" }),
+    panels: [editor],
+    renderers: {
+      root: () => {
+        const navigation = Canvas.useNavigation();
+        return createElement(
+          "button",
+          {
+            onClick: () => navigation.open(editor, { name: "Draft" }),
+            type: "button",
+          },
+          "Open editor",
+        );
+      },
+      editor: Editor,
+    },
+  });
+  const rendered = render(
+    createElement(
+      Canvas.Provider,
+      null,
+      createElement(Reader),
+      createElement(Canvas.Workspace, { label: "Signals" }),
+    ),
+  );
+
+  const rerenderPanel = (times) => {
+    readerRenders = 0;
+    for (let count = 0; count < times; count += 1) {
+      fireEvent.click(rendered.getByRole("button", { name: "Re-render" }));
+    }
+  };
+
+  fireEvent.click(rendered.getByRole("button", { name: "Open editor" }));
+  await waitFor(() =>
+    assert.equal(rendered.getByRole("status").textContent, "Cyclic"),
+  );
+
+  // Reaching the assertion at all is most of the point: a comparison that
+  // walked the value would not return from the first render.
+  rerenderPanel(3);
+  assert.equal(rendered.getByTestId("ticks").textContent, "3");
+  assert.equal(readerRenders, 0);
+  assert.equal(rendered.getByRole("status").textContent, "Cyclic");
+
+  fireEvent.click(rendered.getByRole("button", { name: "Publish array" }));
+  await waitFor(() =>
+    assert.equal(
+      rendered.getByRole("status").textContent,
+      "array: Ada Lovelace",
+    ),
+  );
+  rerenderPanel(3);
+  assert.equal(readerRenders, 0);
+
+  fireEvent.click(rendered.getByRole("button", { name: "Publish rebuilt" }));
+  await waitFor(() =>
+    assert.equal(rendered.getByRole("status").textContent, "Rebuilt"),
+  );
+  // Documented rather than silently different: a `Date` and a function are
+  // compared by identity, so a signal that rebuilds them republishes on every
+  // render, exactly as it did before the comparison landed.
+  rerenderPanel(3);
+  assert.ok(readerRenders >= 3);
+  assert.equal(rendered.getByRole("status").textContent, "Rebuilt");
+  rendered.unmount();
+});
+
 test("a registered visual title replaces the heading rather than printing beside it", () => {
   const editor = definePanel({ kind: "editor", title: ({ name }) => name });
   let Canvas;
@@ -1745,5 +1983,493 @@ test("focus inside a Panel settles the Workspace instead of re-opening its focus
     "the Workspace kept re-rendering instead of settling",
   );
   assert.equal(document.activeElement, elsewhere);
+  rendered.unmount();
+});
+
+function renderDeclaredWidthCanvas() {
+  const root = defineRootPanel({ kind: "classes", title: "Classes" });
+  const wide = definePanel({
+    kind: "wide",
+    title: () => "Wide",
+    width: { resting: "28rem", active: "min(48rem, 92vw)" },
+  });
+  const restingOnly = definePanel({
+    kind: "resting-only",
+    title: () => "Resting only",
+    width: { resting: "22rem" },
+  });
+  const activeOnly = definePanel({
+    kind: "active-only",
+    title: () => "Active only",
+    width: { active: "40rem" },
+  });
+  const themed = definePanel({ kind: "themed", title: () => "Themed" });
+  const panels = [wide, restingOnly, activeOnly, themed];
+  const Canvas = createCanvasModule({
+    root,
+    panels,
+    renderers: {
+      classes: () => null,
+      wide: () => null,
+      "resting-only": () => null,
+      "active-only": () => null,
+      themed: () => null,
+    },
+  });
+  const engine = createPanelEngine({ root, panels });
+  const result = render(
+    createElement(
+      Canvas.Provider,
+      { engine },
+      createElement(Canvas.Workspace, { label: "Classes Canvas" }),
+    ),
+  );
+  for (const definition of panels) {
+    act(() => {
+      engine.open({ panel: definition.reference({}) });
+    });
+  }
+  const panelFor = (kind) =>
+    result.container.querySelector(`[data-panel-kind="${kind}"]`);
+  return { engine, panelFor, result };
+}
+
+test("a Panel Kind that declares a width renders at it", () => {
+  const { panelFor } = renderDeclaredWidthCanvas();
+
+  // Resolved onto the two custom properties the stylesheet already reads, on
+  // the Panel element itself, so the width the Kind declared is the width the
+  // Panel rules see.
+  const wide = panelFor("wide");
+  assert.equal(wide.style.getPropertyValue("--canvas-panel-width"), "28rem");
+  assert.equal(
+    wide.style.getPropertyValue("--canvas-panel-active-width"),
+    "min(48rem, 92vw)",
+  );
+
+  // Each half is independent: declaring one leaves the other inherited, so the
+  // stylesheet still answers for it.
+  const restingOnly = panelFor("resting-only");
+  assert.equal(
+    restingOnly.style.getPropertyValue("--canvas-panel-width"),
+    "22rem",
+  );
+  assert.equal(
+    restingOnly.style.getPropertyValue("--canvas-panel-active-width"),
+    "",
+  );
+
+  const activeOnly = panelFor("active-only");
+  assert.equal(activeOnly.style.getPropertyValue("--canvas-panel-width"), "");
+  assert.equal(
+    activeOnly.style.getPropertyValue("--canvas-panel-active-width"),
+    "40rem",
+  );
+});
+
+test("a Panel Kind that declares no width is unchanged", () => {
+  const { panelFor } = renderDeclaredWidthCanvas();
+
+  // No style attribute at all — not an empty one — so a Canvas whose Kinds say
+  // nothing about presentation produces exactly the markup it always has, and
+  // the only width seam is still the stylesheet.
+  for (const kind of ["classes", "themed"]) {
+    assert.equal(panelFor(kind).hasAttribute("style"), false);
+  }
+});
+
+test("a Panel Separator drag still outranks the width its Kind declared", () => {
+  const { panelFor } = renderDeclaredWidthCanvas();
+  const panel = panelFor("wide");
+  const handle = panel.querySelector("[data-canvas-panel-separator]");
+
+  act(() => {
+    fireEvent.keyDown(handle, { key: "End" });
+  });
+
+  assert.equal(panel.style.flexBasis, `${canvasPanelSizingBounds.max}px`);
+  // The declaration stays where it was: a drag replaces the resolved width, not
+  // the Kind's own default, so releasing it would restore the declared one.
+  assert.equal(panel.style.getPropertyValue("--canvas-panel-width"), "28rem");
+});
+
+test("a content Action renders application content in the header action row, interleaved with buttons by priority", () => {
+  const detail = definePanel({
+    kind: "detail",
+    deduplication: "allow-many",
+    title: () => "Detail",
+  });
+  const cancellations = [];
+  let detailRenders = 0;
+  let Canvas;
+
+  // The case the label-and-handler shape cannot express: a state label, a
+  // ticking duration, and an embedded control, which hides itself when there
+  // is no job to report.
+  function JobReadout({ elapsed }) {
+    return createElement(
+      Fragment,
+      null,
+      createElement(
+        "span",
+        { "data-testid": "job-elapsed" },
+        `Encoding, ${elapsed}s elapsed`,
+      ),
+      createElement(
+        "button",
+        { onClick: () => cancellations.push(elapsed), type: "button" },
+        "Cancel job",
+      ),
+    );
+  }
+
+  function Root() {
+    const navigation = Canvas.useNavigation();
+    const [elapsed, setElapsed] = useState(0);
+    const [running, setRunning] = useState(true);
+    return createElement(
+      Fragment,
+      null,
+      createElement(Canvas.Action, {
+        id: "alpha",
+        label: "Alpha",
+        onSelect: () => {},
+        priority: 20,
+      }),
+      createElement(Canvas.Action, {
+        content: running
+          ? createElement(JobReadout, { elapsed })
+          : // A content Action with nothing to show says so with `null`.
+            null,
+        id: "job-status",
+        priority: 10,
+      }),
+      createElement(Canvas.Action, {
+        id: "zulu",
+        label: "Zulu",
+        onSelect: () => {},
+        priority: 5,
+      }),
+      createElement(
+        "button",
+        { onClick: () => setElapsed((current) => current + 1), type: "button" },
+        "Tick",
+      ),
+      createElement(
+        "button",
+        { onClick: () => setRunning(false), type: "button" },
+        "Finish job",
+      ),
+      createElement(
+        "button",
+        { onClick: () => navigation.open(detail, { id: "d" }), type: "button" },
+        "Open detail",
+      ),
+    );
+  }
+
+  Canvas = createCanvasModule({
+    root: defineRootPanel({ kind: "root", title: "Home" }),
+    panels: [detail],
+    renderers: {
+      root: Root,
+      detail: () => {
+        detailRenders += 1;
+        return createElement("p", null, "Detail body");
+      },
+    },
+  });
+  const rendered = render(
+    createElement(
+      Canvas.Provider,
+      null,
+      createElement(Canvas.Workspace, { label: "Jobs" }),
+    ),
+  );
+
+  const header = rendered.container.querySelector("[data-canvas-panel-header]");
+  const row = () =>
+    [...header.children]
+      .filter((element) => element.hasAttribute("data-canvas-action"))
+      .map(
+        (element) =>
+          `${element.tagName.toLowerCase()}:${element.getAttribute("data-canvas-action")}`,
+      );
+
+  // One sorted row, both shapes in it: the readout takes the place its
+  // priority earned rather than being parked at either end.
+  assert.deepEqual(row(), ["button:alpha", "div:job-status", "button:zulu"]);
+  assert.equal(
+    rendered.getByTestId("job-elapsed").textContent,
+    "Encoding, 0s elapsed",
+  );
+  assert.equal(
+    rendered
+      .getByTestId("job-elapsed")
+      .closest("[data-canvas-panel-header]")
+      ?.hasAttribute("data-canvas-panel-header"),
+    true,
+    "content must render inside the Panel header",
+  );
+
+  // The wrapper says only which Action it belongs to. It claims no role, no
+  // name, and no place in the focus order of its own.
+  const wrapper = header.querySelector("[data-canvas-action-content]");
+  assert.equal(wrapper.getAttribute("data-canvas-action"), "job-status");
+  assert.equal(wrapper.hasAttribute("role"), false);
+  assert.equal(wrapper.hasAttribute("tabindex"), false);
+  assert.equal(wrapper.hasAttribute("aria-hidden"), false);
+
+  fireEvent.click(rendered.getByRole("button", { name: "Open detail" }));
+  const registeredRenders = detailRenders;
+
+  // Application content changes on every render by nature. If it re-registered
+  // the Action, the Workspace's registration state would move and every Panel
+  // renderer would run again — which is what this counts.
+  for (const expected of [1, 2, 3]) {
+    fireEvent.click(rendered.getByRole("button", { name: "Tick" }));
+    assert.equal(
+      rendered.getByTestId("job-elapsed").textContent,
+      `Encoding, ${expected}s elapsed`,
+    );
+  }
+  assert.equal(
+    detailRenders,
+    registeredRenders,
+    "re-rendering content re-registered the Action",
+  );
+  assert.deepEqual(row(), ["button:alpha", "div:job-status", "button:zulu"]);
+
+  // The embedded control is an ordinary button in the header, reachable and
+  // wired to the application's own handler.
+  fireEvent.click(rendered.getByRole("button", { name: "Cancel job" }));
+  assert.deepEqual(cancellations, [3]);
+
+  fireEvent.click(rendered.getByRole("button", { name: "Finish job" }));
+  assert.equal(rendered.queryByTestId("job-elapsed"), null);
+  assert.equal(rendered.queryByRole("button", { name: "Cancel job" }), null);
+  // Self-hiding is the content going away, not the registration: the Action is
+  // still registered and still holds its place in the row.
+  assert.deepEqual(row(), ["button:alpha", "div:job-status", "button:zulu"]);
+  rendered.unmount();
+});
+
+test("content in a background Panel's header acts on the Panel that registered it", async () => {
+  const editor = definePanel({
+    kind: "editor",
+    deduplication: "allow-many",
+    title: ({ name }) => name,
+  });
+  let Canvas;
+
+  function CloseFromHeader() {
+    const navigation = Canvas.useNavigation();
+    const panel = Canvas.usePanel();
+    return createElement(
+      "button",
+      { onClick: () => navigation.close(), type: "button" },
+      `Dismiss ${panel.title}`,
+    );
+  }
+
+  Canvas = createCanvasModule({
+    root: defineRootPanel({ kind: "root", title: "Home" }),
+    panels: [editor],
+    renderers: {
+      root: () => {
+        const navigation = Canvas.useNavigation();
+        return createElement(
+          "button",
+          {
+            onClick: () => navigation.open(editor, { name: "Draft" }),
+            type: "button",
+          },
+          "Open editor",
+        );
+      },
+      editor: ({ descriptor }) => {
+        const navigation = Canvas.useNavigation();
+        return createElement(
+          Fragment,
+          null,
+          createElement(Canvas.Action, {
+            content: createElement(CloseFromHeader),
+            id: "dismiss",
+          }),
+          createElement("p", null, `Editing ${descriptor.name}`),
+          createElement(
+            "button",
+            {
+              onClick: () => navigation.open(editor, { name: "Second" }),
+              type: "button",
+            },
+            `Open a Panel beside ${descriptor.name}`,
+          ),
+        );
+      },
+    },
+  });
+  const rendered = render(
+    createElement(
+      Canvas.Provider,
+      null,
+      createElement(Canvas.Workspace, { label: "Scoped content" }),
+    ),
+  );
+
+  const openPanels = () =>
+    rendered.container.querySelectorAll("[data-canvas-panel]").length;
+
+  fireEvent.click(rendered.getByRole("button", { name: "Open editor" }));
+  fireEvent.click(
+    rendered.getByRole("button", { name: "Open a Panel beside Draft" }),
+  );
+  await act(async () => {});
+  assert.equal(openPanels(), 3);
+
+  // "Second" is the Active Panel, and the read models inside "Draft"'s header
+  // content still resolve to the Panel that registered the Action.
+  const dismiss = rendered.getByRole("button", { name: "Dismiss Draft" });
+  assert.equal(
+    dismiss.closest("[data-canvas-panel]").dataset.panelKind,
+    "editor",
+  );
+  assert.ok(rendered.getByRole("button", { name: "Dismiss Second" }));
+
+  // Navigation from header content targets its own Panel too: closing "Draft"
+  // takes the Panel opened beside it, not the other way round.
+  fireEvent.click(dismiss);
+  await act(async () => {});
+  assert.equal(rendered.queryByRole("button", { name: "Dismiss Draft" }), null);
+  assert.equal(
+    rendered.queryByRole("button", { name: "Dismiss Second" }),
+    null,
+  );
+  assert.equal(openPanels(), 1);
+  rendered.unmount();
+});
+
+test("a content Action's failure is dropped from the row rather than taking the Canvas down", async () => {
+  const reports = [];
+  let Canvas;
+
+  function Explodes({ broken }) {
+    if (broken) throw new Error("readout failed");
+    return createElement("span", { "data-testid": "readout" }, "Idle");
+  }
+
+  function Root() {
+    const [broken, setBroken] = useState(false);
+    return createElement(
+      Fragment,
+      null,
+      createElement(Canvas.Action, {
+        content: createElement(Explodes, { broken }),
+        id: "readout",
+      }),
+      createElement(Canvas.Action, {
+        id: "rename",
+        label: "Rename",
+        onSelect: () => {},
+      }),
+      createElement(
+        "button",
+        { onClick: () => setBroken(true), type: "button" },
+        "Break readout",
+      ),
+      createElement(
+        "button",
+        { onClick: () => setBroken(false), type: "button" },
+        "Mend readout",
+      ),
+    );
+  }
+
+  Canvas = createCanvasModule({
+    onRendererError: (report) => reports.push(report.kind),
+    root: defineRootPanel({ kind: "root", title: "Home" }),
+    panels: [],
+    renderers: { root: Root },
+  });
+  const rendered = render(
+    createElement(
+      Canvas.Provider,
+      null,
+      createElement(Canvas.Workspace, { label: "Failing content" }),
+    ),
+  );
+
+  assert.equal(rendered.getByTestId("readout").textContent, "Idle");
+  const originalConsoleError = console.error;
+  console.error = () => {};
+  try {
+    fireEvent.click(rendered.getByRole("button", { name: "Break readout" }));
+    await act(async () => {});
+  } finally {
+    console.error = originalConsoleError;
+  }
+
+  // The Canvas is still standing: the chrome, the other Action, and the Panel
+  // body are all where they were, and the host heard about the failure.
+  assert.equal(rendered.queryByTestId("readout"), null);
+  assert.ok(rendered.getByRole("button", { name: "Rename" }));
+  assert.ok(rendered.getByRole("region", { name: "Home" }));
+  assert.deepEqual(reports, ["root"]);
+
+  // The next content the application renders is tried again.
+  fireEvent.click(rendered.getByRole("button", { name: "Mend readout" }));
+  await act(async () => {});
+  assert.equal(rendered.getByTestId("readout").textContent, "Idle");
+  rendered.unmount();
+});
+
+test("content may not register a header registration of its own", async () => {
+  const reports = [];
+  let Canvas;
+
+  // A registration that re-runs whenever the content it sits in re-renders is
+  // a loop, and content re-renders by nature. It is refused with a sentence
+  // rather than left to spin.
+  function NestedRegistration() {
+    Canvas.useHeader({ visualTitle: "From inside the header" });
+    return createElement("span", null, "Never rendered");
+  }
+
+  Canvas = createCanvasModule({
+    onRendererError: (report) => reports.push(report.kind),
+    root: defineRootPanel({ kind: "root", title: "Home" }),
+    panels: [],
+    renderers: {
+      root: () =>
+        createElement(Canvas.Action, {
+          content: createElement(NestedRegistration),
+          id: "nested",
+        }),
+    },
+  });
+
+  const originalConsoleError = console.error;
+  console.error = () => {};
+  let rendered;
+  try {
+    rendered = render(
+      createElement(
+        Canvas.Provider,
+        null,
+        createElement(Canvas.Workspace, { label: "Nested registration" }),
+      ),
+    );
+    await act(async () => {});
+  } finally {
+    console.error = originalConsoleError;
+  }
+
+  assert.equal(rendered.queryByText("Never rendered"), null);
+  // Every attempt is reported, and every report names the Panel whose content
+  // it was: the registration settling hands the boundary a new element, which
+  // is a new attempt rather than the same failure counted twice.
+  assert.ok(reports.length > 0, "the refusal must reach the host");
+  assert.deepEqual(new Set(reports), new Set(["root"]));
+  assert.ok(rendered.getByRole("region", { name: "Home" }));
   rendered.unmount();
 });

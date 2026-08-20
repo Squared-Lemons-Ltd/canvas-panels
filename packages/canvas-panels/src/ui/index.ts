@@ -2,6 +2,7 @@
 
 import type {
   ComponentType,
+  CSSProperties,
   KeyboardEvent as ReactKeyboardEvent,
   ReactNode,
   PointerEvent as ReactPointerEvent,
@@ -37,6 +38,7 @@ import {
   type PanelInstanceRef,
   type PanelLifecycle,
   type PanelReference,
+  type PanelWidth,
   type PendingGuardedTransition,
   type RootPanelDefinition,
 } from "../core/index.js";
@@ -131,14 +133,105 @@ export function defineCanvasContext<Signal>(): CanvasContextDefinition<Signal> {
   return Object.freeze({}) as CanvasContextDefinition<Signal>;
 }
 
-export type CanvasActionProps = Readonly<{
+/**
+ * What a content Action may render. `undefined` is excluded on purpose: the
+ * presence of `content` is what tells the two Action shapes apart, so a
+ * control with nothing to show says so with `null` rather than by briefly
+ * becoming a button registration with no label.
+ */
+export type CanvasActionContent = Exclude<ReactNode, undefined>;
+
+export type CanvasActionButtonProps = Readonly<{
   id: string;
   label: string;
   priority?: number;
   disabled?: boolean;
   destructive?: boolean;
   onSelect: () => void;
+  content?: never;
 }>;
+
+/**
+ * The header control no label string describes: a live readout, a status
+ * composite, something with its own embedded button. It registers through the
+ * same path a button Action does and sorts into the same row under the same
+ * `priority` rules — the package decides where it goes, the application
+ * decides what renders.
+ *
+ * The `never`s are the whole point of splitting the shape in two. A
+ * registration carrying both a `label`/`onSelect` pair and content, or
+ * neither, is rejected by the compiler rather than discovered at runtime.
+ */
+export type CanvasActionContentProps = Readonly<{
+  id: string;
+  priority?: number;
+  content: CanvasActionContent;
+  label?: never;
+  onSelect?: never;
+  disabled?: never;
+  destructive?: never;
+}>;
+
+export type CanvasActionProps =
+  | CanvasActionButtonProps
+  | CanvasActionContentProps;
+
+/**
+ * Where a content Action's current render lives between the Panel body that
+ * produced it and the header that shows it.
+ *
+ * Application content is a new element on every render, so putting it in the
+ * registration itself would re-register the Action every time the application
+ * re-rendered — the Workspace's action map is keyed on registration identity,
+ * and a ticking readout would churn it once a second. The registration holds
+ * this store instead: its identity never moves, the header subscribes to it,
+ * and only the one header slot re-renders.
+ */
+type HeaderContentStore = Readonly<{
+  subscribe: (listener: () => void) => () => void;
+  read: () => CanvasActionContent;
+  write: (content: CanvasActionContent) => void;
+}>;
+
+function createHeaderContentStore(): HeaderContentStore {
+  let content: CanvasActionContent = null;
+  const listeners = new Set<() => void>();
+  return Object.freeze({
+    subscribe: (listener: () => void) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    read: () => content,
+    write: (next: CanvasActionContent) => {
+      if (Object.is(next, content)) return;
+      content = next;
+      for (const listener of listeners) listener();
+    },
+  });
+}
+
+/**
+ * What the Workspace holds for one registered Action. The public props are the
+ * application's spelling of this; the button member keeps `content` declared
+ * and absent so the two can be told apart by reading one property.
+ */
+type ActionRegistration =
+  | Readonly<{
+      id: string;
+      label: string;
+      priority?: number;
+      disabled?: boolean;
+      destructive?: boolean;
+      onSelect: () => void;
+      content?: undefined;
+    }>
+  | Readonly<{
+      id: string;
+      priority?: number;
+      content: HeaderContentStore;
+    }>;
 
 export type CanvasPanelLifecycle = PanelLifecycle &
   Readonly<{
@@ -217,11 +310,69 @@ class PanelRendererBoundary extends Component<
   }
 }
 
+/**
+ * A content Action's own containment. Application content in the header is the
+ * one piece of application rendering that happens outside the Panel body, and
+ * so outside the boundary that keeps a renderer failure inside its own Panel;
+ * without this, a throw in a ticking readout would take the whole Workspace
+ * down with it.
+ *
+ * A header is no place for a failure notice — the body's notice already tells
+ * the reader that something went wrong — so a failure drops the content from
+ * the row and is reported through the same `onRendererError` a body failure
+ * uses. The next content the application renders is attempted again: the reset
+ * is driven by new children arriving, so content that throws every time
+ * settles at blank instead of looping.
+ */
+class HeaderContentBoundary extends Component<
+  Readonly<{
+    children?: ReactNode;
+    kind: string;
+    panel: PanelInstanceRef;
+    onError?: (report: RendererErrorReport) => void;
+  }>,
+  Readonly<{ failed: boolean }>
+> {
+  state = Object.freeze({ failed: false });
+
+  /**
+   * The content this boundary last handed to React, which is the content that
+   * threw. Comparing against the *previous* props instead would compare the
+   * failure to the render before it, find them different, and retry the same
+   * content that had just failed — one extra render and one duplicate report
+   * for every failure.
+   */
+  attempted: ReactNode = null;
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  componentDidCatch() {
+    this.props.onError?.(
+      Object.freeze({ kind: this.props.kind, panel: this.props.panel }),
+    );
+  }
+
+  componentDidUpdate() {
+    if (this.state.failed && this.props.children !== this.attempted) {
+      this.setState({ failed: false });
+    }
+  }
+
+  render() {
+    if (this.state.failed) return null;
+    this.attempted = this.props.children;
+    return this.props.children;
+  }
+}
+
 type PanelDefinitionShape = Readonly<{
   role: "panel";
   kind: string;
   deduplication: PanelDeduplication;
   closable: boolean;
+  width?: PanelWidth;
   key?: (input: never) => string;
   title: (input: never) => string;
   reference: (input: never) => PanelReference<string, unknown>;
@@ -591,6 +742,59 @@ function GuardedTransitionDialog({
   );
 }
 
+/**
+ * Whether two Context Signals are the same signal, compared **one level deep**:
+ * the same value by `Object.is`, or two plain objects — or two arrays — with
+ * the same own enumerable entries, each compared by `Object.is`.
+ *
+ * The depth is the whole design. A Context Signal is an opaque
+ * application-typed value, so it may be arbitrarily nested, hold functions,
+ * `Date`s, or class instances, and contain cycles; a comparison that walked it
+ * would cost O(document) on every render of every publisher, and would hang or
+ * throw on the values it was never told about. Nothing here recurses, so the
+ * comparison costs the signal's own entry count, cannot loop on a cyclic value,
+ * and cannot throw. Anything that is not a plain object or an array — including
+ * a `Date`, a `Map`, or a class instance — is compared by identity, and so is a
+ * nested object: a signal that rebuilds one every render republishes every
+ * render, which is what `useMemo` at the call site is still for.
+ */
+function sameContextSignal(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true;
+  if (
+    typeof left !== "object" ||
+    typeof right !== "object" ||
+    left === null ||
+    right === null
+  ) {
+    return false;
+  }
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return (
+      Array.isArray(left) &&
+      Array.isArray(right) &&
+      left.length === right.length &&
+      left.every((value, index) => Object.is(value, right[index]))
+    );
+  }
+  // Plain objects only. Two class instances with matching fields are two
+  // instances, and deciding otherwise would mean answering for a `Map`, a
+  // `Date`, or a proxy the package has never seen by reading its properties.
+  const plain = (value: object) => {
+    const prototype = Object.getPrototypeOf(value);
+    return prototype === Object.prototype || prototype === null;
+  };
+  if (!plain(left) || !plain(right)) return false;
+  const entries = Object.entries(left);
+  return (
+    entries.length === Object.keys(right).length &&
+    entries.every(
+      ([key, value]) =>
+        Object.hasOwn(right, key) &&
+        Object.is(value, (right as Record<string, unknown>)[key]),
+    )
+  );
+}
+
 export function createCanvasModule<
   const Root extends RootPanelDefinition,
   const Definitions extends readonly PanelDefinitionShape[],
@@ -620,7 +824,7 @@ export function createCanvasModule<
   }>;
   type PanelScope = Readonly<{
     panel: OpenPanel;
-    registerAction: (action: CanvasActionProps) => () => void;
+    registerAction: (action: ActionRegistration) => () => void;
     registerHeader: (header: HeaderRegistration) => () => void;
   }>;
   type SignalStore = Readonly<{
@@ -635,6 +839,41 @@ export function createCanvasModule<
   const SignalStoreContext = createContext<SignalStore | null>(null);
   const createEngine = () =>
     createPanelEngine({ root: config.root, panels: config.panels });
+  /*
+   * Each Panel Kind's declared width, resolved once per module onto the two
+   * custom properties the stylesheet reads. `core` carries the declaration as
+   * data because it renders nothing; this is the layer that renders the Panel
+   * element, so this is where a declaration becomes a value on it.
+   *
+   * Custom properties rather than `flex-basis` is the whole design. The Panel
+   * rules resolve `var(--canvas-panel-width)` and `var(--canvas-panel-active-
+   * width)` on the element, so a declared value simply replaces what those two
+   * rules read — which means the transition between the two widths still runs,
+   * the narrow presentations that set `flex-basis: 100%` still override both,
+   * and a Panel Separator drag, which writes `flex-basis` inline, still wins.
+   * A declared `flex-basis` would have flattened all three.
+   *
+   * The cost, and it is the documented trade: a declaration on the element
+   * beats a token inherited into it from anywhere — `:root`, an ancestor, or
+   * the Workspace element itself. For a Kind that declares a width, the
+   * stylesheet no longer sets it. Declare it, or theme it in CSS, not both.
+   */
+  const declaredPanelWidths = new Map<string, CSSProperties>();
+  for (const definition of config.panels) {
+    const width = definition.width;
+    if (width === undefined) continue;
+    declaredPanelWidths.set(
+      definition.kind,
+      Object.freeze({
+        ...(width.resting === undefined
+          ? {}
+          : { "--canvas-panel-width": width.resting }),
+        ...(width.active === undefined
+          ? {}
+          : { "--canvas-panel-active-width": width.active }),
+      }) as CSSProperties,
+    );
+  }
 
   function useLifecycle(lifecycle: CanvasPanelLifecycle): void {
     const register = useContext(LifecycleRegistrationContext);
@@ -694,10 +933,15 @@ export function createCanvasModule<
     );
   }
 
-  function Action(action: CanvasActionProps): null {
+  function useActionScope(): PanelScope {
     const scope = useContext(PanelScopeContext);
     if (!scope)
       throw new Error("Canvas Actions must render inside a Panel renderer");
+    return scope;
+  }
+
+  function ButtonAction(action: CanvasActionButtonProps): null {
+    const scope = useActionScope();
     const { destructive, disabled, id, label, onSelect, priority } = action;
     const latest = useRef(onSelect);
     useLayoutEffect(() => {
@@ -718,6 +962,38 @@ export function createCanvasModule<
     return null;
   }
 
+  function ContentAction(action: CanvasActionContentProps): null {
+    const scope = useActionScope();
+    const { content, id, priority } = action;
+    const [store] = useState(createHeaderContentStore);
+    // The same trick the handler above uses, for the same reason: what changes
+    // on every render goes into something whose identity does not, so the
+    // registration below re-runs only when `id` or `priority` actually moves.
+    useLayoutEffect(() => {
+      store.write(content);
+    }, [content, store]);
+    useEffect(
+      () =>
+        scope.registerAction({
+          content: store,
+          id,
+          ...(priority === undefined ? {} : { priority }),
+        }),
+      [id, priority, scope, store],
+    );
+    return null;
+  }
+
+  // One component per shape rather than one component with two sets of hooks:
+  // each sees only the props its own shape declares, and switching an Action
+  // from a button to content is a remount, which is what a different
+  // registration should be.
+  function Action(action: CanvasActionProps): ReactNode {
+    return action.content === undefined
+      ? createElement(ButtonAction, action)
+      : createElement(ContentAction, action);
+  }
+
   function useContextSignal(signal: Signal): void {
     const scope = useContext(PanelScopeContext);
     const store = useContext(SignalStoreContext);
@@ -726,9 +1002,19 @@ export function createCanvasModule<
         "Canvas Context Signals must run inside a Panel renderer",
       );
     }
+    // The signal is held rather than keyed on its object identity. The natural
+    // call site builds it inline from props — which is exactly what derived
+    // state looks like — and handing a fresh object to the dependency array
+    // republished it on every render, waking every Context Target reader for a
+    // value that had not changed. `sameContextSignal` decides that instead, one
+    // level deep; a signal it calls different is published immediately, and the
+    // effect still returns `publish`'s own cleanup, so unmounting unpublishes.
+    const held = useRef(signal);
+    if (!sameContextSignal(held.current, signal)) held.current = signal;
+    const published = held.current;
     useEffect(
-      () => store.publish(scope.panel.instanceRef, signal),
-      [scope, signal, store],
+      () => store.publish(scope.panel.instanceRef, published),
+      [published, scope, store],
     );
   }
 
@@ -966,7 +1252,7 @@ export function createCanvasModule<
     registerLifecycle: CanvasBinding<Reference>["registerLifecycle"];
     registerAction: (
       panel: PanelInstanceRef,
-      action: CanvasActionProps,
+      action: ActionRegistration,
     ) => () => void;
     registerHeader: (
       panel: PanelInstanceRef,
@@ -995,7 +1281,7 @@ export function createCanvasModule<
       () =>
         Object.freeze({
           panel,
-          registerAction: (action: CanvasActionProps) =>
+          registerAction: (action: ActionRegistration) =>
             registerAction(panel.instanceRef, action),
           registerHeader: (header: HeaderRegistration) =>
             registerHeader(panel.instanceRef, header),
@@ -1012,6 +1298,73 @@ export function createCanvasModule<
           descriptor: panel.reference.input,
           panel: panel.instanceRef,
         }),
+      ),
+    );
+  }
+
+  /**
+   * A content Action's place in the header action row.
+   *
+   * The wrapper is a plain `div` with no ARIA role and no `tabIndex`: it says
+   * nothing about the header's semantics, claims nothing from the Panel Focus
+   * Owner, and leaves whatever the application rendered in ordinary Tab order,
+   * where it sits in the row. A Panel the presentation is hiding is already
+   * `hidden` and `inert`, so its header content goes with it.
+   *
+   * The content renders inside the owning Panel's scope even though it renders
+   * outside that Panel's body, so a control here navigates from its own Panel
+   * rather than from whichever Panel happens to be active. It may not register
+   * anything further: a `useHeader` or a nested `Action` inside content would
+   * re-register on every render of content that changes on every render, which
+   * is a loop, so it is refused with a sentence rather than left to spin.
+   */
+  function HeaderActionContent({
+    content,
+    id,
+    panel,
+  }: Readonly<{
+    content: HeaderContentStore;
+    id: string;
+    panel: OpenPanel;
+  }>) {
+    const node = useSyncExternalStore(
+      content.subscribe,
+      content.read,
+      content.read,
+    );
+    const scope = useMemo<PanelScope>(
+      () =>
+        Object.freeze({
+          panel,
+          registerAction: () => {
+            throw new Error(
+              "A Canvas Action's content may not register a header registration of its own",
+            );
+          },
+          registerHeader: () => {
+            throw new Error(
+              "A Canvas Action's content may not register a header registration of its own",
+            );
+          },
+        }),
+      [panel],
+    );
+    return createElement(
+      "div",
+      {
+        "data-canvas-action": id,
+        "data-canvas-action-content": "",
+      },
+      createElement(
+        HeaderContentBoundary,
+        {
+          kind: panel.kind,
+          panel: panel.instanceRef,
+          ...(config.onRendererError
+            ? { onError: config.onRendererError }
+            : {}),
+        },
+        createElement(PanelScopeContext.Provider, { value: scope }, node),
       ),
     );
   }
@@ -1079,10 +1432,17 @@ export function createCanvasModule<
     const signalStore = useContext(SignalStoreContext);
     if (!signalStore)
       throw new Error("Canvas Workspace requires a Canvas Provider");
+    // The Workspace's own element, which is what "inside this Workspace" is
+    // measured against when focus has to be put somewhere. It is deliberately
+    // the Workspace rather than the application element: the mobile Back
+    // control and the breadcrumbs are Workspace chrome outside the Panels, and
+    // a transition they initiated must still be able to return focus to them.
+    const workspace = useRef<HTMLDivElement>(null);
     const application = useRef<HTMLDivElement>(null);
     const returnFocus = useRef<HTMLElement | null>(null);
     const focusedPanelId = useRef<PanelInstanceId | null>(null);
     const panelScrollOffsets = useRef(new Map<PanelInstanceId, number>());
+    const breadcrumbTrail = useRef<HTMLOListElement>(null);
     const previouslyVisiblePanelIds = useRef<readonly PanelInstanceId[]>([]);
     const previousTransition = useRef(snapshot.transition);
     const initiallyFocusedPanel = useRef<PanelInstanceId | null>(null);
@@ -1125,7 +1485,7 @@ export function createCanvasModule<
       ReadonlyMap<PanelInstanceId, number>
     >(() => new Map());
     const [actionRegistrations, setActionRegistrations] = useState<
-      ReadonlyMap<PanelInstanceId, ReadonlyMap<object, CanvasActionProps>>
+      ReadonlyMap<PanelInstanceId, ReadonlyMap<object, ActionRegistration>>
     >(() => new Map());
     const [pendingDescendantIds, setPendingDescendantIds] = useState<
       ReadonlySet<string>
@@ -1165,7 +1525,7 @@ export function createCanvasModule<
       });
     }, []);
     const registerAction = useCallback(
-      (panel: PanelInstanceRef, action: CanvasActionProps) => {
+      (panel: PanelInstanceRef, action: ActionRegistration) => {
         const owner = Object.freeze({});
         setActionRegistrations((current) => {
           const next = new Map(current);
@@ -1241,23 +1601,47 @@ export function createCanvasModule<
       });
     }, [snapshot.panels]);
 
+    // Where focus goes when a Guarded Transition resolves, however it resolved.
+    // It lands back inside this Workspace: on the control that initiated the
+    // transition while that control is still somewhere focus can go, and on the
+    // retained Active Panel's own heading otherwise.
+    //
+    // Each candidate is judged by where focus actually ended up rather than by
+    // `isConnected`, which answers a different question. `rememberFocus` records
+    // `document.activeElement`, and that is `document.body` whenever the control
+    // that initiated the navigation never took DOM focus — a row that is not
+    // focusable, a browser that does not focus a button when it is clicked, a
+    // keyboard shortcut. The body is an `HTMLElement` and is always connected,
+    // so believing `isConnected` "returned" focus to the body and never reached
+    // the heading behind it. The same went for a control that survived into a
+    // Panel the presentation had just hidden, where `focus()` is refused and
+    // says nothing. An Overlay Workspace paid for it immediately: its Escape is
+    // a handler on the layer, and focus left on the body means the next Escape
+    // arrives nowhere.
     useEffect(() => {
       if (previousTransition.current && !snapshot.transition) {
         const preferred = returnFocus.current;
+        returnFocus.current = null;
         const activeHeaders = headerRegistrations.get(snapshot.activePanelId);
         const registeredFallback = activeHeaders
           ? [...activeHeaders.values()].find(
               ({ fallbackFocus }) => fallbackFocus?.current?.isConnected,
             )?.fallbackFocus?.current
           : null;
-        const fallback = application.current?.querySelector<HTMLElement>(
-          ":scope > [data-active] h2",
-        );
-        (preferred?.isConnected
-          ? preferred
-          : (registeredFallback ?? fallback)
-        )?.focus();
-        returnFocus.current = null;
+        // The retained Active Panel's own heading, which the package renders
+        // for every Panel and which is always inside the current presentation,
+        // so the chain always has a last candidate that can be reached.
+        const heading =
+          application.current?.querySelector<HTMLElement>(
+            ":scope > [data-active] > [data-canvas-panel-header] > h2",
+          ) ?? null;
+        const inside = (node: Element | null) =>
+          node !== null && workspace.current?.contains(node) === true;
+        for (const candidate of [preferred, registeredFallback, heading]) {
+          if (!candidate || !inside(candidate)) continue;
+          candidate.focus();
+          if (inside(document.activeElement)) break;
+        }
       }
       previousTransition.current = snapshot.transition;
     }, [headerRegistrations, snapshot.activePanelId, snapshot.transition]);
@@ -1436,6 +1820,37 @@ export function createCanvasModule<
       }
     }, [visiblePanelIds, ownPanelElement]);
 
+    // The breadcrumb trail is one scrolling line, and where it rests is a
+    // decision, not a default: the crumb for the Active Panel is the last one
+    // the trail renders, so a trail left at its inline start hides the very
+    // crumb that says where you are. It is put at its inline end whenever the
+    // Active Panel changes — which is the same position a trail short enough to
+    // fit already has, so nothing moves until something is actually out of
+    // view. Closing a deeper Panel leaves the trail alone, because the trail
+    // ends at the Active Panel and never showed that Panel in the first place.
+    //
+    // Written directly rather than scrolled to: `scrollIntoView` would scroll
+    // every ancestor that could scroll, including the document, and this is
+    // one element's own offset. The write is instant, so there is no motion
+    // for a reduced-motion preference to have an opinion about; an application
+    // that has asked for `scroll-behavior: smooth` is honoured here as it is
+    // anywhere else, and the package's own reduced-motion block already forces
+    // that back to `auto`.
+    useLayoutEffect(() => {
+      const trail = breadcrumbTrail.current;
+      // Only a narrow presentation renders a trail, and only a Canvas with an
+      // Active Panel has a crumb to rest on.
+      if (!trail || snapshot.breakpoint !== "mobile" || activeIndex < 0) return;
+      // In a right-to-left Canvas the inline end is the negative extreme; the
+      // browser clamps either request to the real scroll range.
+      const inlineEnd =
+        typeof window !== "undefined" &&
+        window.getComputedStyle(trail).direction === "rtl"
+          ? -trail.scrollWidth
+          : trail.scrollWidth;
+      trail.scrollLeft = inlineEnd;
+    }, [activeIndex, snapshot.breakpoint]);
+
     const rememberFocus = useCallback(() => {
       returnFocus.current =
         typeof document !== "undefined" &&
@@ -1591,6 +2006,7 @@ export function createCanvasModule<
             "data-canvas-breakpoint": snapshot.breakpoint,
             "data-canvas-workspace": "",
             onKeyDown: cycleRegions,
+            ref: workspace,
             role: "region",
           },
           // A bare live region, deliberately without `role="status"`: that role
@@ -1631,7 +2047,7 @@ export function createCanvasModule<
                   : null,
                 createElement(
                   "ol",
-                  { "data-canvas-breadcrumbs": "" },
+                  { "data-canvas-breadcrumbs": "", ref: breadcrumbTrail },
                   ...snapshot.panels
                     .slice(0, activeIndex + 1)
                     .map((panel, breadcrumbIndex) =>
@@ -1693,6 +2109,12 @@ export function createCanvasModule<
                     .find(({ dirtyLabel }) => dirtyLabel !== undefined)
                     ?.dirtyLabel
                 : undefined;
+              // The Kind's declared width, and the width a Panel Separator drag
+              // gave this instance. A Kind that declared nothing and has not
+              // been dragged carries no style attribute at all, exactly as
+              // before.
+              const declaredWidth = declaredPanelWidths.get(panel.kind);
+              const resizedWidth = panelWidths.get(panel.instanceId);
               const actions = [
                 ...(actionRegistrations.get(panel.instanceId)?.values() ?? []),
               ].sort(
@@ -1717,10 +2139,12 @@ export function createCanvasModule<
                   key: panel.instanceId,
                   // An explicitly chosen width is applied inline so it outranks
                   // both the Panel and Active Panel rules without either needing
-                  // to become more specific.
-                  style: panelWidths.has(panel.instanceId)
-                    ? { flexBasis: `${panelWidths.get(panel.instanceId)}px` }
-                    : undefined,
+                  // to become more specific. A drag beats the Kind's own
+                  // declaration, because a person moved it.
+                  style:
+                    resizedWidth === undefined
+                      ? declaredWidth
+                      : { ...declaredWidth, flexBasis: `${resizedWidth}px` },
                   onBlurCapture: (event) => {
                     if (!event.currentTarget.contains(event.relatedTarget))
                       signalStore.setFocused(null);
@@ -1776,25 +2200,38 @@ export function createCanvasModule<
                         { "data-canvas-dirty-label": "" },
                         dirtyLabel,
                       ),
+                  // Both Action shapes come out of the one sorted list, so an
+                  // application content readout takes its place among the
+                  // buttons by the priority it registered rather than being
+                  // parked at either end of the row.
                   ...actions.map((action) =>
-                    createElement(
-                      "button",
-                      {
-                        "aria-label": action.label,
-                        // The id the application already gave this Action,
-                        // which until now the Canvas spent only as a React key.
-                        // Without it an application cannot tell its own Actions
-                        // apart in the DOM, so styling one means matching the
-                        // English in its label.
-                        "data-canvas-action": action.id,
-                        "data-destructive": action.destructive ? "" : undefined,
-                        disabled: action.disabled,
-                        key: action.id,
-                        onClick: action.onSelect,
-                        type: "button",
-                      },
-                      action.label,
-                    ),
+                    action.content === undefined
+                      ? createElement(
+                          "button",
+                          {
+                            "aria-label": action.label,
+                            // The id the application already gave this Action,
+                            // which until now the Canvas spent only as a React
+                            // key. Without it an application cannot tell its
+                            // own Actions apart in the DOM, so styling one
+                            // means matching the English in its label.
+                            "data-canvas-action": action.id,
+                            "data-destructive": action.destructive
+                              ? ""
+                              : undefined,
+                            disabled: action.disabled,
+                            key: action.id,
+                            onClick: action.onSelect,
+                            type: "button",
+                          },
+                          action.label,
+                        )
+                      : createElement(HeaderActionContent, {
+                          content: action.content,
+                          id: action.id,
+                          key: action.id,
+                          panel,
+                        }),
                   ),
                   !panel.closable
                     ? null
