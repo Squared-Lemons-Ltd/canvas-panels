@@ -330,3 +330,46 @@ test("focus dropped to the body by a hidden Panel is reclaimed by the Canvas", (
     panels(container)[2],
   );
 });
+
+test("a declared width is presentation-independent, and the stylesheet still decides the narrow ones", () => {
+  const root = defineRootPanel({ kind: "classes", title: "Classes" });
+  const record = definePanel({
+    kind: "record",
+    title: () => "Record",
+    width: { resting: "30rem", active: "52rem" },
+  });
+  const Canvas = createCanvasModule({
+    root,
+    panels: [record],
+    renderers: { classes: () => null, record: () => null },
+  });
+  const engine = createPanelEngine({ root, panels: [record] });
+  engine.open({ panel: record.reference({}) });
+  const viewport = installViewport("desktop");
+  let result;
+  act(() => {
+    result = render(
+      createElement(
+        Canvas.Provider,
+        { engine },
+        createElement(Canvas.Workspace, { label: "Classes Canvas" }),
+      ),
+    );
+  });
+
+  // The Canvas resolves a declared width once and leaves it there. It stays on
+  // a Panel the presentation has hidden, so nothing has to be re-resolved when
+  // that Panel comes back, and it is still only a custom property: the narrow
+  // presentations set `flex-basis` directly, which is what keeps a wide Kind
+  // from carrying its desktop column onto a phone.
+  for (const breakpoint of ["tablet", "mobile", "desktop"]) {
+    act(() => viewport.resizeTo(breakpoint));
+    const panel = panels(result.container).at(-1);
+    assert.equal(panel.getAttribute("data-panel-kind"), "record");
+    assert.equal(panel.style.getPropertyValue("--canvas-panel-width"), "30rem");
+    assert.equal(
+      panel.style.getPropertyValue("--canvas-panel-active-width"),
+      "52rem",
+    );
+  }
+});

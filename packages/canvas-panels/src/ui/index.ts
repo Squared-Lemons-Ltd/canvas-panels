@@ -2,6 +2,7 @@
 
 import type {
   ComponentType,
+  CSSProperties,
   KeyboardEvent as ReactKeyboardEvent,
   ReactNode,
   PointerEvent as ReactPointerEvent,
@@ -37,6 +38,7 @@ import {
   type PanelInstanceRef,
   type PanelLifecycle,
   type PanelReference,
+  type PanelWidth,
   type PendingGuardedTransition,
   type RootPanelDefinition,
 } from "../core/index.js";
@@ -222,6 +224,7 @@ type PanelDefinitionShape = Readonly<{
   kind: string;
   deduplication: PanelDeduplication;
   closable: boolean;
+  width?: PanelWidth;
   key?: (input: never) => string;
   title: (input: never) => string;
   reference: (input: never) => PanelReference<string, unknown>;
@@ -688,6 +691,41 @@ export function createCanvasModule<
   const SignalStoreContext = createContext<SignalStore | null>(null);
   const createEngine = () =>
     createPanelEngine({ root: config.root, panels: config.panels });
+  /*
+   * Each Panel Kind's declared width, resolved once per module onto the two
+   * custom properties the stylesheet reads. `core` carries the declaration as
+   * data because it renders nothing; this is the layer that renders the Panel
+   * element, so this is where a declaration becomes a value on it.
+   *
+   * Custom properties rather than `flex-basis` is the whole design. The Panel
+   * rules resolve `var(--canvas-panel-width)` and `var(--canvas-panel-active-
+   * width)` on the element, so a declared value simply replaces what those two
+   * rules read — which means the transition between the two widths still runs,
+   * the narrow presentations that set `flex-basis: 100%` still override both,
+   * and a Panel Separator drag, which writes `flex-basis` inline, still wins.
+   * A declared `flex-basis` would have flattened all three.
+   *
+   * The cost, and it is the documented trade: a declaration on the element
+   * beats a token inherited into it from anywhere — `:root`, an ancestor, or
+   * the Workspace element itself. For a Kind that declares a width, the
+   * stylesheet no longer sets it. Declare it, or theme it in CSS, not both.
+   */
+  const declaredPanelWidths = new Map<string, CSSProperties>();
+  for (const definition of config.panels) {
+    const width = definition.width;
+    if (width === undefined) continue;
+    declaredPanelWidths.set(
+      definition.kind,
+      Object.freeze({
+        ...(width.resting === undefined
+          ? {}
+          : { "--canvas-panel-width": width.resting }),
+        ...(width.active === undefined
+          ? {}
+          : { "--canvas-panel-active-width": width.active }),
+      }) as CSSProperties,
+    );
+  }
 
   function useLifecycle(lifecycle: CanvasPanelLifecycle): void {
     const register = useContext(LifecycleRegistrationContext);
@@ -1756,6 +1794,12 @@ export function createCanvasModule<
                     .find(({ dirtyLabel }) => dirtyLabel !== undefined)
                     ?.dirtyLabel
                 : undefined;
+              // The Kind's declared width, and the width a Panel Separator drag
+              // gave this instance. A Kind that declared nothing and has not
+              // been dragged carries no style attribute at all, exactly as
+              // before.
+              const declaredWidth = declaredPanelWidths.get(panel.kind);
+              const resizedWidth = panelWidths.get(panel.instanceId);
               const actions = [
                 ...(actionRegistrations.get(panel.instanceId)?.values() ?? []),
               ].sort(
@@ -1780,10 +1824,12 @@ export function createCanvasModule<
                   key: panel.instanceId,
                   // An explicitly chosen width is applied inline so it outranks
                   // both the Panel and Active Panel rules without either needing
-                  // to become more specific.
-                  style: panelWidths.has(panel.instanceId)
-                    ? { flexBasis: `${panelWidths.get(panel.instanceId)}px` }
-                    : undefined,
+                  // to become more specific. A drag beats the Kind's own
+                  // declaration, because a person moved it.
+                  style:
+                    resizedWidth === undefined
+                      ? declaredWidth
+                      : { ...declaredWidth, flexBasis: `${resizedWidth}px` },
                   onBlurCapture: (event) => {
                     if (!event.currentTarget.contains(event.relatedTarget))
                       signalStore.setFocused(null);

@@ -56,7 +56,7 @@ Most applications need `/core`, `/ui`, and `/styles.css`. Reach for `/react` onl
 
 Do these in order. Most breakage is a step done out of sequence.
 
-**1. Define the Root Panel and each Panel Kind** (`/core`). `definePanel` takes a `kind`, a `deduplication` mode (`reuse` collapses onto an existing Panel for the same key, `allow-many` does not), and optional `key`, `title`, and `update`.
+**1. Define the Root Panel and each Panel Kind** (`/core`). `definePanel` takes a `kind`, a `deduplication` mode (`reuse` collapses onto an existing Panel for the same key, `allow-many` does not), and optional `key`, `title`, `width`, and `update`. A `width` — `{ resting, active }`, either half on its own — is that Kind's default presentation, applied to its Panel element, and it wins over a stylesheet rule that sets the width tokens for that Kind.
 
 **2. Close them into one Bound Canvas Module** with `createCanvasModule({ root, panels, renderers })` from `/ui`. The returned module carries `Provider`, `Workspace`, `useNavigation`, `usePanel`, `useHeader`, `useLifecycle`, and `Action`.
 

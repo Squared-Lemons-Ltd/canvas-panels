@@ -175,6 +175,20 @@ Render `ClassesCanvas.Provider` above `ClassesCanvas.Workspace`; each Provider o
 
 The Bound module deliberately exposes no engine and no raw snapshot. Hosts that need one construct it with `createPanelEngine` from `@squaredlemons/canvas-panels/core`, and may pass `onSubscriberError` to report subscriber failures; a failing subscriber never blocks the others or changes the result of a command whose snapshot has already been published.
 
+A Panel Kind may declare its own width, beside the definition that names the Kind rather than in a stylesheet somewhere else:
+
+```ts
+const classPanel = definePanel({
+  kind: "class",
+  title: (input: { name: string }) => input.name,
+  width: { resting: "28rem", active: "min(48rem, 92vw)" },
+});
+```
+
+`resting` is the Panel's width in the stack and `active` is its width as the Active Panel. The two are separate properties, so each half is optional on its own — declare one and the other stays themed — but a `width` that declares neither is a type error rather than a declaration that quietly does nothing. Values are CSS lengths, percentages, `calc()`, `min()`, `max()`, `clamp()`, or `var()` references; anything else — a declaration separator, a quote, a comment, a `url()`, an unbalanced bracket, or more than 128 characters — throws a `TypeError` from `definePanel`, on the line that wrote it rather than on the first surface that opens that Panel.
+
+**A declared width wins over the stylesheet for that Kind.** The package resolves it onto `--canvas-panel-width` and `--canvas-panel-active-width` on the Panel element itself, and a value declared on an element beats one inherited into it from `:root`, from an ancestor, or from the Workspace element. Declare a Kind's width, or theme it in CSS, not both. Two things still outrank it, and both should: the narrow presentations, which set `flex-basis` directly so a wide Kind never carries its desktop column onto a phone, and a Panel Separator drag, because a person moved it. `defineRootPanel` takes no `width`; a Root Panel is themed in CSS.
+
 The Root Panel is permanent and never closable. A Child definition can set `closable: false`; any command or Branch Replacement that would remove it rejects atomically. Each Panel Kind chooses `reuse`, `replace`, or `allow-many`; the first two require a registered semantic Panel Key. Panel inputs are copied into deeply immutable read models and must contain only structured-cloneable plain objects, arrays, and primitives.
 
 Updates use each definition's typed update union and a pure reducer, validate both the payload and the complete result, and reject semantic Panel Key changes. They never shallow-merge arbitrary patches.
@@ -303,8 +317,8 @@ This is the complete list, and it is part of the Public Contract: a token the pa
 | `--canvas-border` | `color-mix(in srgb, CanvasText 18%, transparent)` | Panel edges and header rules |
 | `--canvas-text` | `CanvasText` | Canvas text |
 | `--canvas-text-muted` | `color-mix(in srgb, CanvasText 65%, transparent)` | secondary text, and what an action's colour derives from |
-| `--canvas-panel-width` | `min(24rem, 84vw)` | an inactive Panel |
-| `--canvas-panel-active-width` | `min(36rem, 90vw)` | the Active Panel |
+| `--canvas-panel-width` | `min(24rem, 84vw)` | an inactive Panel, unless its Panel Kind declared a `width` |
+| `--canvas-panel-active-width` | `min(36rem, 90vw)` | the Active Panel, unless its Panel Kind declared a `width` |
 | `--canvas-panel-min-height` | `24rem` | the Canvas's own floor |
 | `--canvas-panel-gap` | `0` | the gutter between Panels |
 | `--canvas-header-min-height` | `3.5rem` | a Panel header |
@@ -326,6 +340,8 @@ This is the complete list, and it is part of the Public Contract: a token the pa
 | `--canvas-action-border` | *derived from* `--canvas-border` | a Canvas Action's edge |
 
 The last three have no default of their own. Each derives from a more general token, and the derivation is resolved **on the action itself** rather than on `:root` — so recolouring the general token recolours the actions with it, and setting the specific one takes them out of the arrangement. A default written on `:root` could not do that: a `var()` inside a custom property is substituted where the property is declared, and every descendant then inherits the answer.
+
+The two Panel width tokens have a second source, and it is nearer. A Panel Kind that declared a `width` on its `definePanel` call carries that value on its own Panel element, which beats these tokens wherever they were set — `:root`, an ancestor, or the Workspace itself. That is the trade for being able to keep a Kind's default presentation beside the Kind: for that Kind the stylesheet no longer sets the width. Theme the Kinds that declare nothing here, and leave the ones that declare a width to their definitions. What still applies to every Panel either way is everything else in this table, the narrow presentations, and a rule that sets `flex-basis` on `[data-canvas-panel][data-panel-kind="…"]` directly — a property, not a token, and so not something an inherited value competes with.
 
 `--canvas-surface-raised` reaches two elements that render outside the Panel Stack — the dialog, inside the Workspace that raised it, and the overlay, in its own Workspace element under `[data-canvas-overlay]` — so a token set on `[data-canvas-workspace]`, on any ancestor, or on `:root` reaches both.
 

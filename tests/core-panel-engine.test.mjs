@@ -3192,3 +3192,72 @@ test("a throwing codec leaves restoration comparing whole inputs", () => {
     [engine.getSnapshot().panels[0].instanceId, retainedId],
   );
 });
+
+test("a Panel Kind may declare its own width, and a Kind that does not is unchanged", () => {
+  const declared = definePanel({
+    kind: "declared-width",
+    title: () => "Declared",
+    width: { resting: "28rem", active: " min(48rem, 92vw) " },
+  });
+  const restingOnly = definePanel({
+    kind: "resting-width",
+    title: () => "Resting",
+    width: { resting: "calc(100% / 3)" },
+  });
+  const activeOnly = definePanel({
+    kind: "active-width",
+    title: () => "Active",
+    width: { active: "var(--app-panel-wide)" },
+  });
+  const undeclared = definePanel({
+    kind: "undeclared-width",
+    title: () => "Undeclared",
+  });
+
+  // Trimmed, frozen, and carried as data: `core` renders nothing, so all it
+  // does with a width is validate it and hand it on.
+  assert.deepEqual(declared.width, {
+    resting: "28rem",
+    active: "min(48rem, 92vw)",
+  });
+  assert.equal(Object.isFrozen(declared.width), true);
+  assert.deepEqual(restingOnly.width, { resting: "calc(100% / 3)" });
+  assert.deepEqual(activeOnly.width, { active: "var(--app-panel-wide)" });
+
+  // A Kind that declares nothing carries no `width` key at all, rather than one
+  // holding `undefined`.
+  assert.equal("width" in undeclared, false);
+  assert.equal(undeclared.width, undefined);
+});
+
+test("a declared Panel width is refused at definition time unless it is a plain CSS length", () => {
+  const declaring = (width) => () =>
+    definePanel({ kind: "hostile-width", title: () => "Hostile", width });
+
+  assert.throws(
+    declaring({}),
+    /must name a resting or an active width/,
+    "a declaration that declares nothing is the silent case, not a width",
+  );
+  assert.throws(declaring({ resting: 320 }), /must be CSS length strings/);
+  assert.throws(declaring({ resting: "   " }), /plain CSS length values/);
+  // Everything a style attribute could read as more than one value.
+  for (const hostile of [
+    "28rem; --canvas-surface: red",
+    '28rem" onmouseover="alert(1)',
+    "28rem !important",
+    "url(https://example.test/pixel.png)",
+    "URL( /x )",
+    "calc(100% /* comment */ - 1rem)",
+    "min(24rem, 84vw",
+    "attr(data-width)@media",
+    `${"1".repeat(129)}px`,
+  ]) {
+    assert.throws(
+      declaring({ resting: hostile }),
+      /plain CSS length values/,
+      `a width of ${hostile} must be refused`,
+    );
+    assert.throws(declaring({ active: hostile }), /plain CSS length values/);
+  }
+});
