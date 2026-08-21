@@ -815,6 +815,13 @@
     --canvas-surface: var(--skin-surface);
     --canvas-surface-active: var(--skin-surface-active);
     /*
+     * The bed the Panels sit on. It is the package's own token now, so the
+     * skin's recessed bed arrives the same way its Panel surface does — and it
+     * is what gives `--canvas-panel-gap` somewhere to show, because a gutter
+     * the colour of the Panels beside it is a gutter nobody can see.
+     */
+    --canvas-surface-bed: var(--skin-bed);
+    /*
      * What the package paints above the Canvas rather than in it — the Guarded
      * Transition dialog, and the Workspace inside the overlay layer. The
      * overlay re-points it below; a dialog is a popover and a command palette
@@ -826,6 +833,7 @@
     --canvas-text-muted: var(--skin-ink-muted);
     --canvas-radius: var(--skin-radius);
     --canvas-panel-gap: var(--skin-gap);
+    --canvas-panel-radius: var(--skin-panel-radius);
     --canvas-panel-width: var(--skin-panel-width);
     --canvas-panel-active-width: var(--skin-panel-active-width);
     --canvas-header-min-height: var(--skin-header-height);
@@ -977,17 +985,14 @@
   }
 
   /*
-   * The bed the Panels sit on, for every Canvas in the application.
-   *
-   * `--canvas-panel-gap` is the package's own token and needs no reaching past
-   * the theming seam. What it does need is somewhere to show: the Canvas paints
-   * behind the Panels in `--canvas-surface` too, so a gap between two Panels
-   * the same colour as the thing behind them is a gap nobody can see. Recessing
-   * the bed is what turns the token into a gutter — and under a skin with no
-   * gutter, it is what the space past the last Panel is drawn in.
+   * How far the bed is inset from the frame, for every Canvas in the
+   * application. What the bed is *painted* in is not here: it used to be, as a
+   * `background` written straight onto this attribute, because one token
+   * painted the bed and every Panel and a recessed bed could not be asked for.
+   * `--canvas-surface-bed` asks for it, and the mapping above is where it is
+   * now said — the same seam every other skin value comes through.
    */
   [data-canvas-application] {
-    background: var(--skin-bed);
     padding-block: var(--skin-canvas-inset-block);
     padding-inline: var(--skin-canvas-inset-inline);
     /*
@@ -1046,12 +1051,16 @@
    * a gutter doing the separating it is one line too many, and on the deepest
    * Panel it has nothing beyond it to separate; flush, it is the only thing
    * dividing two Panels.
+   *
+   * The corners are not here either. `--canvas-panel-radius` carries the
+   * skin's radius through the mapping above, which also rounds what scrolls
+   * inside the Panel — the clipping a radius written onto this attribute never
+   * got, because the package cannot know about a corner it was not told of.
    */
   [data-canvas-panel] {
     /* Order matters: the shorthand first, then the one edge that differs. */
     border: var(--skin-panel-border);
     border-inline-end: var(--skin-panel-edge);
-    border-radius: var(--skin-panel-radius);
     box-shadow: var(--skin-panel-shadow);
   }
 
@@ -1767,6 +1776,7 @@
     --canvas-panel-width: 14rem;
     --canvas-panel-active-width: 17rem;
     --canvas-panel-gap: 0;
+    --canvas-panel-radius: 0;
     --canvas-header-min-height: 2rem;
 
     block-size: 17rem;
@@ -1781,7 +1791,6 @@
   [data-meridian-nested] [data-canvas-panel] {
     border: none;
     border-inline-end: 1px solid var(--skin-rule);
-    border-radius: 0;
     box-shadow: none;
   }
 

@@ -60,6 +60,12 @@
     --canvas-panel-active-width: min(36rem, 90vw);
     --canvas-panel-min-height: 24rem;
     --canvas-panel-gap: 0;
+    /*
+     * Square, so a Canvas nobody has themed is the run of columns it has always
+     * been. A Panel reading as a card is the value an application sets here,
+     * beside a recessed `--canvas-surface-bed` and a gutter to show it in.
+     */
+    --canvas-panel-radius: 0;
 
     /* Chrome metrics */
     --canvas-header-min-height: 3.5rem;
@@ -139,7 +145,23 @@
 
   /* The Canvas scrolls horizontally within itself; the document never does. */
   [data-canvas-application] {
-    background: var(--canvas-surface);
+    /*
+     * The bed, and a derived default like the action colours below: unless an
+     * application names a bed of its own, the ground the Panels sit on is the
+     * surface the Panels are painted in. That is what the Canvas has always
+     * looked like, and it is why the gutter `--canvas-panel-gap` opens is
+     * invisible until this token says otherwise — a gap the colour of the
+     * things it separates separates nothing.
+     *
+     * Derived here rather than declared on `:root` for the reason the action
+     * colours are: a `var()` inside a custom property is substituted where the
+     * property is declared, so `--canvas-surface-bed: var(--canvas-surface)`
+     * on `:root` would resolve against the package's own surface once and hand
+     * every descendant the answer — and an application that recoloured
+     * `--canvas-surface` would find its bed unchanged. Read on the element,
+     * the derivation resolves against whatever that element inherited.
+     */
+    background: var(--canvas-surface-bed, var(--canvas-surface));
     display: flex;
     gap: var(--canvas-panel-gap);
     max-width: 100%;
@@ -162,6 +184,16 @@
 
   [data-canvas-panel] {
     background: var(--canvas-surface);
+    /*
+     * `0` by default, so this rounds nothing until an application asks. The
+     * Panel is not given an `overflow` to clip with: the resize handle
+     * deliberately straddles this edge, and hiding the Panel's overflow would
+     * cut the outer half of the pointer target off. What a rounded Panel does
+     * need clipping is what scrolls inside it, and the body below — already a
+     * scroll container, and so already clipping at its own corners — takes the
+     * two radii that meet the Panel's bottom edge.
+     */
+    border-radius: var(--canvas-panel-radius);
     border-right: 1px solid var(--canvas-border);
     display: flex;
     flex: 0 0 var(--canvas-panel-width);
@@ -373,6 +405,25 @@
 
   /* Each Panel body scrolls on its own so headers stay visible. */
   [data-canvas-panel-body] {
+    /*
+     * The two corners the body shares with the Panel. A scroll container clips
+     * at its own rounded corners, so this is what keeps application content
+     * scrolled to the foot of a rounded Panel from squaring the card off
+     * again. The top pair belong to the header, which paints nothing, so the
+     * Panel's own background is all there is to round there.
+     *
+     * `inherit`, and deliberately not `var(--canvas-panel-radius)`. The body is
+     * the Panel's own child, so this takes whatever corner the Panel actually
+     * computed — from the token, from a Panel Kind, or from a rule an
+     * application wrote against `[data-canvas-panel]`, which is a documented
+     * attribute and so a supported way to round a Panel. Reading the token
+     * instead would follow only the first of those: a Canvas that rounds its
+     * Panels by attribute, or squares them again below a themed ancestor, would
+     * get a square Panel clipping its content on a curve. Found in the Proof
+     * Consumer, whose nested Canvas does exactly that.
+     */
+    border-end-end-radius: inherit;
+    border-end-start-radius: inherit;
     flex: 1 1 auto;
     min-height: 0;
     overflow-y: auto;

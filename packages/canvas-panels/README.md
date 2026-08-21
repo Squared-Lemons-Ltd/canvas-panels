@@ -377,7 +377,8 @@ This is the complete list, and it is part of the Public Contract: a token the pa
 
 | Token | Default | What it sets |
 | --- | --- | --- |
-| `--canvas-surface` | `Canvas` | the Canvas bed and every Panel |
+| `--canvas-surface` | `Canvas` | every Panel, and the Canvas bed unless `--canvas-surface-bed` gives the bed a colour of its own |
+| `--canvas-surface-bed` | *derived from* `--canvas-surface` | the Canvas bed alone: the ground the Panels sit on, what shows through the gutter between them, and what is drawn past the last Panel |
 | `--canvas-surface-active` | `Canvas` | the Active Panel |
 | `--canvas-surface-raised` | `Canvas` | what the package paints *above* the Canvas: the Guarded Transition dialog, and an Overlay Workspace |
 | `--canvas-surface-overlay` | `rgb(0 0 0 / 45%)` | the scrim behind a modal overlay or dialog. The one token that is not a system colour — a translucent shade is the point — and the one the forced-colours block replaces |
@@ -388,6 +389,7 @@ This is the complete list, and it is part of the Public Contract: a token the pa
 | `--canvas-panel-active-width` | `min(36rem, 90vw)` | the Active Panel, unless its Panel Kind declared a `width` |
 | `--canvas-panel-min-height` | `24rem` | the Canvas's own floor |
 | `--canvas-panel-gap` | `0` | the gutter between Panels |
+| `--canvas-panel-radius` | `0` | a Panel's corners |
 | `--canvas-header-min-height` | `3.5rem` | a Panel header |
 | `--canvas-header-padding-inline` | `1.25rem` | a Panel header, and the narrow navigation bar |
 | `--canvas-body-padding` | `0` | a Panel body |
@@ -406,7 +408,19 @@ This is the complete list, and it is part of the Public Contract: a token the pa
 | `--canvas-action-text-hover` | *derived from* `--canvas-text` | a Canvas Action's colour under the pointer |
 | `--canvas-action-border` | *derived from* `--canvas-border` | a Canvas Action's edge |
 
-The last three have no default of their own. Each derives from a more general token, and the derivation is resolved **on the action itself** rather than on `:root` — so recolouring the general token recolours the actions with it, and setting the specific one takes them out of the arrangement. A default written on `:root` could not do that: a `var()` inside a custom property is substituted where the property is declared, and every descendant then inherits the answer.
+Four of these have no default of their own: the three action colours at the foot of the table, and `--canvas-surface-bed`. Each derives from a more general token, and the derivation is resolved **on the element that reads it** — the bed, or the action — rather than on `:root`, so recolouring the general token carries the derived one with it, and setting the derived one takes that element out of the arrangement. A default written on `:root` could not do that: a `var()` inside a custom property is substituted where the property is declared, and every descendant then inherits the answer.
+
+**Panels as cards on a distinct ground** is those tokens together, and nothing else: recess the bed with `--canvas-surface-bed`, open a gutter with `--canvas-panel-gap` for it to show in, and round the Panels with `--canvas-panel-radius`. Each defaults to the Canvas the package has always drawn — one surface, no gutter, square corners — so a Canvas that sets none of them is unchanged.
+
+```css
+.app-canvas {
+  --canvas-surface-bed: color-mix(in srgb, CanvasText 6%, Canvas);
+  --canvas-panel-gap: 0.75rem;
+  --canvas-panel-radius: 0.75rem;
+}
+```
+
+A Panel keeps its `border-right`, and keeps the resize handle that straddles that edge, so the package clips neither: what a rounded Panel clips is what scrolls inside it, which its body already does at the two corners it shares with the Panel.
 
 The two Panel width tokens have a second source, and it is nearer. A Panel Kind that declared a `width` on its `definePanel` call carries that value on its own Panel element, which beats these tokens wherever they were set — `:root`, an ancestor, or the Workspace itself. That is the trade for being able to keep a Kind's default presentation beside the Kind: for that Kind the stylesheet no longer sets the width. Theme the Kinds that declare nothing here, and leave the ones that declare a width to their definitions. What still applies to every Panel either way is everything else in this table, the narrow presentations, and a rule that sets `flex-basis` on `[data-canvas-panel][data-panel-kind="…"]` directly — a property, not a token, and so not something an inherited value competes with.
 
