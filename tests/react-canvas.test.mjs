@@ -704,6 +704,68 @@ test("one aggregate dialog saves multiple dirty Panels deepest-first", async () 
   rendered.unmount();
 });
 
+test("the dialog names a Panel once when only one Panel is dirty", async () => {
+  const root = defineRootPanel({ kind: "root", title: "Documents" });
+  const editor = definePanel({ kind: "editor", title: ({ name }) => name });
+  let Canvas;
+  const Editor = ({ descriptor }) => {
+    Canvas.useLifecycle({
+      dirty: true,
+      guard: () => ({
+        status: "confirm",
+        message: `Save ${descriptor.name}?`,
+      }),
+      save: async () => {},
+      discard: async () => {},
+    });
+    return createElement("p", null, `${descriptor.name} contents`);
+  };
+  Canvas = createCanvasModule({
+    root,
+    panels: [editor],
+    renderers: { root: () => null, editor: Editor },
+  });
+  const engine = createPanelEngine({ root, panels: [editor] });
+  const parent = engine.open({ panel: editor.reference({ name: "Parent" }) });
+  if (parent.status !== "opened") throw new Error("Expected parent");
+  const child = engine.open({
+    originId: parent.instanceId,
+    panel: editor.reference({ name: "Child" }),
+  });
+  if (child.status !== "opened") throw new Error("Expected child");
+  const rendered = render(
+    createElement(Canvas.Provider, { engine }, createElement(Canvas.Workspace)),
+  );
+
+  const describedText = (dialog) =>
+    dom.window.document.getElementById(dialog.getAttribute("aria-describedby"))
+      .textContent;
+
+  // Several Panels: the heading can only count them, so each line has to say
+  // which Panel it is about.
+  fireEvent.click(rendered.getByRole("button", { name: "Close Parent" }));
+  const aggregate = await rendered.findByRole("alertdialog", {
+    name: "Unsaved changes in 2 panels",
+  });
+  assert.equal(
+    describedText(aggregate),
+    "Child: Save Child?Parent: Save Parent?",
+  );
+  fireEvent.click(rendered.getByRole("button", { name: "Stay" }));
+  await waitFor(() => assert.equal(rendered.queryByRole("alertdialog"), null));
+
+  // One Panel: the heading has already named it. A Panel title is a record
+  // name, so a prefix here would repeat it on screen and read it out twice.
+  fireEvent.click(rendered.getByRole("button", { name: "Close Child" }));
+  const single = await rendered.findByRole("alertdialog", {
+    name: "Unsaved changes in Child",
+  });
+  assert.equal(describedText(single), "Save Child?");
+  fireEvent.click(rendered.getByRole("button", { name: "Stay" }));
+  await waitFor(() => assert.equal(rendered.queryByRole("alertdialog"), null));
+  rendered.unmount();
+});
+
 test("a conflicting decision after a failed save keeps the dialog retryable", async () => {
   const root = defineRootPanel({ kind: "root", title: "Documents" });
   const editor = definePanel({ kind: "editor", title: ({ name }) => name });

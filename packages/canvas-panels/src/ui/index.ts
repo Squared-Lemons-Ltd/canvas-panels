@@ -686,11 +686,19 @@ function GuardedTransitionDialog({
       createElement(
         "div",
         { id: messageId },
+        // The prefix says which Panel a line is about, which only one of these
+        // dialogs needs: with several Panels the heading can only count them,
+        // so each line has to name its own. With one, the heading has already
+        // named it — and a Panel title is a record name, so repeating it says
+        // nothing and is read out twice, the heading being `aria-labelledby`
+        // and this `aria-describedby`.
         transition.panels.map((panel) =>
           createElement(
             "p",
             { key: panel.panelId },
-            `${panel.panelTitle}: ${panel.message}`,
+            transition.panels.length === 1
+              ? panel.message
+              : `${panel.panelTitle}: ${panel.message}`,
           ),
         ),
       ),
