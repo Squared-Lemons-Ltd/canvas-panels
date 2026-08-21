@@ -867,6 +867,29 @@ test("the README states how deep a Context Signal is compared", async () => {
   assert.match(readme, /held and compared one level deep/);
 });
 
+test("the README states the two rules a button Action's icon and description turn on", async () => {
+  const readme = await readFile(
+    join(root, "packages/canvas-panels/README.md"),
+    "utf8",
+  );
+
+  // Both are rules a consumer plans around rather than behaviour they can read
+  // off a render. Whether `label` is still the whole accessible name decides
+  // whether an icon may carry meaning, and when a `description` is rendered
+  // decides whether an application has to withdraw it as state changes. The
+  // behaviour is asserted against the built package in
+  // tests/canvas-accessibility.test.mjs; this is what keeps the sentences from
+  // drifting away from it.
+  assert.match(
+    readme,
+    /`label` stays a `string`, and it stays the whole accessible name/,
+  );
+  assert.match(
+    readme,
+    /rendered whenever it is supplied, not only while the Action is `disabled`/,
+  );
+});
+
 test("the stylesheet is one named cascade layer, and says so where a consumer reads", async () => {
   const readme = await readFile(
     join(root, "packages/canvas-panels/README.md"),

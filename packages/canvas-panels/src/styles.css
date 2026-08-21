@@ -112,13 +112,20 @@
   }
 
   /*
-   * The Canvas live region, and the Panel title a registered visual title has
-   * taken the heading's visible place from. Both are removed from view without
-   * being removed from the accessibility tree, so `display: none`,
-   * `visibility: hidden`, and zero size are all unavailable — each of those
-   * would stop the first announcing and leave the second's Panel unnamed.
+   * The Canvas live region, the Panel title a registered visual title has taken
+   * the heading's visible place from, and the accessible description a button
+   * Action registered. All three are removed from view without being removed
+   * from the accessibility tree, so `display: none`, `visibility: hidden`, and
+   * zero size are all unavailable — each of those would stop the first
+   * announcing, leave the second's Panel unnamed, and leave the third
+   * unreadable by the button that points at it.
+   *
+   * Out of flow is also what keeps the description free: a button Action is a
+   * pointer target with a minimum size, and a sentence laid out inside it would
+   * be a sentence laid out inside it.
    */
   [data-canvas-announcer],
+  [data-canvas-action-description],
   [data-canvas-panel-title] {
     border: 0;
     clip-path: inset(50%);
@@ -346,6 +353,22 @@
 
   [data-canvas-panel-header] button[data-destructive] {
     color: var(--canvas-action-text-destructive);
+  }
+
+  /*
+   * The icon a button Action carries, before its label and inside the button.
+   * What the package owns here is the gap and the optical alignment, and
+   * nothing else: an inline box changes neither the button's own layout nor
+   * the row's, so an Action that gains an icon keeps exactly the pointer
+   * target and the place in the row it had without one. The glyph itself is
+   * the application's, and takes no size, colour, or fill from here —
+   * `currentColor` already carries the disabled and destructive treatment down
+   * to it.
+   */
+  [data-canvas-action-icon] {
+    display: inline-flex;
+    margin-inline-end: 0.375rem;
+    vertical-align: -0.125em;
   }
 
   /* Each Panel body scrolls on its own so headers stay visible. */

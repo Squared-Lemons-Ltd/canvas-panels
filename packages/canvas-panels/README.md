@@ -201,7 +201,7 @@ The package renders a Panel's header controls itself, and `Canvas.Action` is how
 
 | Shape | Props | What the package renders |
 | --- | --- | --- |
-| button | `id`, `label`, `onSelect`, and optionally `priority`, `disabled`, `destructive` | a `button` the package owns completely |
+| button | `id`, `label`, `onSelect`, and optionally `priority`, `disabled`, `destructive`, `icon`, `description` | a `button` the package owns completely |
 | content | `id`, `content`, and optionally `priority` | whatever the application passed, in a wrapper the package lays out |
 
 ```tsx
@@ -224,6 +224,22 @@ function ClassRenderer({ descriptor }: ClassProps) {
 
 Both shapes come out of one sorted row — `priority` descending, ties broken by `id` — so a readout takes its place among the buttons rather than being parked at one end. `id` is unique per Panel across both shapes, and a duplicate throws.
 
+**A button Action may carry an icon and an accessible description.** Both are optional, both belong to the button shape alone, and absent them a button renders exactly as it always has.
+
+```tsx
+<Canvas.Action
+  id="publish"
+  label="Publish"
+  icon={<PublishIcon />}
+  disabled={!canPublish}
+  description={canPublish ? undefined : "Add a summary before publishing."}
+  onSelect={publish}
+/>
+```
+
+- **`icon?: ReactNode`** renders inside the button, before the label, in a `span` the package marks `aria-hidden` and names `data-canvas-action-icon`. **`label` stays a `string`, and it stays the whole accessible name** — the button's name is its `aria-label`, so an icon cannot join it, get read as content of its own, or be relied on to say anything. Style the glyph through the attribute; the package sets only the gap and the optical alignment, and `currentColor` carries the disabled and destructive treatment into it. The button keeps its layout, its place in the row, and the pointer target the row protects.
+- **`description?: string`** renders as the button's accessible description: a visually-hidden element named `data-canvas-action-description`, which the button points `aria-describedby` at. It is announced as a description rather than as part of the name, it is reachable by keyboard and by touch, and it is not a `title` tooltip, which is neither. **It is rendered whenever it is supplied, not only while the Action is `disabled`.** A disabled Action is the case that most needs one — "Publish" greyed out with no reason is a dead end — but the description of a control is not a state of it, and one that vanished the moment the control became available would be a change the application never asked for. An application that wants the disabled-only behaviour passes `undefined` when the Action is enabled, as above.
+
 **Content is registered, not portalled.** It reaches the header through the same registration a button uses, so the package renders it as part of its own tree and nothing races the package's re-renders. Three consequences follow, and each is part of the contract:
 
 - **Re-rendering content re-registers nothing.** The content of the moment is held in a store the registration owns, so a readout that ticks once a second costs one small re-render of its own slot. Registration identity moves only when `id` or `priority` does.
@@ -232,7 +248,7 @@ Both shapes come out of one sorted row — `priority` descending, ties broken by
 
 Content that has nothing to show renders `null`; `undefined` is not a value `content` accepts, because the presence of `content` is what tells the two shapes apart. Content that throws is dropped from the row and reported through `onRendererError` exactly as a body failure is — the header shows no notice, the rest of the Canvas is untouched, and the next content the application renders is attempted again.
 
-**This is a constrained escape hatch, not a header slot.** It exists for the one header control that no label string describes: a live readout, a status composite, something with its own embedded button — the case the reporter of [#59](https://github.com/Squared-Lemons-Ltd/canvas-panels/issues/59) found once in forty-odd controls. Everything that reduces to a label and a handler should stay a button Action, which the package can lay out, disable, mark destructive, name for a screen reader, and keep as a pointer target. There is no ref, no portal target, and no way to reach the rest of the header: the package still decides where a control goes, and content that wants to be a Panel's main UI belongs in the Panel body.
+**This is a constrained escape hatch, not a header slot.** It exists for the one header control that no label string describes: a live readout, a status composite, something with its own embedded button — the case the reporter of [#59](https://github.com/Squared-Lemons-Ltd/canvas-panels/issues/59) found once in forty-odd controls. Everything that reduces to a label and a handler should stay a button Action, which the package can lay out, disable, mark destructive, name for a screen reader, describe, put a glyph in front of, and keep as a pointer target. There is no ref, no portal target, and no way to reach the rest of the header: the package still decides where a control goes, and content that wants to be a Panel's main UI belongs in the Panel body.
 
 ### Guarded Transitions
 
@@ -270,6 +286,7 @@ The package targets WCAG 2.2 AA and owns the structural accessibility of the Can
 - Structural changes — a Panel opening or closing, a Branch Replacement, a change of presentation — are described in one polite live region. Activation, focus, and sizing are deliberately not announced: they are already conveyed by focus moving, or reported by the control that caused them. Every sentence comes from a replaceable template (`canvasAnnouncementTemplates`) so a Canvas can be localised.
 - Focus for every appearance of a Panel body has exactly one owner: the Workspace. Activating a Panel gives focus to whatever that Panel registered as `initialFocus`; a Panel that registered nothing is left as the application left it. A renderer failure gives focus to the failure notice, and a retry to the Panel's own heading. Nothing rendered inside a Panel claims that moment.
 - While the Guarded Transition dialog is open, application content is `inert`, focus is contained, and Escape means Stay. However the transition then resolves — Save, Discard, or Stay — focus lands back **inside the Workspace**: on the control that initiated it while that control is still somewhere focus can go, and on the retained Active Panel's own heading otherwise. It is never left on the document body, which is what keeps Escape working in an Overlay Workspace once a dialog has been answered.
+- A button Action is named by its `label` and by nothing else: the name is an `aria-label`, so a registered `icon` cannot reach it, and the icon's wrapper is `aria-hidden` so the glyph is not read as content of its own either. A registered `description` is announced as the button's accessible description through `aria-describedby`, which is reachable by keyboard and by touch — deliberately not a `title` tooltip, which is neither.
 - A content Action's wrapper is a plain `div` with no ARIA role, no label, and no `tabIndex`. It adds nothing to the header's semantics and claims nothing from the Panel Focus Owner, so interactive content inside it is reachable in ordinary Tab order at the position the row gives it, and a Panel the presentation is hiding takes its header content into `inert` with the rest of the Panel. Naming that content, and keeping its own pointer targets large enough, is the application's job — the package cannot name what it did not render.
 - The Panel Separator resizes a Panel by pointer or by keyboard through one sizing engine, so the two cannot disagree about clamping; a resize is announced only once it settles.
 - Motion honours `prefers-reduced-motion`.
@@ -409,6 +426,8 @@ Structural state is exposed through data attributes rather than class names. The
 | `data-canvas-panel-close` | the close control | present on a closable Panel's own close button |
 | `data-canvas-action` | each Canvas Action — the button, or the wrapper around content | the `id` the application gave that Action |
 | `data-canvas-action-content` | the wrapper around a content Action | present only on the wrapper the package puts around application-supplied header content |
+| `data-canvas-action-icon` | the wrapper around a button Action's icon, inside the button | present only when that Action registered an `icon`; the wrapper is `aria-hidden` |
+| `data-canvas-action-description` | a button Action's accessible description, inside the button | present only when that Action registered a `description`; visually hidden, and what the button's `aria-describedby` points at |
 | `data-destructive` | a Canvas Action | present on an Action the application declared destructive |
 | `data-canvas-panel-notice` | within a Panel body | the renderer failure notice that replaced it |
 | `data-canvas-mobile-navigation` | within the Workspace | the narrow presentation's navigation bar |
