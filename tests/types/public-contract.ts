@@ -1,4 +1,4 @@
-import type { ComponentProps } from "react";
+import { type ComponentProps, createElement } from "react";
 
 import {
   createPanelEngine,
@@ -182,6 +182,22 @@ const buttonAction: BoundActionProps = {
   destructive: false,
   disabled: false,
 };
+// An icon and a description are the button shape's, and `label` stays a
+// `string`: it is the accessible name, and the package relies on that.
+const decoratedButtonAction: BoundActionProps = {
+  id: "publish",
+  label: "Publish",
+  onSelect: () => {},
+  icon: createElement("svg", { viewBox: "0 0 16 16" }),
+  description: "Add a summary before publishing.",
+  disabled: true,
+};
+const nodeLabelAction: BoundActionProps = {
+  id: "publish",
+  // @ts-expect-error `label` is the accessible name, and only a string is one.
+  label: createElement("span", null, "Publish"),
+  onSelect: () => {},
+};
 const contentAction: BoundActionProps = {
   id: "job-status",
   priority: 10,
@@ -216,7 +232,23 @@ const contentWithoutContent: BoundActionProps = {
   id: "absent",
   content: undefined,
 };
+// @ts-expect-error Content already owns everything inside its own wrapper;
+// there is nothing there for the package to put a glyph in front of.
+const contentWithIcon: BoundActionProps = {
+  id: "iconised",
+  content: "Encoding, 41s elapsed",
+  icon: createElement("svg", { viewBox: "0 0 16 16" }),
+};
+// @ts-expect-error Content names and describes itself; the package renders no
+// control here for a description to belong to.
+const contentWithDescription: BoundActionProps = {
+  id: "described",
+  content: "Encoding, 41s elapsed",
+  description: "Why the job is stuck.",
+};
 void buttonAction;
+void decoratedButtonAction;
+void nodeLabelAction;
 void contentAction;
 void idleContentAction;
 void bothShapes;
@@ -224,6 +256,8 @@ void neitherShape;
 void contentWithHandler;
 void contentWithButtonPresentation;
 void contentWithoutContent;
+void contentWithIcon;
+void contentWithDescription;
 
 const engine = createPanelEngine({
   root,

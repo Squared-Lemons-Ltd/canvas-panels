@@ -141,12 +141,34 @@ export function defineCanvasContext<Signal>(): CanvasContextDefinition<Signal> {
  */
 export type CanvasActionContent = Exclude<ReactNode, undefined>;
 
+/**
+ * The header control that reduces to a label and a handler, which is nearly
+ * every one of them. The package owns the button completely: its layout, its
+ * disabled and destructive treatment, its pointer target, and its accessible
+ * name.
+ *
+ * `label` stays a `string` because it is that accessible name, and the package
+ * relies on being able to read it. The two optional additions are what an
+ * application could otherwise only get by reaching into a package element:
+ *
+ * - `icon` renders before the label, inside the button, in a wrapper the
+ *   package marks `aria-hidden`. It is decoration beside a name that already
+ *   exists, never part of the name.
+ * - `description` renders as the button's accessible description — a
+ *   visually-hidden element the button points `aria-describedby` at. It is
+ *   rendered whenever it is supplied, not only while `disabled`: a disabled
+ *   Action is the case that most needs one, but the description of a control
+ *   is not a state of it, and one that disappeared the moment the control
+ *   became available would be a change the application never asked for.
+ */
 export type CanvasActionButtonProps = Readonly<{
   id: string;
   label: string;
   priority?: number;
   disabled?: boolean;
   destructive?: boolean;
+  description?: string;
+  icon?: ReactNode;
   onSelect: () => void;
   content?: never;
 }>;
@@ -161,6 +183,10 @@ export type CanvasActionButtonProps = Readonly<{
  * The `never`s are the whole point of splitting the shape in two. A
  * registration carrying both a `label`/`onSelect` pair and content, or
  * neither, is rejected by the compiler rather than discovered at runtime.
+ * Everything the package renders on an application's behalf is named here so
+ * it can be refused, `icon` and `description` included: content already owns
+ * everything inside its own wrapper, and there is nothing there for the
+ * package to put a glyph beside or to describe.
  */
 export type CanvasActionContentProps = Readonly<{
   id: string;
@@ -170,6 +196,8 @@ export type CanvasActionContentProps = Readonly<{
   onSelect?: never;
   disabled?: never;
   destructive?: never;
+  description?: never;
+  icon?: never;
 }>;
 
 export type CanvasActionProps =
@@ -177,8 +205,9 @@ export type CanvasActionProps =
   | CanvasActionContentProps;
 
 /**
- * Where a content Action's current render lives between the Panel body that
- * produced it and the header that shows it.
+ * Where an Action's application-supplied render — a content Action's content,
+ * or a button Action's icon — lives between the Panel body that produced it
+ * and the header that shows it.
  *
  * Application content is a new element on every render, so putting it in the
  * registration itself would re-register the Action every time the application
@@ -213,20 +242,33 @@ function createHeaderContentStore(): HeaderContentStore {
 }
 
 /**
+ * What the Workspace holds for one registered button Action.
+ *
+ * `icon` is always a store and never the node itself, even for the great many
+ * Actions that have no icon. An element in the registration would move its
+ * identity on every render of the Panel body, and a store whose presence came
+ * and went with the prop would do the same the first time an application
+ * showed an icon conditionally.
+ */
+type ButtonActionRegistration = Readonly<{
+  id: string;
+  label: string;
+  priority?: number;
+  disabled?: boolean;
+  destructive?: boolean;
+  description?: string;
+  icon: HeaderContentStore;
+  onSelect: () => void;
+  content?: undefined;
+}>;
+
+/**
  * What the Workspace holds for one registered Action. The public props are the
  * application's spelling of this; the button member keeps `content` declared
  * and absent so the two can be told apart by reading one property.
  */
 type ActionRegistration =
-  | Readonly<{
-      id: string;
-      label: string;
-      priority?: number;
-      disabled?: boolean;
-      destructive?: boolean;
-      onSelect: () => void;
-      content?: undefined;
-    }>
+  | ButtonActionRegistration
   | Readonly<{
       id: string;
       priority?: number;
@@ -950,22 +992,53 @@ export function createCanvasModule<
 
   function ButtonAction(action: CanvasActionButtonProps): null {
     const scope = useActionScope();
-    const { destructive, disabled, id, label, onSelect, priority } = action;
+    const {
+      description,
+      destructive,
+      disabled,
+      icon,
+      id,
+      label,
+      onSelect,
+      priority,
+    } = action;
     const latest = useRef(onSelect);
+    const [iconStore] = useState(createHeaderContentStore);
     useLayoutEffect(() => {
       latest.current = onSelect;
     }, [onSelect]);
+    // The same trick content uses, and for a sharper reason: an icon written
+    // inline at the call site is a new element on every render, so naming it
+    // in the dependency array below would re-register the Action every time —
+    // which moves the Workspace's registration state, which renders the Panel
+    // body again, which builds another icon. The store's identity never moves,
+    // so only the button's own slot re-renders. `description` is a string and
+    // needs none of this.
+    useLayoutEffect(() => {
+      iconStore.write(icon ?? null);
+    }, [icon, iconStore]);
     useEffect(
       () =>
         scope.registerAction({
+          icon: iconStore,
           id,
           label,
           onSelect: () => latest.current(),
+          ...(description === undefined ? {} : { description }),
           ...(destructive === undefined ? {} : { destructive }),
           ...(disabled === undefined ? {} : { disabled }),
           ...(priority === undefined ? {} : { priority }),
         }),
-      [destructive, disabled, id, label, priority, scope],
+      [
+        description,
+        destructive,
+        disabled,
+        iconStore,
+        id,
+        label,
+        priority,
+        scope,
+      ],
     );
     return null;
   }
@@ -1307,6 +1380,74 @@ export function createCanvasModule<
           panel: panel.instanceRef,
         }),
       ),
+    );
+  }
+
+  /**
+   * A button Action's place in the header action row.
+   *
+   * A component rather than an element built inline, because the icon lives in
+   * a store and something has to subscribe to it. Only this one slot
+   * re-renders when an application's icon changes.
+   *
+   * Both optional parts render inside the button rather than beside it. The
+   * row is laid out by direct-child adjacency — `> button + button` is what
+   * takes back the automatic margin that pushes the row to the trailing edge —
+   * so a sibling element between two buttons would break that adjacency and
+   * throw the control after it to the far side of the header. Inside the
+   * button they cost the row nothing, and they cost the button nothing either:
+   * the icon is an inline box and the description is taken out of flow
+   * entirely, so an Action carrying both is still the same pointer target the
+   * `flex: 0 0 auto` rule protects for WCAG 2.5.8.
+   *
+   * Neither can reach the accessible name. It is the `aria-label` below, which
+   * is `label` and nothing else, so the icon could not join it even if the
+   * wrapper were not `aria-hidden` — the wrapper is what stops the glyph being
+   * read as content in its own right. The description is announced as a
+   * description because that is what `aria-describedby` makes it, which is the
+   * point: a reason a control is unavailable is not part of its name, and a
+   * `title` tooltip would be unreachable by keyboard and invisible on touch.
+   */
+  function HeaderActionButton({
+    action,
+  }: Readonly<{ action: ButtonActionRegistration }>) {
+    const icon = useSyncExternalStore(
+      action.icon.subscribe,
+      action.icon.read,
+      action.icon.read,
+    );
+    const descriptionId = `${useId()}-action-description`;
+    return createElement(
+      "button",
+      {
+        "aria-describedby":
+          action.description === undefined ? undefined : descriptionId,
+        "aria-label": action.label,
+        // The id the application already gave this Action, which until now the
+        // Canvas spent only as a React key. Without it an application cannot
+        // tell its own Actions apart in the DOM, so styling one means matching
+        // the English in its label.
+        "data-canvas-action": action.id,
+        "data-destructive": action.destructive ? "" : undefined,
+        disabled: action.disabled,
+        onClick: action.onSelect,
+        type: "button",
+      },
+      icon === null || icon === undefined
+        ? null
+        : createElement(
+            "span",
+            { "aria-hidden": true, "data-canvas-action-icon": "" },
+            icon,
+          ),
+      action.label,
+      action.description === undefined
+        ? null
+        : createElement(
+            "span",
+            { "data-canvas-action-description": "", id: descriptionId },
+            action.description,
+          ),
     );
   }
 
@@ -2214,26 +2355,10 @@ export function createCanvasModule<
                   // parked at either end of the row.
                   ...actions.map((action) =>
                     action.content === undefined
-                      ? createElement(
-                          "button",
-                          {
-                            "aria-label": action.label,
-                            // The id the application already gave this Action,
-                            // which until now the Canvas spent only as a React
-                            // key. Without it an application cannot tell its
-                            // own Actions apart in the DOM, so styling one
-                            // means matching the English in its label.
-                            "data-canvas-action": action.id,
-                            "data-destructive": action.destructive
-                              ? ""
-                              : undefined,
-                            disabled: action.disabled,
-                            key: action.id,
-                            onClick: action.onSelect,
-                            type: "button",
-                          },
-                          action.label,
-                        )
+                      ? createElement(HeaderActionButton, {
+                          action,
+                          key: action.id,
+                        })
                       : createElement(HeaderActionContent, {
                           content: action.content,
                           id: action.id,

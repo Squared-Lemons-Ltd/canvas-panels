@@ -2535,3 +2535,177 @@ test("content may not register a header registration of its own", async () => {
   assert.ok(rendered.getByRole("region", { name: "Home" }));
   rendered.unmount();
 });
+
+test("a button Action renders an icon before its label and a description the button points at", () => {
+  const detail = definePanel({
+    kind: "detail",
+    deduplication: "allow-many",
+    title: () => "Detail",
+  });
+  let detailRenders = 0;
+  let Canvas;
+
+  function Root() {
+    const navigation = Canvas.useNavigation();
+    const [summarised, setSummarised] = useState(false);
+    const [redraws, setRedraws] = useState(0);
+    return createElement(
+      Fragment,
+      null,
+      // The Action that registers neither field: it must render exactly as it
+      // did before either existed.
+      createElement(Canvas.Action, {
+        id: "preview",
+        label: "Preview",
+        onSelect: () => {},
+        priority: 30,
+      }),
+      createElement(Canvas.Action, {
+        description: summarised
+          ? "Publishing replaces the live page."
+          : "Add a summary before publishing.",
+        disabled: !summarised,
+        // Written inline at the call site, which is what an application does
+        // and what makes it a new element on every render.
+        icon: createElement("svg", {
+          "data-testid": `publish-icon-${redraws}`,
+          viewBox: "0 0 16 16",
+        }),
+        id: "publish",
+        label: "Publish",
+        onSelect: () => {},
+        priority: 20,
+      }),
+      createElement(
+        "button",
+        { onClick: () => setSummarised(true), type: "button" },
+        "Add summary",
+      ),
+      createElement(
+        "button",
+        { onClick: () => setRedraws((current) => current + 1), type: "button" },
+        "Redraw icon",
+      ),
+      createElement(
+        "button",
+        { onClick: () => navigation.open(detail, { id: "d" }), type: "button" },
+        "Open detail",
+      ),
+    );
+  }
+
+  Canvas = createCanvasModule({
+    root: defineRootPanel({ kind: "root", title: "Home" }),
+    panels: [detail],
+    renderers: {
+      root: Root,
+      detail: () => {
+        detailRenders += 1;
+        return createElement("p", null, "Detail body");
+      },
+    },
+  });
+  const rendered = render(
+    createElement(
+      Canvas.Provider,
+      null,
+      createElement(Canvas.Workspace, { label: "Publishing" }),
+    ),
+  );
+
+  const header = rendered.container.querySelector("[data-canvas-panel-header]");
+  const action = (id) =>
+    header.querySelector(`button[data-canvas-action="${id}"]`);
+
+  // Absent both fields, nothing about the button has moved: its label is still
+  // its only child, and there is nothing for it to point at.
+  assert.equal(action("preview").innerHTML, "Preview");
+  assert.equal(action("preview").hasAttribute("aria-describedby"), false);
+  assert.equal(
+    action("preview").querySelectorAll("[data-canvas-action-icon]").length,
+    0,
+  );
+
+  // The icon comes first, the label after it, the description last — all three
+  // inside the button, which is what keeps the row's direct-child adjacency
+  // intact and the button a single pointer target.
+  assert.deepEqual(
+    [...action("publish").childNodes].map((node) =>
+      node.nodeType === 1
+        ? node
+            .getAttributeNames()
+            .find((name) => name.startsWith("data-canvas-"))
+        : `#text:${node.textContent}`,
+    ),
+    [
+      "data-canvas-action-icon",
+      "#text:Publish",
+      "data-canvas-action-description",
+    ],
+  );
+  assert.deepEqual(
+    [...header.children]
+      .filter((element) => element.hasAttribute("data-canvas-action"))
+      .map(
+        (element) =>
+          `${element.tagName.toLowerCase()}:${element.getAttribute("data-canvas-action")}`,
+      ),
+    ["button:preview", "button:publish"],
+  );
+
+  // The accessible name is the label and nothing else. The glyph is decoration
+  // beside a name that already exists, and says so.
+  assert.ok(rendered.getByRole("button", { name: "Publish" }));
+  assert.equal(action("publish").getAttribute("aria-label"), "Publish");
+  const icon = action("publish").querySelector("[data-canvas-action-icon]");
+  assert.equal(icon.tagName.toLowerCase(), "span");
+  assert.equal(icon.getAttribute("aria-hidden"), "true");
+  assert.equal(icon.firstElementChild.tagName.toLowerCase(), "svg");
+
+  // The description is announced as a description: a real element the button
+  // points at, not a `title` a keyboard or a touch screen cannot reach.
+  const describedBy = action("publish").getAttribute("aria-describedby");
+  assert.equal(typeof describedBy, "string");
+  const description = dom.window.document.getElementById(describedBy);
+  assert.equal(description.textContent, "Add a summary before publishing.");
+  assert.equal(description.getAttribute("data-canvas-action-description"), "");
+  assert.equal(
+    description.parentElement.getAttribute("data-canvas-action"),
+    "publish",
+  );
+
+  // A description is not a state of the control. Enabling the Action does not
+  // withdraw it; the application decides what it says, or whether to say
+  // anything, by what it registers.
+  fireEvent.click(rendered.getByRole("button", { name: "Add summary" }));
+  assert.equal(action("publish").hasAttribute("disabled"), false);
+  assert.equal(
+    dom.window.document.getElementById(
+      action("publish").getAttribute("aria-describedby"),
+    ).textContent,
+    "Publishing replaces the live page.",
+  );
+
+  fireEvent.click(rendered.getByRole("button", { name: "Open detail" }));
+  const registeredRenders = detailRenders;
+
+  // An icon written inline is a new element on every render. If it re-registered
+  // the Action, the Workspace's registration state would move and every Panel
+  // renderer would run again — which is what this counts.
+  for (const redraw of [1, 2, 3]) {
+    fireEvent.click(rendered.getByRole("button", { name: "Redraw icon" }));
+    assert.equal(
+      action("publish")
+        .querySelector("[data-canvas-action-icon]")
+        .firstElementChild.getAttribute("data-testid"),
+      `publish-icon-${redraw}`,
+    );
+  }
+  assert.equal(
+    detailRenders,
+    registeredRenders,
+    "re-rendering an icon re-registered the Action",
+  );
+  assert.equal(action("publish").getAttribute("aria-label"), "Publish");
+  rendered.unmount();
+});
