@@ -1,5 +1,174 @@
 # @squaredlemons/canvas-panels
 
+## 0.4.0
+
+### Minor Changes
+
+- cb424d2: **The Canvas bed and a Panel's corners each answer to a token of their own.**
+  `--canvas-surface` painted the bed and every Panel from one value, so "Panels as
+  cards on a distinct ground" was inexpressible at any setting of it: whatever the
+  value, the gutter `--canvas-panel-gap` opens was the same colour as the things it
+  separates, and a gap nobody can see is not a gutter. A Panel had no radius token
+  either — `--canvas-radius` reaches the Guarded Transition dialog and an Overlay
+  Workspace, not `[data-canvas-panel]` — so a card treatment meant reaching past
+  the documented seam and writing rules against the package's own attributes,
+  which is an override fighting whatever the package paints next.
+
+  Two additions:
+
+  - `--canvas-surface-bed` paints the Canvas bed. It has no default of its own: it
+    derives from `--canvas-surface` on the bed element, the way the action colours
+    derive from `--canvas-text-muted` on the action, so an application that
+    recolours the surface still carries the bed with it and one that names a bed
+    takes it out of the arrangement.
+  - `--canvas-panel-radius` rounds a Panel, and defaults to `0`.
+
+  Together with `--canvas-panel-gap` they are the whole recipe, and the README's
+  "Theming" section states it:
+
+  ```css
+  .app-canvas {
+    --canvas-surface-bed: color-mix(in srgb, CanvasText 6%, Canvas);
+    --canvas-panel-gap: 0.75rem;
+    --canvas-panel-radius: 0.75rem;
+  }
+  ```
+
+  **Both defaults are the Canvas the package already drew** — one surface behind
+  the Panels and square corners — so a Canvas that names neither token renders
+  exactly as it did in 0.3.0. A Panel keeps its `border-right`, and the package
+  gives it no `overflow` to clip with: the resize handle deliberately straddles
+  that edge, and clipping the Panel would cut the outer half of its pointer target
+  off. What a rounded Panel needs clipped is what scrolls inside it, so the Panel
+  body — already a scroll container — takes the two radii that meet the Panel's
+  bottom edge.
+
+  **One rendering does change without anyone setting a token, and it is worth
+  knowing before you upgrade.** The body takes those two radii with `inherit`, not
+  from `--canvas-panel-radius`, because `data-canvas-panel` is a published
+  attribute and rounding a Panel through it is a supported thing to do — reading
+  the token would have followed only the token, leaving a Canvas that rounds its
+  Panels by attribute with a square body clipping its content on a curve. So if
+  you already round `[data-canvas-panel]` yourself, content scrolled to the foot of
+  a Panel now stops at the card's corner instead of painting over it. No edit is
+  required, and the corner is the one you were already asking for; it is simply the
+  first release in which the Panel body agrees with it.
+
+  **Additions to the Public Contract**: the `--canvas-surface-bed` and
+  `--canvas-panel-radius` custom properties. Nothing is removed, and no existing
+  override stops working — an override that rounds a Panel is now _followed_ by
+  the Panel body, which is the one change described above. An application that had
+  reached onto `[data-canvas-application]` or `[data-canvas-panel]` to paint a bed
+  or round a Panel can move those rules onto the tokens.
+
+  Closes #64.
+
+- 507e61f: **A button Action can now say why it is the way it is.** `Canvas.Action` has always taken `disabled`, and there has never been anywhere to put the reason. "Publish" greyed out with no explanation is a dead end: a user cannot tell whether they lack a permission, whether a required field is empty, or whether the thing is already published. The package renders the button itself, so an application could not add one either without selecting a package element, which the README forbids.
+
+  The button shape takes an optional `description`:
+
+  ```tsx
+  <Canvas.Action
+    id="publish"
+    label="Publish"
+    disabled={!canPublish}
+    description={canPublish ? undefined : "Add a summary before publishing."}
+    onSelect={publish}
+  />
+  ```
+
+  The package renders it as the button's **accessible description**: a visually-hidden element inside the button, named `data-canvas-action-description`, which the button points `aria-describedby` at. It is announced as a description rather than as part of the name, and it is reachable by keyboard and by touch — deliberately not a `title` tooltip, which is neither.
+
+  **It is rendered whenever it is supplied, not only while the Action is `disabled`.** The disabled case is what the reporter needed and what motivated it, but the description of a control is not a state of it, and one that vanished the moment the control became available would be a change the application never asked for. An application that wants the description only while the Action is unavailable passes `undefined` when it is not, as above.
+
+  The description is rendered _inside_ the button rather than beside it. That is not incidental: the header row is laid out by direct-child adjacency — `> button + button` is what takes back the automatic margin that pushes the row to the trailing edge — so a sibling element between two buttons would throw the control after it to the far side of the header. Inside, and taken out of flow, it costs the row nothing and costs the button nothing, so an Action carrying one is still the same pointer target the `flex: 0 0 auto` rule protects for WCAG 2.5.8.
+
+  **Additions to the Public Contract**: `description` on the button shape of `Canvas.Action`, the rule that it renders whenever it is supplied, and the `data-canvas-action-description` attribute. `description` is `?: never` on the content shape, which already owns everything inside its own wrapper. Nothing is removed, and an Action that registers no description renders exactly as it did before.
+
+  Closes #65.
+
+- 57bdb91: Let a Canvas Workspace activate the Panel someone focuses, and say plainly that
+  focus otherwise does not.
+
+  Focus and Activation have always been two things here. Clicking or tabbing into
+  a retained Panel records it as the DOM-Focused Panel and stops: it does not
+  become the Active Panel, so it keeps its retained width and styling, and every
+  `useNavigation()`, `usePanel()`, or `usePresentation()` call that defaults to
+  "the Active Panel" goes on resolving somewhere else. That split is deliberate,
+  and nothing in the README admitted to it — the package maintained a focus signal
+  that looked exactly like the input to click-to-select, and a consumer converting
+  a master–detail admin found out by debugging Panels that would not respond to
+  clicks. The README now states the rule under "Navigation", whether or not a
+  Canvas opts out of it.
+
+  `Canvas.Workspace` takes `activateOnFocus`. It defaults to `false`, so a Canvas
+  that does not ask behaves exactly as before; opting in is the addition, and
+  changing what an existing Canvas does would not have been. With it on, focus
+  arriving inside a retained Panel — by pointer, by Tab, or by F6 — makes that
+  Panel the Active Panel.
+
+  Only focus that arrives on its own counts. Focus the Canvas places itself is a
+  repair rather than an arrival and activates nothing: returning focus to the
+  control that opened a Guarded Transition, which usually sits in a Panel that is
+  no longer the active one, must not undo the move it has just made, and rescuing
+  focus out of a Panel the presentation has just hidden must not move the Active
+  Panel, which a Declared Breakpoint never does. Focus reaching a Panel behind an
+  open Guarded Transition dialog, where the Panels are inert, activates nothing
+  either. Activation stays silent in the live region however it was caused.
+
+  **Activation caused by focus already inside the Panel never moves that focus.**
+  Activating a Panel ordinarily hands focus to whatever it registered as
+  `initialFocus`. This one activation claims nothing, because the caret is already
+  in the field the user has just clicked into, and taking it anywhere else would
+  be the option's own accessibility defect.
+
+  Closes #66.
+
+- 507e61f: **A button Action can now carry an icon beside its label.** A header control's label is a `string`, so the ordinary admin verbs — Preview, Save, Publish, Unpublish, Delete — arrived on the package without the glyphs they had before. 0.3.0's `content` shape did not answer it: the two shapes are mutually exclusive, so adding an icon to a Save button meant giving up `disabled`, `destructive`, the accessible naming, the layout, and the pointer target, and re-implementing all of it for a glyph.
+
+  The button shape takes an optional `icon`:
+
+  ```tsx
+  <Canvas.Action
+    id="publish"
+    label="Publish"
+    icon={<PublishIcon />}
+    onSelect={publish}
+  />
+  ```
+
+  It renders inside the button the package already owns, before the label, in a `span` marked `aria-hidden` and named `data-canvas-action-icon`. The button keeps everything it had: its layout, its place in the sorted row, its disabled and destructive treatment, and the pointer target the row protects.
+
+  **`label` stays a `string`, and it stays the whole accessible name.** The button is named by an `aria-label`, so an icon cannot join the name, be read as content of its own, or be relied on to say anything — which is what lets the package go on relying on `label`, and what stops an icon-only control being registered by accident. The package styles only the gap and the optical alignment; the glyph's size and colour are the application's, and `currentColor` carries the disabled and destructive treatment down to it.
+
+  An icon written inline at the call site is a new element on every render, so the registration holds a store rather than the node, exactly as a content Action does. Re-rendering an icon re-renders that one header slot and re-registers nothing.
+
+  **Additions to the Public Contract**: `icon` on the button shape of `Canvas.Action`, the guarantee that `label` remains the whole accessible name, and the `data-canvas-action-icon` attribute. `icon` is `?: never` on the content shape, which already renders whatever it likes inside its own wrapper. Nothing is removed, and an Action that registers no icon renders exactly as it did before.
+
+  Closes #67.
+
+### Patch Changes
+
+- 691b3ff: Stop the Guarded Transition dialog naming a Panel twice when only one Panel is
+  dirty.
+
+  The dialog's heading names the Panel — "Unsaved changes in Draft" — and every
+  message line was prefixed with the same title again: "Draft: This panel has
+  unsaved changes." With a fixture title the repetition is barely visible. With a
+  real one it is the whole dialog: a consumer reported a 104-character record
+  title filling the top two thirds of the modal, printed twice before the three
+  decisions, and read out twice by a screen reader, the heading being
+  `aria-labelledby` and the message `aria-describedby`. Nothing an application
+  could do reached it — the prefix and the message are one text node, so CSS
+  cannot drop it, `usePanelEditor({ messages })` replaces only the half after it,
+  and hiding the message would break `aria-describedby`.
+
+  A single-Panel dialog now shows the message alone. Several dirty Panels are
+  unchanged and keep the prefix, because there the heading can only count them and
+  each line has to say which Panel it is about.
+
+  Closes #63.
+
 ## 0.3.0
 
 ### Minor Changes
