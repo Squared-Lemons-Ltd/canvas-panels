@@ -201,7 +201,7 @@ The package renders a Panel's header controls itself, and `Canvas.Action` is how
 
 | Shape | Props | What the package renders |
 | --- | --- | --- |
-| button | `id`, `label`, `onSelect`, and optionally `priority`, `disabled`, `destructive` | a `button` the package owns completely |
+| button | `id`, `label`, `onSelect`, and optionally `priority`, `disabled`, `destructive`, `icon`, `description` | a `button` the package owns completely |
 | content | `id`, `content`, and optionally `priority` | whatever the application passed, in a wrapper the package lays out |
 
 ```tsx
@@ -224,6 +224,22 @@ function ClassRenderer({ descriptor }: ClassProps) {
 
 Both shapes come out of one sorted row — `priority` descending, ties broken by `id` — so a readout takes its place among the buttons rather than being parked at one end. `id` is unique per Panel across both shapes, and a duplicate throws.
 
+**A button Action may carry an icon and an accessible description.** Both are optional, both belong to the button shape alone, and absent them a button renders exactly as it always has.
+
+```tsx
+<Canvas.Action
+  id="publish"
+  label="Publish"
+  icon={<PublishIcon />}
+  disabled={!canPublish}
+  description={canPublish ? undefined : "Add a summary before publishing."}
+  onSelect={publish}
+/>
+```
+
+- **`icon?: ReactNode`** renders inside the button, before the label, in a `span` the package marks `aria-hidden` and names `data-canvas-action-icon`. **`label` stays a `string`, and it stays the whole accessible name** — the button's name is its `aria-label`, so an icon cannot join it, get read as content of its own, or be relied on to say anything. Style the glyph through the attribute; the package sets only the gap and the optical alignment, and `currentColor` carries the disabled and destructive treatment into it. The button keeps its layout, its place in the row, and the pointer target the row protects.
+- **`description?: string`** renders as the button's accessible description: a visually-hidden element named `data-canvas-action-description`, which the button points `aria-describedby` at. It is announced as a description rather than as part of the name, it is reachable by keyboard and by touch, and it is not a `title` tooltip, which is neither. **It is rendered whenever it is supplied, not only while the Action is `disabled`.** A disabled Action is the case that most needs one — "Publish" greyed out with no reason is a dead end — but the description of a control is not a state of it, and one that vanished the moment the control became available would be a change the application never asked for. An application that wants the disabled-only behaviour passes `undefined` when the Action is enabled, as above.
+
 **Content is registered, not portalled.** It reaches the header through the same registration a button uses, so the package renders it as part of its own tree and nothing races the package's re-renders. Three consequences follow, and each is part of the contract:
 
 - **Re-rendering content re-registers nothing.** The content of the moment is held in a store the registration owns, so a readout that ticks once a second costs one small re-render of its own slot. Registration identity moves only when `id` or `priority` does.
@@ -232,7 +248,7 @@ Both shapes come out of one sorted row — `priority` descending, ties broken by
 
 Content that has nothing to show renders `null`; `undefined` is not a value `content` accepts, because the presence of `content` is what tells the two shapes apart. Content that throws is dropped from the row and reported through `onRendererError` exactly as a body failure is — the header shows no notice, the rest of the Canvas is untouched, and the next content the application renders is attempted again.
 
-**This is a constrained escape hatch, not a header slot.** It exists for the one header control that no label string describes: a live readout, a status composite, something with its own embedded button — the case the reporter of [#59](https://github.com/Squared-Lemons-Ltd/canvas-panels/issues/59) found once in forty-odd controls. Everything that reduces to a label and a handler should stay a button Action, which the package can lay out, disable, mark destructive, name for a screen reader, and keep as a pointer target. There is no ref, no portal target, and no way to reach the rest of the header: the package still decides where a control goes, and content that wants to be a Panel's main UI belongs in the Panel body.
+**This is a constrained escape hatch, not a header slot.** It exists for the one header control that no label string describes: a live readout, a status composite, something with its own embedded button — the case the reporter of [#59](https://github.com/Squared-Lemons-Ltd/canvas-panels/issues/59) found once in forty-odd controls. Everything that reduces to a label and a handler should stay a button Action, which the package can lay out, disable, mark destructive, name for a screen reader, describe, put a glyph in front of, and keep as a pointer target. There is no ref, no portal target, and no way to reach the rest of the header: the package still decides where a control goes, and content that wants to be a Panel's main UI belongs in the Panel body.
 
 ### Guarded Transitions
 
@@ -268,8 +284,9 @@ The package targets WCAG 2.2 AA and owns the structural accessibility of the Can
 
 - Every visible Panel is a labelled region. **F6** and **Shift+F6** cycle the Panel Regions the current presentation is showing, wrapping at both ends; a retained but hidden Panel is not a Region. Region cycling is the only key the Canvas claims — normal DOM Tab order is untouched and no arrow or letter shortcut is registered globally.
 - Structural changes — a Panel opening or closing, a Branch Replacement, a change of presentation — are described in one polite live region. Activation, focus, and sizing are deliberately not announced: they are already conveyed by focus moving, or reported by the control that caused them. Every sentence comes from a replaceable template (`canvasAnnouncementTemplates`) so a Canvas can be localised.
-- Focus for every appearance of a Panel body has exactly one owner: the Workspace. Activating a Panel gives focus to whatever that Panel registered as `initialFocus`; a Panel that registered nothing is left as the application left it. A renderer failure gives focus to the failure notice, and a retry to the Panel's own heading. Nothing rendered inside a Panel claims that moment.
+- Focus for every appearance of a Panel body has exactly one owner: the Workspace. Activating a Panel gives focus to whatever that Panel registered as `initialFocus`; a Panel that registered nothing is left as the application left it. A renderer failure gives focus to the failure notice, and a retry to the Panel's own heading. Nothing rendered inside a Panel claims that moment. Focus arriving inside a Panel is not itself a claim — see "Navigation" — and a Canvas running with `activateOnFocus` makes the one activation that claims nothing: the Panel already has focus, so it is left exactly where the user put it rather than taken to `initialFocus`.
 - While the Guarded Transition dialog is open, application content is `inert`, focus is contained, and Escape means Stay. However the transition then resolves — Save, Discard, or Stay — focus lands back **inside the Workspace**: on the control that initiated it while that control is still somewhere focus can go, and on the retained Active Panel's own heading otherwise. It is never left on the document body, which is what keeps Escape working in an Overlay Workspace once a dialog has been answered.
+- A button Action is named by its `label` and by nothing else: the name is an `aria-label`, so a registered `icon` cannot reach it, and the icon's wrapper is `aria-hidden` so the glyph is not read as content of its own either. A registered `description` is announced as the button's accessible description through `aria-describedby`, which is reachable by keyboard and by touch — deliberately not a `title` tooltip, which is neither.
 - A content Action's wrapper is a plain `div` with no ARIA role, no label, and no `tabIndex`. It adds nothing to the header's semantics and claims nothing from the Panel Focus Owner, so interactive content inside it is reachable in ordinary Tab order at the position the row gives it, and a Panel the presentation is hiding takes its header content into `inert` with the rest of the Panel. Naming that content, and keeping its own pointer targets large enough, is the application's job — the package cannot name what it did not render.
 - The Panel Separator resizes a Panel by pointer or by keyboard through one sizing engine, so the two cannot disagree about clamping; a resize is announced only once it settles.
 - Motion honours `prefers-reduced-motion`.
@@ -277,6 +294,16 @@ The package targets WCAG 2.2 AA and owns the structural accessibility of the Can
 **Manual verification status.** Automated checks cover roles, names, focus order, live-region wiring, and axe-clean rendering in Chromium. A full WCAG 2.2 AA sign-off additionally requires a manual VoiceOver and Safari pass, which has not yet been performed for this release.
 
 ## Navigation
+
+**Focus does not imply Activation.** Clicking or tabbing into a retained Panel focuses it, and the Canvas records it as the DOM-Focused Panel — but that does not make it the Active Panel. A Panel becomes active when something navigates: opening from it, closing back to it, restoring a stack, or a host calling `activate` itself. Until then the Panel someone has clicked into keeps its retained width and its retained styling, and every `useNavigation()`, `usePanel()`, or `usePresentation()` call that defaults to "the Active Panel" resolves somewhere else. A host that wants click-to-activate and does not want the option below must call `activate` itself.
+
+A Canvas that should behave like a master–detail UI, where clicking a column selects it, asks for that on its Workspace:
+
+```tsx
+<ClassesCanvas.Workspace activateOnFocus label="Classes" />
+```
+
+`activateOnFocus` defaults to `false`, so a Canvas that does not ask keeps the rule above exactly. With it on, focus arriving inside a retained Panel — by pointer, by Tab, or by F6 — makes that Panel the Active Panel. Only focus that arrives on its own counts: focus the Canvas places itself, returning it to the control that opened a Guarded Transition or rescuing it out of a Panel the presentation has just hidden, activates nothing, because a repair is not an arrival. Neither does focus that reaches a Panel behind an open Guarded Transition dialog, where the Panels are inert. Activating this way is silent, like every other activation, and **never moves focus** — see "Accessibility".
 
 Each Child Panel definition declares a persistence mode. The default, `transient`, keeps the Panel and every descendant out of Navigation Documents. `navigation` adds a positive descriptor version plus `encode`, `validate`, `decode`, and a complete ordered migration for every historical version. `navigation-with-loader` adds an asynchronous `restore(input, { signal })` availability check.
 
@@ -350,7 +377,8 @@ This is the complete list, and it is part of the Public Contract: a token the pa
 
 | Token | Default | What it sets |
 | --- | --- | --- |
-| `--canvas-surface` | `Canvas` | the Canvas bed and every Panel |
+| `--canvas-surface` | `Canvas` | every Panel, and the Canvas bed unless `--canvas-surface-bed` gives the bed a colour of its own |
+| `--canvas-surface-bed` | *derived from* `--canvas-surface` | the Canvas bed alone: the ground the Panels sit on, what shows through the gutter between them, and what is drawn past the last Panel |
 | `--canvas-surface-active` | `Canvas` | the Active Panel |
 | `--canvas-surface-raised` | `Canvas` | what the package paints *above* the Canvas: the Guarded Transition dialog, and an Overlay Workspace |
 | `--canvas-surface-overlay` | `rgb(0 0 0 / 45%)` | the scrim behind a modal overlay or dialog. The one token that is not a system colour — a translucent shade is the point — and the one the forced-colours block replaces |
@@ -361,6 +389,7 @@ This is the complete list, and it is part of the Public Contract: a token the pa
 | `--canvas-panel-active-width` | `min(36rem, 90vw)` | the Active Panel, unless its Panel Kind declared a `width` |
 | `--canvas-panel-min-height` | `24rem` | the Canvas's own floor |
 | `--canvas-panel-gap` | `0` | the gutter between Panels |
+| `--canvas-panel-radius` | `0` | a Panel's corners |
 | `--canvas-header-min-height` | `3.5rem` | a Panel header |
 | `--canvas-header-padding-inline` | `1.25rem` | a Panel header, and the narrow navigation bar |
 | `--canvas-body-padding` | `0` | a Panel body |
@@ -379,7 +408,19 @@ This is the complete list, and it is part of the Public Contract: a token the pa
 | `--canvas-action-text-hover` | *derived from* `--canvas-text` | a Canvas Action's colour under the pointer |
 | `--canvas-action-border` | *derived from* `--canvas-border` | a Canvas Action's edge |
 
-The last three have no default of their own. Each derives from a more general token, and the derivation is resolved **on the action itself** rather than on `:root` — so recolouring the general token recolours the actions with it, and setting the specific one takes them out of the arrangement. A default written on `:root` could not do that: a `var()` inside a custom property is substituted where the property is declared, and every descendant then inherits the answer.
+Four of these have no default of their own: the three action colours at the foot of the table, and `--canvas-surface-bed`. Each derives from a more general token, and the derivation is resolved **on the element that reads it** — the bed, or the action — rather than on `:root`, so recolouring the general token carries the derived one with it, and setting the derived one takes that element out of the arrangement. A default written on `:root` could not do that: a `var()` inside a custom property is substituted where the property is declared, and every descendant then inherits the answer.
+
+**Panels as cards on a distinct ground** is those tokens together, and nothing else: recess the bed with `--canvas-surface-bed`, open a gutter with `--canvas-panel-gap` for it to show in, and round the Panels with `--canvas-panel-radius`. Each defaults to the Canvas the package has always drawn — one surface, no gutter, square corners — so a Canvas that sets none of them is unchanged.
+
+```css
+.app-canvas {
+  --canvas-surface-bed: color-mix(in srgb, CanvasText 6%, Canvas);
+  --canvas-panel-gap: 0.75rem;
+  --canvas-panel-radius: 0.75rem;
+}
+```
+
+A Panel keeps its `border-right`, and keeps the resize handle that straddles that edge, so the package clips neither: what a rounded Panel clips is what scrolls inside it, which its body already does at the two corners it shares with the Panel.
 
 The two Panel width tokens have a second source, and it is nearer. A Panel Kind that declared a `width` on its `definePanel` call carries that value on its own Panel element, which beats these tokens wherever they were set — `:root`, an ancestor, or the Workspace itself. That is the trade for being able to keep a Kind's default presentation beside the Kind: for that Kind the stylesheet no longer sets the width. Theme the Kinds that declare nothing here, and leave the ones that declare a width to their definitions. What still applies to every Panel either way is everything else in this table, the narrow presentations, and a rule that sets `flex-basis` on `[data-canvas-panel][data-panel-kind="…"]` directly — a property, not a token, and so not something an inherited value competes with.
 
@@ -409,6 +450,8 @@ Structural state is exposed through data attributes rather than class names. The
 | `data-canvas-panel-close` | the close control | present on a closable Panel's own close button |
 | `data-canvas-action` | each Canvas Action — the button, or the wrapper around content | the `id` the application gave that Action |
 | `data-canvas-action-content` | the wrapper around a content Action | present only on the wrapper the package puts around application-supplied header content |
+| `data-canvas-action-icon` | the wrapper around a button Action's icon, inside the button | present only when that Action registered an `icon`; the wrapper is `aria-hidden` |
+| `data-canvas-action-description` | a button Action's accessible description, inside the button | present only when that Action registered a `description`; visually hidden, and what the button's `aria-describedby` points at |
 | `data-destructive` | a Canvas Action | present on an Action the application declared destructive |
 | `data-canvas-panel-notice` | within a Panel body | the renderer failure notice that replaced it |
 | `data-canvas-mobile-navigation` | within the Workspace | the narrow presentation's navigation bar |

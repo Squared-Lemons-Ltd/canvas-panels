@@ -349,6 +349,35 @@ The last two would still be better as tokens — `--canvas-dirty-label-*` and a
 title type scale — which is the shape of the request rather than a complaint
 about the workaround.
 
+### The bed and the Panel corners were not tokens either — fixed
+
+Every skin in the table above wants two things the token seam could not say. A
+recessed bed is the first: `--canvas-surface` painted the Canvas bed *and* every
+Panel from one value, so a gutter set with `--canvas-panel-gap` came out the
+colour of the Panels beside it and separated nothing — Float's inset cards and
+Glass's tinted ground are the whole point of those skins, and neither could be
+asked for. A Panel's corners are the second: `--canvas-radius` reaches the
+dialog and the overlay Workspace, not `[data-canvas-panel]`.
+
+So this app painted the bed with a `background` written onto
+`[data-canvas-application]`, and rounded the Panels with a `border-radius`
+written onto `[data-canvas-panel]` — two overrides of the package's own painting
+rather than two settings of it, each fighting whatever the package paints next.
+
+Reported as “A Canvas bed and its Panels share one surface token, so
+cards-on-a-ground is inexpressible” (#64), and fixed in the package:
+`--canvas-surface-bed` paints the bed and `--canvas-panel-radius` rounds a
+Panel. Both are mapped in the one seam rule now, beside every other skin value,
+and both attribute rules are gone. The nested Workspace squares its Panels
+through the same token rather than by reaching for the attribute, which is what
+its own comment always said it wanted.
+
+One thing does change, and it is the package doing what it now knows to: a
+rounded Panel's body clips its scrolled content at the two corners it shares
+with the Panel, which a radius written onto the attribute never got. Under
+Meridian, Float, and Glass a table scrolled to the foot of a Panel is now cut to
+the card's corner instead of painting over it.
+
 ### `data-canvas-panel-id` was not stable across a server render — fixed
 
 Panel Instance IDs used to come from a counter that started afresh in each

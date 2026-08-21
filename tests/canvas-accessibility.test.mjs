@@ -100,7 +100,12 @@ const bounds = Object.freeze({
   coarseStep: 64,
 });
 
-function renderCanvas({ breakpoint = "desktop", announcements, sizing } = {}) {
+function renderCanvas({
+  breakpoint = "desktop",
+  announcements,
+  sizing,
+  activateOnFocus,
+} = {}) {
   const viewport = installViewport(breakpoint);
   const built = buildCanvas();
   let result;
@@ -110,6 +115,7 @@ function renderCanvas({ breakpoint = "desktop", announcements, sizing } = {}) {
         built.Canvas.Provider,
         { engine: built.engine },
         createElement(built.Canvas.Workspace, {
+          activateOnFocus,
           label: "Classes Canvas",
           announcements,
           sizing,
@@ -486,6 +492,57 @@ test("F6 reads focus from the document, not from a Panel's focus handler", () =>
   pressF6(canvas.container, { shiftKey: true });
 
   assert.equal(focusedHeading(canvas.container), classA);
+});
+
+test("F6 leaves the Active Panel alone", () => {
+  const canvas = renderCanvas();
+  openClassAndLearner(canvas);
+  const active = canvas.engine.getSnapshot().activePanelId;
+  const [classes] = headings(canvas.container);
+
+  act(() => {
+    classes.focus();
+  });
+  pressF6(canvas.container);
+
+  // Cycling moves between landmarks and nothing else. Focus does not imply
+  // Activation, so the region F6 landed on is focused and still not active.
+  assert.equal(canvas.engine.getSnapshot().activePanelId, active);
+});
+
+test("F6 activates the region it lands on where the Canvas activates on focus", () => {
+  const canvas = renderCanvas({ activateOnFocus: true });
+  openClassAndLearner(canvas);
+  const [classes] = headings(canvas.container);
+  const classA = canvas.engine.getSnapshot().panels[1].instanceId;
+
+  act(() => {
+    classes.focus();
+  });
+  pressF6(canvas.container);
+
+  // A keypress a person made, treated exactly as a click or a Tab into the
+  // same region would be.
+  assert.equal(canvas.engine.getSnapshot().activePanelId, classA);
+});
+
+test("a Panel activated by focus announces nothing new", () => {
+  const canvas = renderCanvas({ activateOnFocus: true });
+  openClassAndLearner(canvas);
+  const afterOpening = announcer(canvas.container).textContent;
+  const [classes] = headings(canvas.container);
+
+  act(() => {
+    classes.focus();
+  });
+
+  // Activation is silent however it was caused, and here focus moving is
+  // already what tells the reader where they now are.
+  assert.equal(
+    canvas.engine.getSnapshot().activePanelId,
+    canvas.engine.getSnapshot().panels[0].instanceId,
+  );
+  assert.equal(announcer(canvas.container).textContent, afterOpening);
 });
 
 test("a separator reports the width its Panel actually has", () => {
@@ -1096,4 +1153,146 @@ test("the action row lays itself out without reaching inside application content
   // this kind of content is for.
   assert.match(content[1], /flex:\s*0 1 auto;/);
   assert.match(content[1], /min-inline-size:\s*0;/);
+});
+
+function buildDecoratedActionCanvas() {
+  const root = defineRootPanel({ kind: "classes", title: "Classes" });
+  const classPanel = definePanel({
+    kind: "class",
+    deduplication: "reuse",
+    key: ({ classId }) => classId,
+    title: ({ name }) => name,
+  });
+  let Canvas;
+  Canvas = createCanvasModule({
+    root,
+    panels: [classPanel],
+    renderers: {
+      classes: () => createElement("p", null, "Class list"),
+      class: () =>
+        createElement(
+          "div",
+          null,
+          createElement(Canvas.Action, {
+            description: "Add a summary before publishing.",
+            disabled: true,
+            icon: createElement("svg", { viewBox: "0 0 16 16" }),
+            id: "publish",
+            label: "Publish class",
+            onSelect: () => {},
+            priority: 20,
+          }),
+          createElement(Canvas.Action, {
+            icon: createElement("svg", { viewBox: "0 0 16 16" }),
+            id: "rename",
+            label: "Rename class",
+            onSelect: () => {},
+            priority: 10,
+          }),
+          createElement("button", { type: "button" }, "Class action"),
+        ),
+    },
+  });
+  const engine = createPanelEngine({ root, panels: [classPanel] });
+  installViewport("desktop");
+  let result;
+  act(() => {
+    result = render(
+      createElement(
+        Canvas.Provider,
+        { engine },
+        createElement(Canvas.Workspace, { label: "Classes Canvas" }),
+      ),
+    );
+  });
+  act(() => {
+    engine.open({
+      originId: engine.getSnapshot().activePanelId,
+      panel: classPanel.reference({ classId: "a", name: "Class A" }),
+    });
+  });
+  return result;
+}
+
+test("an Action's icon and description pass automated accessibility checks", async () => {
+  const canvas = buildDecoratedActionCanvas();
+
+  const axe = (await import("axe-core")).default;
+  // Contrast is a theming concern the application owns through the documented
+  // `--canvas-*` tokens, and jsdom applies no stylesheet to measure anyway.
+  const { violations } = await axe.run(canvas.container, {
+    rules: { "color-contrast": { enabled: false } },
+  });
+
+  assert.deepEqual(
+    violations.map(({ id }) => id),
+    [],
+  );
+  canvas.unmount();
+});
+
+test("an Action's icon stays out of its name and its description is announced as one", () => {
+  const canvas = buildDecoratedActionCanvas();
+  const header = canvas.container
+    .querySelector("[data-canvas-panel][data-active]")
+    .querySelector("[data-canvas-panel-header]");
+  const action = (id) =>
+    header.querySelector(`button[data-canvas-action="${id}"]`);
+
+  // The name is the registered `label` and nothing else, which is what lets
+  // the package rely on it: an icon beside it never joins it, and the wrapper
+  // is hidden so the glyph is not read as content of its own either.
+  const labels = [...header.querySelectorAll("button")].map((button) =>
+    button.getAttribute("aria-label"),
+  );
+  assert.deepEqual(labels, ["Publish class", "Rename class", "Close Class A"]);
+  for (const id of ["publish", "rename"]) {
+    assert.equal(
+      action(id)
+        .querySelector("[data-canvas-action-icon]")
+        .getAttribute("aria-hidden"),
+      "true",
+    );
+  }
+
+  // The description is a real element in the accessibility tree that the
+  // button points at, so it reaches a keyboard and a touch screen — which is
+  // exactly what a `title` tooltip does not do.
+  const describedBy = action("publish").getAttribute("aria-describedby");
+  assert.equal(typeof describedBy, "string");
+  assert.equal(
+    dom.window.document.getElementById(describedBy).textContent,
+    "Add a summary before publishing.",
+  );
+  // An icon on its own describes nothing, and a described control is not a
+  // state: neither field implies the other.
+  assert.equal(action("rename").hasAttribute("aria-describedby"), false);
+  canvas.unmount();
+});
+
+test("a described Action is readable without being visible, and an icon costs it no space", () => {
+  // The description shares the visually-hidden treatment the live region and
+  // the displaced Panel title use: out of view, still in the accessibility
+  // tree, and out of flow — so a sentence inside a button is not a sentence
+  // laid out inside a button, and the pointer target above is untouched.
+  const hidden = stylesheet.match(
+    /\[data-canvas-announcer\],\s*\[data-canvas-action-description\],\s*\[data-canvas-panel-title\] \{([^}]*)\}/,
+  );
+  assert.ok(
+    hidden,
+    "a registered description must be hidden without being removed",
+  );
+  assert.match(hidden[1], /position:\s*absolute;/);
+  assert.match(hidden[1], /clip-path:\s*inset\(50%\);/);
+  assert.doesNotMatch(hidden[1], /display:\s*none;/);
+  assert.doesNotMatch(hidden[1], /visibility:\s*hidden;/);
+
+  const icon = stylesheet.match(/\[data-canvas-action-icon\] \{([^}]*)\}/);
+  assert.ok(icon, "the package must lay out the icon it wraps");
+  // An inline box beside the label: it moves neither the button's own layout
+  // nor the row's. And the glyph itself is the application's — a size or a
+  // colour set here would fight the icon set it came from.
+  assert.match(icon[1], /display:\s*inline-flex;/);
+  assert.doesNotMatch(icon[1], /(inline|block)-size:/);
+  assert.doesNotMatch(icon[1], /color:/);
 });

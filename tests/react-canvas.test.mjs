@@ -704,6 +704,68 @@ test("one aggregate dialog saves multiple dirty Panels deepest-first", async () 
   rendered.unmount();
 });
 
+test("the dialog names a Panel once when only one Panel is dirty", async () => {
+  const root = defineRootPanel({ kind: "root", title: "Documents" });
+  const editor = definePanel({ kind: "editor", title: ({ name }) => name });
+  let Canvas;
+  const Editor = ({ descriptor }) => {
+    Canvas.useLifecycle({
+      dirty: true,
+      guard: () => ({
+        status: "confirm",
+        message: `Save ${descriptor.name}?`,
+      }),
+      save: async () => {},
+      discard: async () => {},
+    });
+    return createElement("p", null, `${descriptor.name} contents`);
+  };
+  Canvas = createCanvasModule({
+    root,
+    panels: [editor],
+    renderers: { root: () => null, editor: Editor },
+  });
+  const engine = createPanelEngine({ root, panels: [editor] });
+  const parent = engine.open({ panel: editor.reference({ name: "Parent" }) });
+  if (parent.status !== "opened") throw new Error("Expected parent");
+  const child = engine.open({
+    originId: parent.instanceId,
+    panel: editor.reference({ name: "Child" }),
+  });
+  if (child.status !== "opened") throw new Error("Expected child");
+  const rendered = render(
+    createElement(Canvas.Provider, { engine }, createElement(Canvas.Workspace)),
+  );
+
+  const describedText = (dialog) =>
+    dom.window.document.getElementById(dialog.getAttribute("aria-describedby"))
+      .textContent;
+
+  // Several Panels: the heading can only count them, so each line has to say
+  // which Panel it is about.
+  fireEvent.click(rendered.getByRole("button", { name: "Close Parent" }));
+  const aggregate = await rendered.findByRole("alertdialog", {
+    name: "Unsaved changes in 2 panels",
+  });
+  assert.equal(
+    describedText(aggregate),
+    "Child: Save Child?Parent: Save Parent?",
+  );
+  fireEvent.click(rendered.getByRole("button", { name: "Stay" }));
+  await waitFor(() => assert.equal(rendered.queryByRole("alertdialog"), null));
+
+  // One Panel: the heading has already named it. A Panel title is a record
+  // name, so a prefix here would repeat it on screen and read it out twice.
+  fireEvent.click(rendered.getByRole("button", { name: "Close Child" }));
+  const single = await rendered.findByRole("alertdialog", {
+    name: "Unsaved changes in Child",
+  });
+  assert.equal(describedText(single), "Save Child?");
+  fireEvent.click(rendered.getByRole("button", { name: "Stay" }));
+  await waitFor(() => assert.equal(rendered.queryByRole("alertdialog"), null));
+  rendered.unmount();
+});
+
 test("a conflicting decision after a failed save keeps the dialog retryable", async () => {
   const root = defineRootPanel({ kind: "root", title: "Documents" });
   const editor = definePanel({ kind: "editor", title: ({ name }) => name });
@@ -1986,6 +2048,193 @@ test("focus inside a Panel settles the Workspace instead of re-opening its focus
   rendered.unmount();
 });
 
+// A Canvas whose Panels each register an `initialFocus` and have somewhere
+// else inside them to click, which is what makes "activating because focus
+// arrived must not move that focus" a question with a wrong answer.
+function renderActivationCanvas({ activateOnFocus } = {}) {
+  const root = defineRootPanel({ kind: "root", title: "Home" });
+  const draft = definePanel({
+    kind: "draft",
+    deduplication: "allow-many",
+    title: ({ name }) => name,
+  });
+  let Canvas;
+
+  function Draft({ descriptor }) {
+    const initialFocus = useRef(null);
+    const [dirty, setDirty] = useState(false);
+    const navigation = Canvas.useNavigation();
+    Canvas.useLifecycle({
+      dirty,
+      initialFocus,
+      guard: () =>
+        dirty
+          ? { status: "confirm", message: "Discard your unsaved changes?" }
+          : { status: "allow" },
+      save: async () => setDirty(false),
+      discard: async () => setDirty(false),
+    });
+    return createElement(
+      Fragment,
+      null,
+      createElement(
+        "button",
+        {
+          "data-testid": `start-${descriptor.name}`,
+          ref: initialFocus,
+          type: "button",
+        },
+        `Start ${descriptor.name}`,
+      ),
+      // Where the user clicks, which is deliberately not the control this
+      // Panel registered as its `initialFocus`. A button rather than a text
+      // field only because this file's React was initialized before its
+      // document existed, which sends every focused `input` down React's
+      // legacy change polyfill and reports an uncaught `detachEvent`.
+      createElement(
+        "button",
+        { "data-testid": `notes-${descriptor.name}`, type: "button" },
+        `Notes ${descriptor.name}`,
+      ),
+      createElement(
+        "button",
+        {
+          "data-testid": `soil-${descriptor.name}`,
+          onClick: () => setDirty(true),
+          type: "button",
+        },
+        `Soil ${descriptor.name}`,
+      ),
+      createElement(
+        "button",
+        {
+          "data-testid": `open-from-${descriptor.name}`,
+          onClick: () => navigation.open(draft, { name: "three" }),
+          type: "button",
+        },
+        `Open from ${descriptor.name}`,
+      ),
+    );
+  }
+
+  Canvas = createCanvasModule({
+    root,
+    panels: [draft],
+    renderers: { root: () => null, draft: Draft },
+  });
+
+  // Read outside every renderer, where the Bound module's hooks answer for the
+  // Active Panel — which is exactly the resolution the reporter watched land on
+  // the wrong Panel.
+  function ActivePanelProbe() {
+    return createElement(
+      "p",
+      { "data-testid": "active-panel" },
+      Canvas.usePanel().title,
+    );
+  }
+
+  const engine = createPanelEngine({ root, panels: [draft] });
+  const rendered = render(
+    createElement(
+      Canvas.Provider,
+      { engine },
+      createElement(ActivePanelProbe),
+      createElement(Canvas.Workspace, { activateOnFocus, label: "Drafts" }),
+    ),
+  );
+  for (const name of ["one", "two"]) {
+    act(() => {
+      engine.open({
+        originId: engine.getSnapshot().activePanelId,
+        panel: draft.reference({ name }),
+      });
+    });
+  }
+  return {
+    activePanelTitle: () => rendered.getByTestId("active-panel").textContent,
+    engine,
+    // Deliberately a string rather than the element: a failed comparison of two
+    // DOM nodes in this runner hangs the file instead of reporting.
+    focusedTestId: () =>
+      document.activeElement?.getAttribute("data-testid") ?? null,
+    rendered,
+  };
+}
+
+test("focus alone does not make a retained Panel the Active Panel", async () => {
+  const canvas = renderActivationCanvas();
+  const notes = canvas.rendered.getByTestId("notes-one");
+
+  act(() => notes.focus());
+  await act(async () => {});
+
+  // The standing rule: focus records the DOM-Focused Panel and stops there.
+  assert.equal(canvas.activePanelTitle(), "two");
+  assert.equal(canvas.focusedTestId(), "notes-one");
+  canvas.rendered.unmount();
+});
+
+test("a Canvas that activates on focus follows the user into a retained Panel", async () => {
+  const canvas = renderActivationCanvas({ activateOnFocus: true });
+  const notes = canvas.rendered.getByTestId("notes-one");
+  assert.equal(canvas.activePanelTitle(), "two");
+
+  act(() => notes.focus());
+  await act(async () => {});
+
+  assert.equal(canvas.activePanelTitle(), "one");
+  canvas.rendered.unmount();
+});
+
+test("activating a Panel because focus arrived inside it never moves that focus", async () => {
+  const canvas = renderActivationCanvas({ activateOnFocus: true });
+  const notes = canvas.rendered.getByTestId("notes-one");
+
+  act(() => notes.focus());
+  await act(async () => {});
+
+  // The Panel registered an `initialFocus`, and activation ordinarily hands
+  // focus to it. Not this activation: focus is already inside the Panel, so
+  // sending it anywhere else would take the caret out of the field the user
+  // has just clicked into.
+  assert.equal(canvas.activePanelTitle(), "one");
+  assert.equal(canvas.focusedTestId(), "notes-one");
+
+  // And it is not taken a tick later, once the Workspace has settled.
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  });
+  assert.equal(canvas.focusedTestId(), "notes-one");
+  canvas.rendered.unmount();
+});
+
+test("focus the Canvas restores after a Guarded Transition activates nothing", async () => {
+  const canvas = renderActivationCanvas({ activateOnFocus: true });
+  const { rendered } = canvas;
+  // Draft two has unsaved work, so opening from draft one must guard it.
+  fireEvent.click(rendered.getByTestId("soil-two"));
+
+  const opener = rendered.getByTestId("open-from-one");
+  act(() => opener.focus());
+  await act(async () => {});
+  assert.equal(canvas.activePanelTitle(), "one");
+
+  fireEvent.click(opener);
+  await rendered.findByRole("alertdialog");
+  await act(async () => {
+    fireEvent.click(rendered.getByRole("button", { name: "Discard" }));
+  });
+  await waitFor(() => assert.equal(rendered.queryByRole("alertdialog"), null));
+
+  // Focus went back to the control that started the transition, and that
+  // control is in a Panel which is no longer the active one. The Canvas put it
+  // there, so it is a repair rather than an arrival, and it must not undo the
+  // move the user just made.
+  assert.equal(canvas.activePanelTitle(), "three");
+  rendered.unmount();
+});
+
 function renderDeclaredWidthCanvas() {
   const root = defineRootPanel({ kind: "classes", title: "Classes" });
   const wide = definePanel({
@@ -2471,5 +2720,179 @@ test("content may not register a header registration of its own", async () => {
   assert.ok(reports.length > 0, "the refusal must reach the host");
   assert.deepEqual(new Set(reports), new Set(["root"]));
   assert.ok(rendered.getByRole("region", { name: "Home" }));
+  rendered.unmount();
+});
+
+test("a button Action renders an icon before its label and a description the button points at", () => {
+  const detail = definePanel({
+    kind: "detail",
+    deduplication: "allow-many",
+    title: () => "Detail",
+  });
+  let detailRenders = 0;
+  let Canvas;
+
+  function Root() {
+    const navigation = Canvas.useNavigation();
+    const [summarised, setSummarised] = useState(false);
+    const [redraws, setRedraws] = useState(0);
+    return createElement(
+      Fragment,
+      null,
+      // The Action that registers neither field: it must render exactly as it
+      // did before either existed.
+      createElement(Canvas.Action, {
+        id: "preview",
+        label: "Preview",
+        onSelect: () => {},
+        priority: 30,
+      }),
+      createElement(Canvas.Action, {
+        description: summarised
+          ? "Publishing replaces the live page."
+          : "Add a summary before publishing.",
+        disabled: !summarised,
+        // Written inline at the call site, which is what an application does
+        // and what makes it a new element on every render.
+        icon: createElement("svg", {
+          "data-testid": `publish-icon-${redraws}`,
+          viewBox: "0 0 16 16",
+        }),
+        id: "publish",
+        label: "Publish",
+        onSelect: () => {},
+        priority: 20,
+      }),
+      createElement(
+        "button",
+        { onClick: () => setSummarised(true), type: "button" },
+        "Add summary",
+      ),
+      createElement(
+        "button",
+        { onClick: () => setRedraws((current) => current + 1), type: "button" },
+        "Redraw icon",
+      ),
+      createElement(
+        "button",
+        { onClick: () => navigation.open(detail, { id: "d" }), type: "button" },
+        "Open detail",
+      ),
+    );
+  }
+
+  Canvas = createCanvasModule({
+    root: defineRootPanel({ kind: "root", title: "Home" }),
+    panels: [detail],
+    renderers: {
+      root: Root,
+      detail: () => {
+        detailRenders += 1;
+        return createElement("p", null, "Detail body");
+      },
+    },
+  });
+  const rendered = render(
+    createElement(
+      Canvas.Provider,
+      null,
+      createElement(Canvas.Workspace, { label: "Publishing" }),
+    ),
+  );
+
+  const header = rendered.container.querySelector("[data-canvas-panel-header]");
+  const action = (id) =>
+    header.querySelector(`button[data-canvas-action="${id}"]`);
+
+  // Absent both fields, nothing about the button has moved: its label is still
+  // its only child, and there is nothing for it to point at.
+  assert.equal(action("preview").innerHTML, "Preview");
+  assert.equal(action("preview").hasAttribute("aria-describedby"), false);
+  assert.equal(
+    action("preview").querySelectorAll("[data-canvas-action-icon]").length,
+    0,
+  );
+
+  // The icon comes first, the label after it, the description last — all three
+  // inside the button, which is what keeps the row's direct-child adjacency
+  // intact and the button a single pointer target.
+  assert.deepEqual(
+    [...action("publish").childNodes].map((node) =>
+      node.nodeType === 1
+        ? node
+            .getAttributeNames()
+            .find((name) => name.startsWith("data-canvas-"))
+        : `#text:${node.textContent}`,
+    ),
+    [
+      "data-canvas-action-icon",
+      "#text:Publish",
+      "data-canvas-action-description",
+    ],
+  );
+  assert.deepEqual(
+    [...header.children]
+      .filter((element) => element.hasAttribute("data-canvas-action"))
+      .map(
+        (element) =>
+          `${element.tagName.toLowerCase()}:${element.getAttribute("data-canvas-action")}`,
+      ),
+    ["button:preview", "button:publish"],
+  );
+
+  // The accessible name is the label and nothing else. The glyph is decoration
+  // beside a name that already exists, and says so.
+  assert.ok(rendered.getByRole("button", { name: "Publish" }));
+  assert.equal(action("publish").getAttribute("aria-label"), "Publish");
+  const icon = action("publish").querySelector("[data-canvas-action-icon]");
+  assert.equal(icon.tagName.toLowerCase(), "span");
+  assert.equal(icon.getAttribute("aria-hidden"), "true");
+  assert.equal(icon.firstElementChild.tagName.toLowerCase(), "svg");
+
+  // The description is announced as a description: a real element the button
+  // points at, not a `title` a keyboard or a touch screen cannot reach.
+  const describedBy = action("publish").getAttribute("aria-describedby");
+  assert.equal(typeof describedBy, "string");
+  const description = dom.window.document.getElementById(describedBy);
+  assert.equal(description.textContent, "Add a summary before publishing.");
+  assert.equal(description.getAttribute("data-canvas-action-description"), "");
+  assert.equal(
+    description.parentElement.getAttribute("data-canvas-action"),
+    "publish",
+  );
+
+  // A description is not a state of the control. Enabling the Action does not
+  // withdraw it; the application decides what it says, or whether to say
+  // anything, by what it registers.
+  fireEvent.click(rendered.getByRole("button", { name: "Add summary" }));
+  assert.equal(action("publish").hasAttribute("disabled"), false);
+  assert.equal(
+    dom.window.document.getElementById(
+      action("publish").getAttribute("aria-describedby"),
+    ).textContent,
+    "Publishing replaces the live page.",
+  );
+
+  fireEvent.click(rendered.getByRole("button", { name: "Open detail" }));
+  const registeredRenders = detailRenders;
+
+  // An icon written inline is a new element on every render. If it re-registered
+  // the Action, the Workspace's registration state would move and every Panel
+  // renderer would run again — which is what this counts.
+  for (const redraw of [1, 2, 3]) {
+    fireEvent.click(rendered.getByRole("button", { name: "Redraw icon" }));
+    assert.equal(
+      action("publish")
+        .querySelector("[data-canvas-action-icon]")
+        .firstElementChild.getAttribute("data-testid"),
+      `publish-icon-${redraw}`,
+    );
+  }
+  assert.equal(
+    detailRenders,
+    registeredRenders,
+    "re-rendering an icon re-registered the Action",
+  );
+  assert.equal(action("publish").getAttribute("aria-label"), "Publish");
   rendered.unmount();
 });

@@ -141,12 +141,34 @@ export function defineCanvasContext<Signal>(): CanvasContextDefinition<Signal> {
  */
 export type CanvasActionContent = Exclude<ReactNode, undefined>;
 
+/**
+ * The header control that reduces to a label and a handler, which is nearly
+ * every one of them. The package owns the button completely: its layout, its
+ * disabled and destructive treatment, its pointer target, and its accessible
+ * name.
+ *
+ * `label` stays a `string` because it is that accessible name, and the package
+ * relies on being able to read it. The two optional additions are what an
+ * application could otherwise only get by reaching into a package element:
+ *
+ * - `icon` renders before the label, inside the button, in a wrapper the
+ *   package marks `aria-hidden`. It is decoration beside a name that already
+ *   exists, never part of the name.
+ * - `description` renders as the button's accessible description — a
+ *   visually-hidden element the button points `aria-describedby` at. It is
+ *   rendered whenever it is supplied, not only while `disabled`: a disabled
+ *   Action is the case that most needs one, but the description of a control
+ *   is not a state of it, and one that disappeared the moment the control
+ *   became available would be a change the application never asked for.
+ */
 export type CanvasActionButtonProps = Readonly<{
   id: string;
   label: string;
   priority?: number;
   disabled?: boolean;
   destructive?: boolean;
+  description?: string;
+  icon?: ReactNode;
   onSelect: () => void;
   content?: never;
 }>;
@@ -161,6 +183,10 @@ export type CanvasActionButtonProps = Readonly<{
  * The `never`s are the whole point of splitting the shape in two. A
  * registration carrying both a `label`/`onSelect` pair and content, or
  * neither, is rejected by the compiler rather than discovered at runtime.
+ * Everything the package renders on an application's behalf is named here so
+ * it can be refused, `icon` and `description` included: content already owns
+ * everything inside its own wrapper, and there is nothing there for the
+ * package to put a glyph beside or to describe.
  */
 export type CanvasActionContentProps = Readonly<{
   id: string;
@@ -170,6 +196,8 @@ export type CanvasActionContentProps = Readonly<{
   onSelect?: never;
   disabled?: never;
   destructive?: never;
+  description?: never;
+  icon?: never;
 }>;
 
 export type CanvasActionProps =
@@ -177,8 +205,9 @@ export type CanvasActionProps =
   | CanvasActionContentProps;
 
 /**
- * Where a content Action's current render lives between the Panel body that
- * produced it and the header that shows it.
+ * Where an Action's application-supplied render — a content Action's content,
+ * or a button Action's icon — lives between the Panel body that produced it
+ * and the header that shows it.
  *
  * Application content is a new element on every render, so putting it in the
  * registration itself would re-register the Action every time the application
@@ -213,20 +242,33 @@ function createHeaderContentStore(): HeaderContentStore {
 }
 
 /**
+ * What the Workspace holds for one registered button Action.
+ *
+ * `icon` is always a store and never the node itself, even for the great many
+ * Actions that have no icon. An element in the registration would move its
+ * identity on every render of the Panel body, and a store whose presence came
+ * and went with the prop would do the same the first time an application
+ * showed an icon conditionally.
+ */
+type ButtonActionRegistration = Readonly<{
+  id: string;
+  label: string;
+  priority?: number;
+  disabled?: boolean;
+  destructive?: boolean;
+  description?: string;
+  icon: HeaderContentStore;
+  onSelect: () => void;
+  content?: undefined;
+}>;
+
+/**
  * What the Workspace holds for one registered Action. The public props are the
  * application's spelling of this; the button member keeps `content` declared
  * and absent so the two can be told apart by reading one property.
  */
 type ActionRegistration =
-  | Readonly<{
-      id: string;
-      label: string;
-      priority?: number;
-      disabled?: boolean;
-      destructive?: boolean;
-      onSelect: () => void;
-      content?: undefined;
-    }>
+  | ButtonActionRegistration
   | Readonly<{
       id: string;
       priority?: number;
@@ -462,6 +504,26 @@ export type CanvasWorkspaceProps = Readonly<{
    * {@link canvasPanelSizingBounds}.
    */
   sizing?: PanelSizingBounds;
+  /**
+   * Whether focus arriving inside a retained Panel makes it the Active Panel.
+   *
+   * Defaults to `false`, which is the Canvas's standing rule: focus records
+   * the DOM-Focused Panel and nothing else, so a Panel becomes active only
+   * when something navigates or calls `activate`. Turn it on for a Canvas
+   * that should behave like a master–detail UI, where clicking or tabbing
+   * into a column selects it.
+   *
+   * Only focus that arrives on its own counts. Focus the Canvas itself places
+   * — restoring it after a Guarded Transition, rescuing it out of a Panel the
+   * presentation has just hidden, landing it on a renderer failure notice —
+   * activates nothing, because the Canvas put it there. Neither does focus
+   * that reaches a Panel behind an open Guarded Transition dialog.
+   *
+   * Activating this way never moves focus: the Panel already has it, so the
+   * one claim activation makes on focus is settled where it stands rather
+   * than sent to that Panel's `initialFocus`.
+   */
+  activateOnFocus?: boolean;
 }>;
 
 export type CanvasModuleProviderProps<
@@ -686,11 +748,19 @@ function GuardedTransitionDialog({
       createElement(
         "div",
         { id: messageId },
+        // The prefix says which Panel a line is about, which only one of these
+        // dialogs needs: with several Panels the heading can only count them,
+        // so each line has to name its own. With one, the heading has already
+        // named it — and a Panel title is a record name, so repeating it says
+        // nothing and is read out twice, the heading being `aria-labelledby`
+        // and this `aria-describedby`.
         transition.panels.map((panel) =>
           createElement(
             "p",
             { key: panel.panelId },
-            `${panel.panelTitle}: ${panel.message}`,
+            transition.panels.length === 1
+              ? panel.message
+              : `${panel.panelTitle}: ${panel.message}`,
           ),
         ),
       ),
@@ -942,22 +1012,53 @@ export function createCanvasModule<
 
   function ButtonAction(action: CanvasActionButtonProps): null {
     const scope = useActionScope();
-    const { destructive, disabled, id, label, onSelect, priority } = action;
+    const {
+      description,
+      destructive,
+      disabled,
+      icon,
+      id,
+      label,
+      onSelect,
+      priority,
+    } = action;
     const latest = useRef(onSelect);
+    const [iconStore] = useState(createHeaderContentStore);
     useLayoutEffect(() => {
       latest.current = onSelect;
     }, [onSelect]);
+    // The same trick content uses, and for a sharper reason: an icon written
+    // inline at the call site is a new element on every render, so naming it
+    // in the dependency array below would re-register the Action every time —
+    // which moves the Workspace's registration state, which renders the Panel
+    // body again, which builds another icon. The store's identity never moves,
+    // so only the button's own slot re-renders. `description` is a string and
+    // needs none of this.
+    useLayoutEffect(() => {
+      iconStore.write(icon ?? null);
+    }, [icon, iconStore]);
     useEffect(
       () =>
         scope.registerAction({
+          icon: iconStore,
           id,
           label,
           onSelect: () => latest.current(),
+          ...(description === undefined ? {} : { description }),
           ...(destructive === undefined ? {} : { destructive }),
           ...(disabled === undefined ? {} : { disabled }),
           ...(priority === undefined ? {} : { priority }),
         }),
-      [destructive, disabled, id, label, priority, scope],
+      [
+        description,
+        destructive,
+        disabled,
+        iconStore,
+        id,
+        label,
+        priority,
+        scope,
+      ],
     );
     return null;
   }
@@ -1303,6 +1404,74 @@ export function createCanvasModule<
   }
 
   /**
+   * A button Action's place in the header action row.
+   *
+   * A component rather than an element built inline, because the icon lives in
+   * a store and something has to subscribe to it. Only this one slot
+   * re-renders when an application's icon changes.
+   *
+   * Both optional parts render inside the button rather than beside it. The
+   * row is laid out by direct-child adjacency — `> button + button` is what
+   * takes back the automatic margin that pushes the row to the trailing edge —
+   * so a sibling element between two buttons would break that adjacency and
+   * throw the control after it to the far side of the header. Inside the
+   * button they cost the row nothing, and they cost the button nothing either:
+   * the icon is an inline box and the description is taken out of flow
+   * entirely, so an Action carrying both is still the same pointer target the
+   * `flex: 0 0 auto` rule protects for WCAG 2.5.8.
+   *
+   * Neither can reach the accessible name. It is the `aria-label` below, which
+   * is `label` and nothing else, so the icon could not join it even if the
+   * wrapper were not `aria-hidden` — the wrapper is what stops the glyph being
+   * read as content in its own right. The description is announced as a
+   * description because that is what `aria-describedby` makes it, which is the
+   * point: a reason a control is unavailable is not part of its name, and a
+   * `title` tooltip would be unreachable by keyboard and invisible on touch.
+   */
+  function HeaderActionButton({
+    action,
+  }: Readonly<{ action: ButtonActionRegistration }>) {
+    const icon = useSyncExternalStore(
+      action.icon.subscribe,
+      action.icon.read,
+      action.icon.read,
+    );
+    const descriptionId = `${useId()}-action-description`;
+    return createElement(
+      "button",
+      {
+        "aria-describedby":
+          action.description === undefined ? undefined : descriptionId,
+        "aria-label": action.label,
+        // The id the application already gave this Action, which until now the
+        // Canvas spent only as a React key. Without it an application cannot
+        // tell its own Actions apart in the DOM, so styling one means matching
+        // the English in its label.
+        "data-canvas-action": action.id,
+        "data-destructive": action.destructive ? "" : undefined,
+        disabled: action.disabled,
+        onClick: action.onSelect,
+        type: "button",
+      },
+      icon === null || icon === undefined
+        ? null
+        : createElement(
+            "span",
+            { "aria-hidden": true, "data-canvas-action-icon": "" },
+            icon,
+          ),
+      action.label,
+      action.description === undefined
+        ? null
+        : createElement(
+            "span",
+            { "data-canvas-action-description": "", id: descriptionId },
+            action.description,
+          ),
+    );
+  }
+
+  /**
    * A content Action's place in the header action row.
    *
    * The wrapper is a plain `div` with no ARIA role and no `tabIndex`: it says
@@ -1423,7 +1592,12 @@ export function createCanvasModule<
     );
   }
 
-  function Workspace({ label, announcements, sizing }: CanvasWorkspaceProps) {
+  function Workspace({
+    label,
+    announcements,
+    sizing,
+    activateOnFocus = false,
+  }: CanvasWorkspaceProps) {
     const { snapshot, activate, close, registerLifecycle, resolveTransition } =
       bindings.useCanvas();
     useBreakpointPresentation(bindings.useEngine());
@@ -1447,6 +1621,13 @@ export function createCanvasModule<
     const previousTransition = useRef(snapshot.transition);
     const initiallyFocusedPanel = useRef<PanelInstanceId | null>(null);
     const honouredReplacements = useRef(new Map<PanelInstanceId, number>());
+    // Raised while the Canvas is moving focus itself. Everywhere the Workspace
+    // repairs focus goes through `placeFocus` below, so a Panel's own focus
+    // handler can tell focus that arrived from focus that was put there — the
+    // difference between someone clicking into a Panel and the Canvas returning
+    // focus to the control that opened a Guarded Transition. Only the first is
+    // a reason to activate anything.
+    const placingFocus = useRef(false);
 
     // A Panel Instance ID is unique within its own Panel Engine and nowhere
     // else, so every lookup by one is confined to the Panels this Workspace
@@ -1472,6 +1653,21 @@ export function createCanvasModule<
         ? panel.getAttribute("data-canvas-panel-id")
         : null;
     }, []);
+    // Every focus move the Workspace makes on its own account. The browser
+    // dispatches the focus event synchronously from inside `focus()`, so the
+    // flag is up for exactly the handlers this move causes and down again
+    // before anything else can read it — including when `focus()` throws.
+    const placeFocus = useCallback(
+      (element: HTMLElement, options?: FocusOptions) => {
+        placingFocus.current = true;
+        try {
+          element.focus(options);
+        } finally {
+          placingFocus.current = false;
+        }
+      },
+      [],
+    );
     const [dirtyPanelIds, setDirtyPanelIds] = useState<
       ReadonlySet<PanelInstanceId>
     >(() => new Set());
@@ -1639,12 +1835,21 @@ export function createCanvasModule<
           node !== null && workspace.current?.contains(node) === true;
         for (const candidate of [preferred, registeredFallback, heading]) {
           if (!candidate || !inside(candidate)) continue;
-          candidate.focus();
+          // Returned by the Canvas, so it activates nothing even where the
+          // Canvas is activating on focus: the control that initiated the
+          // transition is often in a Panel that is no longer the active one,
+          // and giving it focus back must not undo the move it just made.
+          placeFocus(candidate);
           if (inside(document.activeElement)) break;
         }
       }
       previousTransition.current = snapshot.transition;
-    }, [headerRegistrations, snapshot.activePanelId, snapshot.transition]);
+    }, [
+      headerRegistrations,
+      placeFocus,
+      snapshot.activePanelId,
+      snapshot.transition,
+    ]);
 
     const activePanelId = snapshot.activePanelId;
     const activeReplacements = bodyReplacements.get(activePanelId) ?? 0;
@@ -1705,7 +1910,7 @@ export function createCanvasModule<
         // A replacement has just put focus inside this Panel, so activation has
         // nothing left to claim for it.
         initiallyFocusedPanel.current = activePanelId;
-        target.focus({ preventScroll: true });
+        placeFocus(target, { preventScroll: true });
         return;
       }
       // Activating a Panel hands focus to whatever that Panel registered, once.
@@ -1719,13 +1924,14 @@ export function createCanvasModule<
         : null;
       if (!registered?.isConnected) return;
       initiallyFocusedPanel.current = activePanelId;
-      registered.focus({ preventScroll: true });
+      placeFocus(registered, { preventScroll: true });
     }, [
       activePanelId,
       activeReplacements,
       deepestTransition,
       headerRegistrations,
       panelPartIdFor,
+      placeFocus,
     ]);
 
     const registerWorkspaceLifecycle = useCallback<
@@ -1801,8 +2007,12 @@ export function createCanvasModule<
       const heading = focusRefugeHeadingId
         ? document.getElementById(focusRefugeHeadingId)
         : null;
-      (heading ?? application.current)?.focus();
-    }, [visiblePanelIds, focusRefugeHeadingId, ownPanelIdOf]);
+      // A rescue, not an arrival: a Declared Breakpoint changes presentation
+      // only, and must never move the Active Panel — least of all onto the
+      // Panel focus was just tipped into because the active one went away.
+      const refuge = heading ?? application.current;
+      if (refuge) placeFocus(refuge);
+    }, [visiblePanelIds, focusRefugeHeadingId, ownPanelIdOf, placeFocus]);
 
     // Retained Panels are hidden with `display: none`, which resets their
     // scroll offset, so each body's offset is recorded as it scrolls and
@@ -1887,6 +2097,10 @@ export function createCanvasModule<
         const heading = headingId ? document.getElementById(headingId) : null;
         if (!heading) return;
         event.preventDefault();
+        // Deliberately not `placeFocus`: the Canvas is carrying out a keypress
+        // a person just made, not repairing focus of its own accord. A Canvas
+        // activating on focus treats F6 exactly as it treats a click or a Tab
+        // into the same region, which is the whole promise of that option.
         heading.focus();
       },
       [ownPanelIdOf, panelPartIdFor, visiblePanelIds],
@@ -2152,6 +2366,30 @@ export function createCanvasModule<
                   onFocusCapture: () => {
                     focusedPanelId.current = panel.instanceId;
                     signalStore.setFocused(panel.instanceRef);
+                    // Recording the DOM-Focused Panel is all focus does by
+                    // default. A Canvas that has asked for it goes on to make
+                    // the Panel someone focused the Active Panel too — but only
+                    // for focus that arrived on its own. Focus the Canvas
+                    // placed is a repair, and a Panel behind an open Guarded
+                    // Transition dialog is inert and has no business being
+                    // activated by a focus that reached it anyway.
+                    if (
+                      !activateOnFocus ||
+                      active ||
+                      placingFocus.current ||
+                      deepestTransition
+                    ) {
+                      return;
+                    }
+                    const outcome = activate({ target: panel.instanceRef });
+                    // Focus is already where activation would have sent it, so
+                    // the one claim activation makes on focus is settled here,
+                    // before the effect that honours it can run. Without this
+                    // the Panel would pull the caret out of the field the user
+                    // has just clicked into and hand it to `initialFocus`.
+                    if (outcome.status === "activated") {
+                      initiallyFocusedPanel.current = panel.instanceId;
+                    }
                   },
                   role: "region",
                 },
@@ -2206,26 +2444,10 @@ export function createCanvasModule<
                   // parked at either end of the row.
                   ...actions.map((action) =>
                     action.content === undefined
-                      ? createElement(
-                          "button",
-                          {
-                            "aria-label": action.label,
-                            // The id the application already gave this Action,
-                            // which until now the Canvas spent only as a React
-                            // key. Without it an application cannot tell its
-                            // own Actions apart in the DOM, so styling one
-                            // means matching the English in its label.
-                            "data-canvas-action": action.id,
-                            "data-destructive": action.destructive
-                              ? ""
-                              : undefined,
-                            disabled: action.disabled,
-                            key: action.id,
-                            onClick: action.onSelect,
-                            type: "button",
-                          },
-                          action.label,
-                        )
+                      ? createElement(HeaderActionButton, {
+                          action,
+                          key: action.id,
+                        })
                       : createElement(HeaderActionContent, {
                           content: action.content,
                           id: action.id,

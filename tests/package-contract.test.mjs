@@ -768,6 +768,69 @@ test("every surface the package paints answers to a --canvas-* token", () => {
   }
 });
 
+test("the Canvas bed and a Panel's corners are themeable apart from the Panels", () => {
+  const own = (selector) =>
+    stylesheetRules.find(
+      (rule) => rule.selector === selector && rule.at.length === 1,
+    );
+  const root = own(":root");
+  const application = own("[data-canvas-application]");
+  const panel = own("[data-canvas-panel]");
+  const body = own("[data-canvas-panel-body]");
+
+  assert.ok(root && application && panel && body, "the Canvas must be styled");
+
+  // One token painted the bed and every Panel, so "Panels as cards on a
+  // distinct ground" was inexpressible at any value: whatever it was set to,
+  // the gutter `--canvas-panel-gap` opens was the colour of the things it
+  // separates. The bed answers to its own token now.
+  assert.match(
+    application.declarations,
+    /background:\s*var\(\s*--canvas-surface-bed\s*,\s*var\(\s*--canvas-surface\s*\)\s*\)/,
+    "the bed must paint --canvas-surface-bed, falling back to the surface",
+  );
+  assert.match(
+    panel.declarations,
+    /background:\s*var\(\s*--canvas-surface\s*\)/,
+    "a Panel must keep painting --canvas-surface",
+  );
+  // Derived at the point of use, like the action colours: declared on `:root`
+  // the `var()` would be substituted there, resolve against the package's own
+  // surface, and hand every descendant the answer — so an application that
+  // recoloured `--canvas-surface` would find its bed unchanged.
+  assert.doesNotMatch(
+    root.declarations,
+    /--canvas-surface-bed\s*:/,
+    "--canvas-surface-bed derives from --canvas-surface and cannot be declared",
+  );
+
+  // Square by default, so a Canvas nobody has themed is the run of columns it
+  // has always been.
+  assert.match(root.declarations, /--canvas-panel-radius:\s*0;/);
+  assert.match(
+    panel.declarations,
+    /border-radius:\s*var\(\s*--canvas-panel-radius\s*\)/,
+  );
+  // The Panel is deliberately given no `overflow` to clip with — the resize
+  // handle straddles this edge, and clipping the Panel would cut the outer half
+  // of that pointer target off. The body is already a scroll container, so it
+  // already clips at its own corners; it takes the two that meet the Panel's
+  // bottom edge, which is what stops content scrolled to the foot of a rounded
+  // Panel squaring the card off again.
+  assert.doesNotMatch(panel.declarations, /(?:^|[\s;])overflow[-a-z]*:/);
+  assert.match(body.declarations, /border-end-end-radius:\s*inherit;/);
+  assert.match(body.declarations, /border-end-start-radius:\s*inherit;/);
+  // And `inherit` rather than the token, which is the whole point: the body is
+  // the Panel's own child, so it takes the corner the Panel actually computed —
+  // from the token, or from a rule an application wrote against
+  // `[data-canvas-panel]`, which is a documented attribute and a supported way
+  // to round a Panel. Reading `var(--canvas-panel-radius)` here follows only
+  // the first route, so a Canvas that rounds or squares its Panels by attribute
+  // gets a Panel whose corner and whose clipping disagree. Found in the Proof
+  // Consumer, whose nested Canvas squares its Panels below a themed ancestor.
+  assert.doesNotMatch(body.declarations, /--canvas-panel-radius/);
+});
+
 test("every --canvas-* token the stylesheet knows is named in the contract", async () => {
   const readme = await readFile(
     join(root, "packages/canvas-panels/README.md"),
@@ -865,6 +928,47 @@ test("the README states how deep a Context Signal is compared", async () => {
   // package in tests/react-canvas.test.mjs; this is what keeps the sentence
   // from drifting away from it.
   assert.match(readme, /held and compared one level deep/);
+});
+
+test("the README states the two rules a button Action's icon and description turn on", async () => {
+  const readme = await readFile(
+    join(root, "packages/canvas-panels/README.md"),
+    "utf8",
+  );
+
+  // Both are rules a consumer plans around rather than behaviour they can read
+  // off a render. Whether `label` is still the whole accessible name decides
+  // whether an icon may carry meaning, and when a `description` is rendered
+  // decides whether an application has to withdraw it as state changes. The
+  // behaviour is asserted against the built package in
+  // tests/canvas-accessibility.test.mjs; this is what keeps the sentences from
+  // drifting away from it.
+  assert.match(
+    readme,
+    /`label` stays a `string`, and it stays the whole accessible name/,
+  );
+  assert.match(
+    readme,
+    /rendered whenever it is supplied, not only while the Action is `disabled`/,
+  );
+});
+
+test("the README says that focus does not imply Activation, and names the option that changes it", async () => {
+  const readme = await readFile(
+    join(root, "packages/canvas-panels/README.md"),
+    "utf8",
+  );
+
+  // The split between the DOM-Focused Panel and the Active Panel is a design
+  // decision, and a consumer who has to discover it by debugging a Canvas that
+  // will not respond to clicks has been told nothing. Both halves are asserted
+  // here: the rule, and the opt-in that reverses it. The behaviour itself is
+  // asserted against the built package in tests/react-canvas.test.mjs.
+  assert.match(readme, /\*\*Focus does not imply Activation\.\*\*/);
+  assert.match(readme, /`activateOnFocus` defaults to `false`/);
+  // And the accessibility half, which is the part a host cannot re-derive:
+  // activating because focus arrived must not then move that focus.
+  assert.match(readme, /never moves focus/);
 });
 
 test("the stylesheet is one named cascade layer, and says so where a consumer reads", async () => {
