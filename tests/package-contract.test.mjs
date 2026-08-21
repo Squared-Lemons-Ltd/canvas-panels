@@ -867,6 +867,24 @@ test("the README states how deep a Context Signal is compared", async () => {
   assert.match(readme, /held and compared one level deep/);
 });
 
+test("the README says that focus does not imply Activation, and names the option that changes it", async () => {
+  const readme = await readFile(
+    join(root, "packages/canvas-panels/README.md"),
+    "utf8",
+  );
+
+  // The split between the DOM-Focused Panel and the Active Panel is a design
+  // decision, and a consumer who has to discover it by debugging a Canvas that
+  // will not respond to clicks has been told nothing. Both halves are asserted
+  // here: the rule, and the opt-in that reverses it. The behaviour itself is
+  // asserted against the built package in tests/react-canvas.test.mjs.
+  assert.match(readme, /\*\*Focus does not imply Activation\.\*\*/);
+  assert.match(readme, /`activateOnFocus` defaults to `false`/);
+  // And the accessibility half, which is the part a host cannot re-derive:
+  // activating because focus arrived must not then move that focus.
+  assert.match(readme, /never moves focus/);
+});
+
 test("the stylesheet is one named cascade layer, and says so where a consumer reads", async () => {
   const readme = await readFile(
     join(root, "packages/canvas-panels/README.md"),

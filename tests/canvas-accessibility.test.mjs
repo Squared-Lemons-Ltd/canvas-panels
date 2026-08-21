@@ -100,7 +100,12 @@ const bounds = Object.freeze({
   coarseStep: 64,
 });
 
-function renderCanvas({ breakpoint = "desktop", announcements, sizing } = {}) {
+function renderCanvas({
+  breakpoint = "desktop",
+  announcements,
+  sizing,
+  activateOnFocus,
+} = {}) {
   const viewport = installViewport(breakpoint);
   const built = buildCanvas();
   let result;
@@ -110,6 +115,7 @@ function renderCanvas({ breakpoint = "desktop", announcements, sizing } = {}) {
         built.Canvas.Provider,
         { engine: built.engine },
         createElement(built.Canvas.Workspace, {
+          activateOnFocus,
           label: "Classes Canvas",
           announcements,
           sizing,
@@ -486,6 +492,57 @@ test("F6 reads focus from the document, not from a Panel's focus handler", () =>
   pressF6(canvas.container, { shiftKey: true });
 
   assert.equal(focusedHeading(canvas.container), classA);
+});
+
+test("F6 leaves the Active Panel alone", () => {
+  const canvas = renderCanvas();
+  openClassAndLearner(canvas);
+  const active = canvas.engine.getSnapshot().activePanelId;
+  const [classes] = headings(canvas.container);
+
+  act(() => {
+    classes.focus();
+  });
+  pressF6(canvas.container);
+
+  // Cycling moves between landmarks and nothing else. Focus does not imply
+  // Activation, so the region F6 landed on is focused and still not active.
+  assert.equal(canvas.engine.getSnapshot().activePanelId, active);
+});
+
+test("F6 activates the region it lands on where the Canvas activates on focus", () => {
+  const canvas = renderCanvas({ activateOnFocus: true });
+  openClassAndLearner(canvas);
+  const [classes] = headings(canvas.container);
+  const classA = canvas.engine.getSnapshot().panels[1].instanceId;
+
+  act(() => {
+    classes.focus();
+  });
+  pressF6(canvas.container);
+
+  // A keypress a person made, treated exactly as a click or a Tab into the
+  // same region would be.
+  assert.equal(canvas.engine.getSnapshot().activePanelId, classA);
+});
+
+test("a Panel activated by focus announces nothing new", () => {
+  const canvas = renderCanvas({ activateOnFocus: true });
+  openClassAndLearner(canvas);
+  const afterOpening = announcer(canvas.container).textContent;
+  const [classes] = headings(canvas.container);
+
+  act(() => {
+    classes.focus();
+  });
+
+  // Activation is silent however it was caused, and here focus moving is
+  // already what tells the reader where they now are.
+  assert.equal(
+    canvas.engine.getSnapshot().activePanelId,
+    canvas.engine.getSnapshot().panels[0].instanceId,
+  );
+  assert.equal(announcer(canvas.container).textContent, afterOpening);
 });
 
 test("a separator reports the width its Panel actually has", () => {
