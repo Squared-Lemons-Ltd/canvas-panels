@@ -36,3 +36,5 @@ Activating a Panel ordinarily hands focus to whatever it registered as
 `initialFocus`. This one activation claims nothing, because the caret is already
 in the field the user has just clicked into, and taking it anywhere else would
 be the option's own accessibility defect.
+
+Closes #66.

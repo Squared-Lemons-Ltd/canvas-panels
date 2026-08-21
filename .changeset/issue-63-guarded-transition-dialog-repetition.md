@@ -19,3 +19,5 @@ and hiding the message would break `aria-describedby`.
 A single-Panel dialog now shows the message alone. Several dirty Panels are
 unchanged and keep the prefix, because there the heading can only count them and
 each line has to say which Panel it is about.
+
+Closes #63.
