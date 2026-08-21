@@ -46,3 +46,5 @@ the two radii that meet the Panel's bottom edge, which is inert at `0`.
 override changes meaning. An application that had reached onto
 `[data-canvas-application]` or `[data-canvas-panel]` to paint a bed or round a
 Panel can move those rules onto the tokens.
+
+Closes #64.
