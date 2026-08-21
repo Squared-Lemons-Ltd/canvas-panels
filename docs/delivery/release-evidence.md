@@ -59,6 +59,83 @@ node --input-type=module -e '
 
 `pnpm pack:check` already does the equivalent against the local tarball for every subpath, both consumers, and a Next production build. The commands above are the part it cannot do: proving that the *registry* holds the same bytes, and that an install with no workspace resolution reaches them.
 
+## 0.4.0
+
+Five reports from two external adoptions on `0.3.0` — PodMule across 16 Canvas Workspaces, and a ~40-host admin migration — implemented in four worktrees behind four separate gates, merged into one branch, and released together. Four additions to the Public Contract; nothing removed, nothing narrowed, and the `0.x` allowance for a breaking change in a minor unused.
+
+| Field | Value |
+| --- | --- |
+| Version | `0.4.0` |
+| Tarball | `canvas-panels-0.4.0.tgz` |
+| Integrity, as published | `sha512-UG+FGvgM9Tqrr1f3okgjt/QoionJEazM3JT0eJ5Q3jRyhkyoK37oOGdftlj1fxwNMZs44WtHz7+J2VMe+iNFGg==` |
+| Shasum, as published | `310dccc69e55465a02ab0abc7d3d0d49adaa0d2d` |
+| Integrity, local pack | `sha512-L90KNNambgsjsoX7kBY59HcsvOe4xCjPwMGV19nWNjOZlaTJsaICIGGiy0WZGQktM6cXFlGLqLHHqoNkAfeeig==` (`2fdd0a34…`) — differs only by the Changesets `package.json` rewrite; see "How to reproduce" |
+| Packed size | 52 entries, 151,282 bytes packed, 654,345 bytes unpacked |
+| Registry | Public npm, `https://registry.npmjs.org` |
+| Licence | MIT, shipped in the tarball |
+| Provenance | **Attested.** `https://slsa.dev/provenance/v1` plus npm's publish attestation, naming workflow `.github/workflows/release.yml` on `refs/heads/main` and source commit `0cd643c8…` |
+| Visibility | Public |
+| dist-tag | `latest`; `next` left on `0.2.0-rc.0` |
+| Source commit | `0cd643c89a1574129c24406f36459822acee7f9a`, tagged `@squaredlemons/canvas-panels@0.4.0` |
+| Workflow run | [32500220452](https://github.com/Squared-Lemons-Ltd/canvas-panels/actions/runs/32500220452), 21 August 2026 |
+| Toolchain | Node 22.23.2 in the publish job, npm `^11.5.1` installed in the job, pnpm 9.15.9; gate additionally on Node 24.19.0 |
+| Gate | `pnpm gate` passed on the cut commit and again in CI: 473 contract tests, 3 packed-consumer tests, 0 failures, on Node 22 and Node 24 |
+
+### What shipped
+
+Minor, all four additions to the Public Contract:
+
+- **A button Action can carry an icon** ([#67](https://github.com/Squared-Lemons-Ltd/canvas-panels/issues/67)). `icon?: ReactNode` on the button shape, rendered inside the button before the label in an `aria-hidden` wrapper. `label` stays a `string` and stays the whole accessible name — now contractual rather than merely true, so an icon can never carry meaning the name does not. Adds the `data-canvas-action-icon` attribute. An icon written inline is a new element on every render, so the registration holds a store rather than the node, exactly as a content Action does; naming the element in the registration's dependency array is an infinite re-registration loop, not merely churn, and a re-render-counting test holds that shut.
+- **A button Action can say why it is disabled** ([#65](https://github.com/Squared-Lemons-Ltd/canvas-panels/issues/65)). `description?: string`, rendered as the button's accessible description through `aria-describedby` onto a visually-hidden element — keyboard- and touch-reachable, deliberately not a `title` tooltip, which is neither. Adds the `data-canvas-action-description` attribute. It renders whenever it is supplied rather than only while `disabled`: the disabled case is what motivated it, but the description of a control is not a state of it. Both this and the icon render *inside* the button, because the header row is laid out by direct-child adjacency and a sibling element between two buttons would throw the next control to the far side of the header.
+- **A Canvas Workspace can activate the Panel someone focuses** ([#66](https://github.com/Squared-Lemons-Ltd/canvas-panels/issues/66)). `activateOnFocus`, defaulting to `false`. Only focus arriving on its own activates: every focus move the Canvas makes on its own account — returning focus after a Guarded Transition, rescuing it out of a Panel the presentation has hidden, claiming `initialFocus`, the renderer-failure notice — goes through one helper the focus handler ignores, because a repair is not an arrival. F6 deliberately does activate. An activation caused by focus already inside the Panel never moves that focus.
+- **The Canvas bed and a Panel's corners have their own tokens** ([#64](https://github.com/Squared-Lemons-Ltd/canvas-panels/issues/64)). `--canvas-surface-bed` and `--canvas-panel-radius`, so Panels-as-cards-on-a-ground is a token change rather than an override of the package's own painting.
+
+Patch:
+
+- **A single-Panel Guarded Transition dialog names its Panel once** ([#63](https://github.com/Squared-Lemons-Ltd/canvas-panels/issues/63)). The heading already names it, and every message line repeated the title in front of the message. Against a real 104-character record title that filled two thirds of the modal, printed twice, and was read out twice — the heading being `aria-labelledby` and the message `aria-describedby`. Several dirty Panels are unchanged and keep the prefix, because there the heading can only count them.
+
+### The documentation half of #66 shipped whether or not a Canvas opts in
+
+The split between the DOM-Focused Panel and the Active Panel was always deliberate and was nowhere written down, and the package maintained a focus signal that looked exactly like the input to click-to-select. The reporter found it by debugging a converted admin whose Panels appeared not to respond to clicks. The README now states the rule under "Navigation", the contract carries it as its own enforced row, and the shipped skill carries it too — so an agent building against the package meets it before it debugs it.
+
+### Two renderings change without anyone setting anything
+
+Both are in the changelog rather than left to be discovered, and neither requires an edit:
+
+- **The single-Panel dialog message loses its title prefix** (#63). Anyone asserting on that exact string in a test sees it change. The rendered sentence is not contract text and never was — it is in the same class as the DOM inside a Panel body.
+- **A Panel rounded through `[data-canvas-panel]` now clips its scrolled content to the corner** (#64). The Panel body takes its two bottom radii with `inherit` rather than from `--canvas-panel-radius`, because `data-canvas-panel` is a published attribute and rounding a Panel through it is a supported thing to do; reading the token would have followed only the token, leaving a square body clipping content on a curve. Found by hitting it in the Proof Consumer, whose nested Canvas does exactly that, and pinned by a test that a token-only test would have passed.
+
+The second was caught during the release review: the changeset had claimed nothing changes for a consumer who sets neither token, which is false for precisely that case. Corrected in `e86a603` before the version was cut. It is the reason the review step exists.
+
+### Why `--canvas-surface-bed` has no `:root` default
+
+The issue asked for `--canvas-surface-bed: var(--canvas-surface)`. The contract suite forbids that shape, and correctly: a `var()` inside a custom property is substituted where the property is *declared*, so a `:root` default resolves against the package's own surface once and hands every descendant the answer — an application that recoloured `--canvas-surface` would find its bed unchanged. It is derived on the element that reads it instead, the way the three action colours are, so recolouring the general token carries the bed with it and naming the bed takes it out of the arrangement. Four tokens now have no default of their own, and the README's "Theming" table says which and why.
+
+### A rounded Panel is not clipped by the Panel
+
+`overflow: hidden` on `[data-canvas-panel]` would cut the outer half of the Panel Separator's pointer target off, which deliberately straddles that edge for WCAG 2.5.8 — and would do so at every value including `0`, failing the requirement that a new token's default change nothing. What a rounded Panel needs clipped is what scrolls inside it, so the body — already a scroll container — takes the two radii that meet the Panel's bottom edge. The top pair belong to the header, which paints nothing.
+
+### The publish left no `gitHead`, and again did not push its tag
+
+The same two gaps as `0.2.1` and `0.3.0`. **Three for three**, so they are properties of this path and not accidents:
+
+- **`npm view @squaredlemons/canvas-panels@0.4.0 gitHead` is empty.** The tie to source is the attestation, which is signed and names `0cd643c8…`.
+- **`changeset publish` created the tag and the workflow's own `git push --tags` did not push it.** The run log shows `🦋 New tag: @squaredlemons/canvas-panels@0.4.0` at `15:58:35.947Z`, the push step starting 26ms later, and `Everything up-to-date` at `15:58:36.233Z`. The tag was absent from the remote afterwards and was created here from the attested commit and pushed by hand.
+
+**The cause is still not established, and one plausible explanation has now been ruled out.** The obvious candidate — that Changesets writes an *annotated* tag (`git tag <name> -m <name>`) and the runner has no committer identity, so tag creation fails and Changesets logs its success message anyway — was tested directly against git with no global or system config: the annotated tag was created, exit 0. So a missing identity is not it. What is left to check is whether the tag exists in the runner's working copy at all when the push runs, which the log cannot answer because Changesets logs `New tag:` without reporting the git command's result. A diagnostic `git tag --list` between the two steps would settle it in one release. Tracked in [#71](https://github.com/Squared-Lemons-Ltd/canvas-panels/issues/71).
+
+### Verified against the registry
+
+Run on 21 August 2026, unauthenticated — the package is public:
+
+- `npm view` reports `dist.integrity sha512-UG+FGvgM…` and `dist.shasum 310dccc6…`, matching the row above, with `latest` resolving to `0.4.0` and `next` still on `0.2.0-rc.0`.
+- **The attestation covers the bytes npm serves.** Both the SLSA provenance and npm's publish attestation carry a subject digest of `506f851af80cf53a…`, which is exactly what the published `dist.integrity` decodes to, so the tarball on the registry is the one the workflow built, from `0cd643c8…`, in run 32500220452.
+- The published tarball was downloaded and compared against a local pack of the same tree: `diff -r` over `dist/` is **empty**, the file lists are identical, and `package.json` is semantically equal — `scripts` moved to the end and the trailing newline dropped, the Changesets rewrite seen at `0.1.0` and `0.2.1` and now confirmed a third time.
+- A clean consumer outside this workspace — `npm init`, then `npm add @squaredlemons/canvas-panels@0.4.0 react@^19 react-dom@^19` with no `.npmrc` and no token — installed it and recorded `sha512-UG+FGvgM…` in its own lockfile.
+- In that consumer all nine subpaths import and `styles.css` resolves to `@squaredlemons/canvas-panels/dist/styles.css`.
+- **All five changes were exercised against the published artifact**, not the local build: the published `dist/styles.css` declares `--canvas-panel-radius: 0`, paints the bed from `var(--canvas-surface-bed, var(--canvas-surface))`, and carries `border-end-end-radius: inherit` / `border-end-start-radius: inherit` on the Panel body; the published `dist/ui/index.d.ts` carries `description?: string` and `icon?: ReactNode` on `CanvasActionButtonProps` and `activateOnFocus?: boolean` on the Workspace props; the published `dist/ui/index.js` emits both new `data-canvas-action-*` attributes, destructures `activateOnFocus = false`, and carries the single-Panel dialog ternary that drops the title prefix.
+- `npm audit signatures` reports verified registry signatures for all four packages and verified attestations for three, this package among them.
+
 ## 0.3.0
 
 Five reports from the first external adopter's migration onto `0.2.x`, each fixed in its own worktree behind its own gate and merged together. Two additions to the Public Contract, and one published type narrowed with them.
