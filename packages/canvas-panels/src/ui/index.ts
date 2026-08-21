@@ -504,6 +504,26 @@ export type CanvasWorkspaceProps = Readonly<{
    * {@link canvasPanelSizingBounds}.
    */
   sizing?: PanelSizingBounds;
+  /**
+   * Whether focus arriving inside a retained Panel makes it the Active Panel.
+   *
+   * Defaults to `false`, which is the Canvas's standing rule: focus records
+   * the DOM-Focused Panel and nothing else, so a Panel becomes active only
+   * when something navigates or calls `activate`. Turn it on for a Canvas
+   * that should behave like a master–detail UI, where clicking or tabbing
+   * into a column selects it.
+   *
+   * Only focus that arrives on its own counts. Focus the Canvas itself places
+   * — restoring it after a Guarded Transition, rescuing it out of a Panel the
+   * presentation has just hidden, landing it on a renderer failure notice —
+   * activates nothing, because the Canvas put it there. Neither does focus
+   * that reaches a Panel behind an open Guarded Transition dialog.
+   *
+   * Activating this way never moves focus: the Panel already has it, so the
+   * one claim activation makes on focus is settled where it stands rather
+   * than sent to that Panel's `initialFocus`.
+   */
+  activateOnFocus?: boolean;
 }>;
 
 export type CanvasModuleProviderProps<
@@ -1572,7 +1592,12 @@ export function createCanvasModule<
     );
   }
 
-  function Workspace({ label, announcements, sizing }: CanvasWorkspaceProps) {
+  function Workspace({
+    label,
+    announcements,
+    sizing,
+    activateOnFocus = false,
+  }: CanvasWorkspaceProps) {
     const { snapshot, activate, close, registerLifecycle, resolveTransition } =
       bindings.useCanvas();
     useBreakpointPresentation(bindings.useEngine());
@@ -1596,6 +1621,13 @@ export function createCanvasModule<
     const previousTransition = useRef(snapshot.transition);
     const initiallyFocusedPanel = useRef<PanelInstanceId | null>(null);
     const honouredReplacements = useRef(new Map<PanelInstanceId, number>());
+    // Raised while the Canvas is moving focus itself. Everywhere the Workspace
+    // repairs focus goes through `placeFocus` below, so a Panel's own focus
+    // handler can tell focus that arrived from focus that was put there — the
+    // difference between someone clicking into a Panel and the Canvas returning
+    // focus to the control that opened a Guarded Transition. Only the first is
+    // a reason to activate anything.
+    const placingFocus = useRef(false);
 
     // A Panel Instance ID is unique within its own Panel Engine and nowhere
     // else, so every lookup by one is confined to the Panels this Workspace
@@ -1621,6 +1653,21 @@ export function createCanvasModule<
         ? panel.getAttribute("data-canvas-panel-id")
         : null;
     }, []);
+    // Every focus move the Workspace makes on its own account. The browser
+    // dispatches the focus event synchronously from inside `focus()`, so the
+    // flag is up for exactly the handlers this move causes and down again
+    // before anything else can read it — including when `focus()` throws.
+    const placeFocus = useCallback(
+      (element: HTMLElement, options?: FocusOptions) => {
+        placingFocus.current = true;
+        try {
+          element.focus(options);
+        } finally {
+          placingFocus.current = false;
+        }
+      },
+      [],
+    );
     const [dirtyPanelIds, setDirtyPanelIds] = useState<
       ReadonlySet<PanelInstanceId>
     >(() => new Set());
@@ -1788,12 +1835,21 @@ export function createCanvasModule<
           node !== null && workspace.current?.contains(node) === true;
         for (const candidate of [preferred, registeredFallback, heading]) {
           if (!candidate || !inside(candidate)) continue;
-          candidate.focus();
+          // Returned by the Canvas, so it activates nothing even where the
+          // Canvas is activating on focus: the control that initiated the
+          // transition is often in a Panel that is no longer the active one,
+          // and giving it focus back must not undo the move it just made.
+          placeFocus(candidate);
           if (inside(document.activeElement)) break;
         }
       }
       previousTransition.current = snapshot.transition;
-    }, [headerRegistrations, snapshot.activePanelId, snapshot.transition]);
+    }, [
+      headerRegistrations,
+      placeFocus,
+      snapshot.activePanelId,
+      snapshot.transition,
+    ]);
 
     const activePanelId = snapshot.activePanelId;
     const activeReplacements = bodyReplacements.get(activePanelId) ?? 0;
@@ -1854,7 +1910,7 @@ export function createCanvasModule<
         // A replacement has just put focus inside this Panel, so activation has
         // nothing left to claim for it.
         initiallyFocusedPanel.current = activePanelId;
-        target.focus({ preventScroll: true });
+        placeFocus(target, { preventScroll: true });
         return;
       }
       // Activating a Panel hands focus to whatever that Panel registered, once.
@@ -1868,13 +1924,14 @@ export function createCanvasModule<
         : null;
       if (!registered?.isConnected) return;
       initiallyFocusedPanel.current = activePanelId;
-      registered.focus({ preventScroll: true });
+      placeFocus(registered, { preventScroll: true });
     }, [
       activePanelId,
       activeReplacements,
       deepestTransition,
       headerRegistrations,
       panelPartIdFor,
+      placeFocus,
     ]);
 
     const registerWorkspaceLifecycle = useCallback<
@@ -1950,8 +2007,12 @@ export function createCanvasModule<
       const heading = focusRefugeHeadingId
         ? document.getElementById(focusRefugeHeadingId)
         : null;
-      (heading ?? application.current)?.focus();
-    }, [visiblePanelIds, focusRefugeHeadingId, ownPanelIdOf]);
+      // A rescue, not an arrival: a Declared Breakpoint changes presentation
+      // only, and must never move the Active Panel — least of all onto the
+      // Panel focus was just tipped into because the active one went away.
+      const refuge = heading ?? application.current;
+      if (refuge) placeFocus(refuge);
+    }, [visiblePanelIds, focusRefugeHeadingId, ownPanelIdOf, placeFocus]);
 
     // Retained Panels are hidden with `display: none`, which resets their
     // scroll offset, so each body's offset is recorded as it scrolls and
@@ -2036,6 +2097,10 @@ export function createCanvasModule<
         const heading = headingId ? document.getElementById(headingId) : null;
         if (!heading) return;
         event.preventDefault();
+        // Deliberately not `placeFocus`: the Canvas is carrying out a keypress
+        // a person just made, not repairing focus of its own accord. A Canvas
+        // activating on focus treats F6 exactly as it treats a click or a Tab
+        // into the same region, which is the whole promise of that option.
         heading.focus();
       },
       [ownPanelIdOf, panelPartIdFor, visiblePanelIds],
@@ -2301,6 +2366,30 @@ export function createCanvasModule<
                   onFocusCapture: () => {
                     focusedPanelId.current = panel.instanceId;
                     signalStore.setFocused(panel.instanceRef);
+                    // Recording the DOM-Focused Panel is all focus does by
+                    // default. A Canvas that has asked for it goes on to make
+                    // the Panel someone focused the Active Panel too — but only
+                    // for focus that arrived on its own. Focus the Canvas
+                    // placed is a repair, and a Panel behind an open Guarded
+                    // Transition dialog is inert and has no business being
+                    // activated by a focus that reached it anyway.
+                    if (
+                      !activateOnFocus ||
+                      active ||
+                      placingFocus.current ||
+                      deepestTransition
+                    ) {
+                      return;
+                    }
+                    const outcome = activate({ target: panel.instanceRef });
+                    // Focus is already where activation would have sent it, so
+                    // the one claim activation makes on focus is settled here,
+                    // before the effect that honours it can run. Without this
+                    // the Panel would pull the caret out of the field the user
+                    // has just clicked into and hand it to `initialFocus`.
+                    if (outcome.status === "activated") {
+                      initiallyFocusedPanel.current = panel.instanceId;
+                    }
                   },
                   role: "region",
                 },

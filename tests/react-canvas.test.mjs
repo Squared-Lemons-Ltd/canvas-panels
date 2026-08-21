@@ -2048,6 +2048,193 @@ test("focus inside a Panel settles the Workspace instead of re-opening its focus
   rendered.unmount();
 });
 
+// A Canvas whose Panels each register an `initialFocus` and have somewhere
+// else inside them to click, which is what makes "activating because focus
+// arrived must not move that focus" a question with a wrong answer.
+function renderActivationCanvas({ activateOnFocus } = {}) {
+  const root = defineRootPanel({ kind: "root", title: "Home" });
+  const draft = definePanel({
+    kind: "draft",
+    deduplication: "allow-many",
+    title: ({ name }) => name,
+  });
+  let Canvas;
+
+  function Draft({ descriptor }) {
+    const initialFocus = useRef(null);
+    const [dirty, setDirty] = useState(false);
+    const navigation = Canvas.useNavigation();
+    Canvas.useLifecycle({
+      dirty,
+      initialFocus,
+      guard: () =>
+        dirty
+          ? { status: "confirm", message: "Discard your unsaved changes?" }
+          : { status: "allow" },
+      save: async () => setDirty(false),
+      discard: async () => setDirty(false),
+    });
+    return createElement(
+      Fragment,
+      null,
+      createElement(
+        "button",
+        {
+          "data-testid": `start-${descriptor.name}`,
+          ref: initialFocus,
+          type: "button",
+        },
+        `Start ${descriptor.name}`,
+      ),
+      // Where the user clicks, which is deliberately not the control this
+      // Panel registered as its `initialFocus`. A button rather than a text
+      // field only because this file's React was initialized before its
+      // document existed, which sends every focused `input` down React's
+      // legacy change polyfill and reports an uncaught `detachEvent`.
+      createElement(
+        "button",
+        { "data-testid": `notes-${descriptor.name}`, type: "button" },
+        `Notes ${descriptor.name}`,
+      ),
+      createElement(
+        "button",
+        {
+          "data-testid": `soil-${descriptor.name}`,
+          onClick: () => setDirty(true),
+          type: "button",
+        },
+        `Soil ${descriptor.name}`,
+      ),
+      createElement(
+        "button",
+        {
+          "data-testid": `open-from-${descriptor.name}`,
+          onClick: () => navigation.open(draft, { name: "three" }),
+          type: "button",
+        },
+        `Open from ${descriptor.name}`,
+      ),
+    );
+  }
+
+  Canvas = createCanvasModule({
+    root,
+    panels: [draft],
+    renderers: { root: () => null, draft: Draft },
+  });
+
+  // Read outside every renderer, where the Bound module's hooks answer for the
+  // Active Panel — which is exactly the resolution the reporter watched land on
+  // the wrong Panel.
+  function ActivePanelProbe() {
+    return createElement(
+      "p",
+      { "data-testid": "active-panel" },
+      Canvas.usePanel().title,
+    );
+  }
+
+  const engine = createPanelEngine({ root, panels: [draft] });
+  const rendered = render(
+    createElement(
+      Canvas.Provider,
+      { engine },
+      createElement(ActivePanelProbe),
+      createElement(Canvas.Workspace, { activateOnFocus, label: "Drafts" }),
+    ),
+  );
+  for (const name of ["one", "two"]) {
+    act(() => {
+      engine.open({
+        originId: engine.getSnapshot().activePanelId,
+        panel: draft.reference({ name }),
+      });
+    });
+  }
+  return {
+    activePanelTitle: () => rendered.getByTestId("active-panel").textContent,
+    engine,
+    // Deliberately a string rather than the element: a failed comparison of two
+    // DOM nodes in this runner hangs the file instead of reporting.
+    focusedTestId: () =>
+      document.activeElement?.getAttribute("data-testid") ?? null,
+    rendered,
+  };
+}
+
+test("focus alone does not make a retained Panel the Active Panel", async () => {
+  const canvas = renderActivationCanvas();
+  const notes = canvas.rendered.getByTestId("notes-one");
+
+  act(() => notes.focus());
+  await act(async () => {});
+
+  // The standing rule: focus records the DOM-Focused Panel and stops there.
+  assert.equal(canvas.activePanelTitle(), "two");
+  assert.equal(canvas.focusedTestId(), "notes-one");
+  canvas.rendered.unmount();
+});
+
+test("a Canvas that activates on focus follows the user into a retained Panel", async () => {
+  const canvas = renderActivationCanvas({ activateOnFocus: true });
+  const notes = canvas.rendered.getByTestId("notes-one");
+  assert.equal(canvas.activePanelTitle(), "two");
+
+  act(() => notes.focus());
+  await act(async () => {});
+
+  assert.equal(canvas.activePanelTitle(), "one");
+  canvas.rendered.unmount();
+});
+
+test("activating a Panel because focus arrived inside it never moves that focus", async () => {
+  const canvas = renderActivationCanvas({ activateOnFocus: true });
+  const notes = canvas.rendered.getByTestId("notes-one");
+
+  act(() => notes.focus());
+  await act(async () => {});
+
+  // The Panel registered an `initialFocus`, and activation ordinarily hands
+  // focus to it. Not this activation: focus is already inside the Panel, so
+  // sending it anywhere else would take the caret out of the field the user
+  // has just clicked into.
+  assert.equal(canvas.activePanelTitle(), "one");
+  assert.equal(canvas.focusedTestId(), "notes-one");
+
+  // And it is not taken a tick later, once the Workspace has settled.
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  });
+  assert.equal(canvas.focusedTestId(), "notes-one");
+  canvas.rendered.unmount();
+});
+
+test("focus the Canvas restores after a Guarded Transition activates nothing", async () => {
+  const canvas = renderActivationCanvas({ activateOnFocus: true });
+  const { rendered } = canvas;
+  // Draft two has unsaved work, so opening from draft one must guard it.
+  fireEvent.click(rendered.getByTestId("soil-two"));
+
+  const opener = rendered.getByTestId("open-from-one");
+  act(() => opener.focus());
+  await act(async () => {});
+  assert.equal(canvas.activePanelTitle(), "one");
+
+  fireEvent.click(opener);
+  await rendered.findByRole("alertdialog");
+  await act(async () => {
+    fireEvent.click(rendered.getByRole("button", { name: "Discard" }));
+  });
+  await waitFor(() => assert.equal(rendered.queryByRole("alertdialog"), null));
+
+  // Focus went back to the control that started the transition, and that
+  // control is in a Panel which is no longer the active one. The Canvas put it
+  // there, so it is a repair rather than an arrival, and it must not undo the
+  // move the user just made.
+  assert.equal(canvas.activePanelTitle(), "three");
+  rendered.unmount();
+});
+
 function renderDeclaredWidthCanvas() {
   const root = defineRootPanel({ kind: "classes", title: "Classes" });
   const wide = definePanel({

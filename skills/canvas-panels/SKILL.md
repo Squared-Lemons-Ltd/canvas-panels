@@ -88,6 +88,8 @@ Renderers receive only their deeply readonly descriptor and Panel Ref. Fetch ins
 
 **F6 is the only key the Canvas claims.** F6 and Shift+F6 cycle Panel Regions. Tab order is left as the DOM defines it and no arrow or letter shortcut is registered globally — so do not add arrow-key panel navigation "to match"; it will fight the DOM and break the accessibility contract.
 
+**Focus does not select a Panel.** Clicking or tabbing into a retained Panel focuses it and nothing more: it does not become the Active Panel, so it keeps its retained width and every hook that defaults to the Active Panel resolves elsewhere. For master–detail behaviour pass `activateOnFocus` to `Module.Workspace` — it defaults to off — or call `activate` yourself.
+
 **Guards are the package's, not yours.** Report `dirty` through the Panel Editor lifecycle and let the package run the Save / Discard / Stay dialog. Do not write your own `beforeunload` or confirm dialog.
 
 ## Unsaved changes
