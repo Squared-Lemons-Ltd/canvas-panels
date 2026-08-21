@@ -347,6 +347,46 @@ test("each Panel body is its own scroll container beneath a retained header", ()
   }
 });
 
+test("a Panel body rounds with its Panel, whatever rounded the Panel", () => {
+  const { container } = renderCanvas("desktop");
+  const panel = declarationsFor("[data-canvas-panel]");
+  const body = declarationsFor("[data-canvas-panel-body]");
+
+  // The Panel takes its corner from the token.
+  assert.match(panel, /border-radius:\s*var\(--canvas-panel-radius\);/);
+
+  // The body takes its two bottom corners from the *Panel*, and deliberately
+  // not from the token. `[data-canvas-panel]` is a documented attribute, so a
+  // rule an application writes against it is a supported way to round a Panel —
+  // or to square one again below an ancestor that set the token, which is what
+  // a Canvas nested inside a Panel does. Reading `var(--canvas-panel-radius)`
+  // here would follow only the token, leaving a square Panel clipping its
+  // content on a curve; `inherit` follows whatever the Panel actually computed,
+  // from any route.
+  assert.match(body, /border-end-end-radius:\s*inherit;/);
+  assert.match(body, /border-end-start-radius:\s*inherit;/);
+  assert.doesNotMatch(body, /-radius:\s*var\(/);
+
+  // Which holds only while the body is the Panel's own child: `inherit` takes
+  // the parent's computed value, so a wrapper introduced between the two would
+  // hand it some other element's corner and the clipping would silently stop
+  // tracking. Asserted through the attributes rather than by comparing the two
+  // elements, because a failing assertion on a pair of DOM nodes hangs this
+  // runner with no output.
+  for (const element of panels(container)) {
+    const panelBody = element.querySelector("[data-canvas-panel-body]");
+    assert.equal(
+      panelBody.parentElement.hasAttribute("data-canvas-panel"),
+      true,
+      "a Panel body must be the Panel's own child",
+    );
+    assert.equal(
+      panelBody.parentElement.getAttribute("data-canvas-panel-id"),
+      element.getAttribute("data-canvas-panel-id"),
+    );
+  }
+});
+
 test("a Canvas without matchMedia presents the desktop Canvas", () => {
   const originalMatchMedia = dom.window.matchMedia;
   dom.window.matchMedia = undefined;
