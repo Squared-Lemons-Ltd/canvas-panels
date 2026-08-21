@@ -80,7 +80,7 @@ Renderers receive only their deeply readonly descriptor and Panel Ref. Fetch ins
 
 **ESM only.** No CommonJS build and no `require` condition. `require.resolve("@squaredlemons/canvas-panels/core")` fails with `ERR_PACKAGE_PATH_NOT_EXPORTED`, which looks like a packaging fault and is not one.
 
-**Cascade layer order is yours to state.** The stylesheet is one layer named `canvas-panels`, and CSS orders layers by first appearance — so with no `@layer` statement the order falls out of import order, which is a decision nobody made and is wrong in both directions. Declare it once in the entry stylesheet, above every `@import`.
+**Cascade layer order is yours to state.** The stylesheet is one layer named `canvas-panels`, and CSS orders layers by first appearance — so with no `@layer` statement the order falls out of import order, which is a decision nobody made and is wrong in both directions. Declare it once in the entry stylesheet, above every `@import`. Get it wrong and nothing errors: the package's rules are outranked rather than missing, and the symptom is package-rendered controls arriving as bare text with no hit target — the Guarded Transition dialog's Save, Discard and Stay first. That reads as "the package ships no styling", and it is not; check the layer statement before filing it as one.
 
 **Server-safe vs client.** Only `/core`, `/next/server`, and `/testing` are server-safe. Every other subpath carries `"use client"`. Importing `/ui` into a Server Component is the most common Next.js failure here.
 

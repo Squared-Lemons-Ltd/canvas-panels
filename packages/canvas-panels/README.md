@@ -345,6 +345,8 @@ That is the recipe for **Tailwind v4**, whose own layers are `theme`, `base`, `c
 
 Without Tailwind the rule is the same one: put `canvas-panels` **above any reset or preflight layer** — the package styles the Canvas and a reset must not land on top of it — and **below the layers holding the application's own component and utility rules**, so that application styling wins. An application with no layers at all needs no statement: unlayered CSS already beats every layered rule.
 
+**What it looks like when it is wrong.** A reset that lands on top of the Canvas does not announce itself — the package's rules are still there, still valid, and simply outranked. What a consumer sees is package-rendered controls arriving as bare text with no hit target, most visibly the Guarded Transition dialog's Save, Discard, and Stay. That reads as "the package ships no styling for these", and it is not: every one of them is painted from the `--canvas-action-*` tokens in the layer. If a package-rendered control looks unstyled, check the layer statement before anything else.
+
 One rule in the layer is deliberately absolute. The `prefers-reduced-motion` block uses `!important`, and for important declarations the cascade inverts layer order, so it outranks application CSS whether layered or not. That is the only exception; everything else stays overridable as described.
 
 ### Custom properties
