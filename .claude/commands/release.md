@@ -122,7 +122,16 @@ npm dist-tag ls @squaredlemons/canvas-panels
 
 Record the release in `docs/delivery/release-evidence.md` — integrity, shasum, dist-tag, source commit, workflow run, provenance, and what was verified. Check the attestation's subject digest against `dist.integrity`: that is what proves the bytes npm serves are the bytes the workflow built.
 
-**Push the tag yourself.** `changeset publish` creates one inside the runner and nothing pushes it, so it does not exist on the remote. Create it from the attested commit — see step 1 for reading that when `gitHead` is empty — and push it.
+**Check the tag reached the remote.** The workflow now configures a committer identity before publishing, which is what `changeset publish` needs to write its annotated tag at all, and pushes with the remote named — see [#71](https://github.com/Squared-Lemons-Ltd/canvas-panels/issues/71) for why three releases reported a tag and pushed nothing. That fix could only ever be verified by a release, so verify it:
+
+```sh
+git ls-remote --tags origin '@squaredlemons/canvas-panels@<version>'
+```
+
+Record the answer either way, because until one release answers it the fix is unproven:
+
+- **The tag is there.** Say so in the evidence record — that is the acceptance test passing — and close [#71](https://github.com/Squared-Lemons-Ltd/canvas-panels/issues/71) citing this version.
+- **Nothing came back.** It has regressed. Say so in the evidence record, reopen #71 if it was closed, then create the tag from the attested commit — see step 1 for reading that when `gitHead` is empty — and push it by hand as before.
 
 ## Refuse to proceed if
 

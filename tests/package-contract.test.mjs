@@ -14,6 +14,34 @@ import {
 const root = fileURLToPath(new URL("..", import.meta.url));
 const distribution = join(root, "packages/canvas-panels/dist");
 
+/**
+ * The release workflow, and the same source with its comments taken out. The
+ * comments are free to name the triggers, tokens and flags they explain, so
+ * every assertion that forbids something has to read past them to mean
+ * anything. `job` is one job's steps alone: an assertion about the order of
+ * steps within the publishing job is not established by where a string falls
+ * in a two-job file, because a step added to `gate` sits above all of them.
+ */
+async function releaseWorkflow() {
+  const source = await readFile(
+    join(root, ".github/workflows/release.yml"),
+    "utf8",
+  );
+  const executed = source.replace(/^\s*#.*$/gm, "");
+  return {
+    source,
+    executed,
+    job: (name) => {
+      const start = executed.indexOf(`\n  ${name}:\n`);
+      assert.notEqual(start, -1, `release.yml must declare a \`${name}\` job`);
+      const next = executed.slice(start + 1).search(/\n {2}\w[\w-]*:\n/);
+      return next === -1
+        ? executed.slice(start)
+        : executed.slice(start, start + 1 + next);
+    },
+  };
+}
+
 async function readJson(path) {
   return JSON.parse(await readFile(join(root, path), "utf8"));
 }
@@ -1190,15 +1218,8 @@ test("the complete Package Gate is one command, and it is what CI runs", async (
 });
 
 test("only the release workflow can publish, and it holds no publish token", async () => {
-  const release = await readFile(
-    join(root, ".github/workflows/release.yml"),
-    "utf8",
-  );
+  const { source: release, executed } = await releaseWorkflow();
   const workflows = await collectFiles(join(root, ".github/workflows"));
-  // What the workflow actually does, with the comments taken out: they are free
-  // to name the triggers and the tokens they explain, and every assertion below
-  // that forbids something has to read past them to mean anything.
-  const executed = release.replace(/^\s*#.*$/gm, "");
 
   // Exactly one workflow publishes, and it is reachable only from `main`.
   const publishing = [];
@@ -1272,6 +1293,64 @@ test("only the release workflow can publish, and it holds no publish token", asy
   assert.doesNotMatch(executed, /pull-requests:/);
   assert.doesNotMatch(executed, /version:\s*pnpm release:version/);
   assert.match(executed, /run:\s*pnpm release:publish/);
+});
+
+test("the release tag is written, proved, and pushed to a named remote", async () => {
+  // Three releases in a row reported a tag and pushed nothing. `changeset
+  // publish` writes an *annotated* tag — `git tag <name> -m <name>`,
+  // deliberately, so `--follow-tags` would work — and an annotated tag needs a
+  // committer identity. A GitHub-hosted runner has none: `actions/checkout`
+  // sets `http.extraheader`, `safe.directory` and `gc.auto` and no identity,
+  // and git's hostname fallback derives `runner@<host>.(none)`, which it
+  // refuses. `git tag` then exits 128 having written nothing — invisibly,
+  // because `@changesets/cli` prints `New tag:` *before* calling git and
+  // discards the boolean it returns, and captures stderr rather than
+  // inheriting it. `git push --tags` finds nothing to send, says
+  // `Everything up-to-date`, and the job stays green. See
+  // https://github.com/Squared-Lemons-Ltd/canvas-panels/issues/71.
+  const { executed, job } = await releaseWorkflow();
+  // Read within the publishing job alone. Across the whole file an identity
+  // configured in `gate` would satisfy "before the publish" while the job that
+  // writes the tag still had none — which is this bug, passing.
+  const publishing = job("release");
+
+  const nameAt = publishing.search(/git config user\.name/);
+  const emailAt = publishing.search(/git config user\.email/);
+  const publishAt = publishing.search(/pnpm release:publish/);
+  const listAt = publishing.search(/git tag --list '@squaredlemons\/\*'/);
+  const pushAt = publishing.search(/git push .*--tags/);
+
+  for (const [step, at] of [
+    ["git config user.name", nameAt],
+    ["git config user.email", emailAt],
+    ["pnpm release:publish", publishAt],
+    ["git tag --list '@squaredlemons/*'", listAt],
+    ["git push origin --tags", pushAt],
+  ]) {
+    assert.notEqual(at, -1, `the publishing job must run \`${step}\``);
+  }
+
+  // The identity exists before the publish that writes the tag, which is the
+  // fix itself: after it, the tag has already failed to be written.
+  assert.ok(
+    nameAt < publishAt && emailAt < publishAt,
+    "the identity must be set before `pnpm release:publish` writes the tag",
+  );
+
+  // And the tag is read off git between being written and being pushed, so a
+  // release that tags nothing says so in the log rather than being inferred
+  // from Changesets' `New tag:` line, which prints either way.
+  assert.ok(
+    publishAt < listAt && listAt < pushAt,
+    "`git tag --list` must run between the publish and the push",
+  );
+
+  // `actions/checkout` leaves a detached HEAD, so the push names its remote
+  // rather than relying on an upstream that is not configured. `--follow-tags`
+  // is not an alternative anywhere in this workflow: it pushes annotated tags
+  // reachable from a pushed commit, and this job pushes no commit.
+  assert.match(publishing, /git push origin --tags/);
+  assert.doesNotMatch(executed, /--follow-tags/);
 });
 
 test("the repository distributes exactly one skill, and it is the consumer's", async () => {

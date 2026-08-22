@@ -126,7 +126,7 @@ The same two gaps as `0.2.1` and `0.3.0`. **Three for three**, so they are prope
 
 It is invisible twice over: `@changesets/cli` prints `New tag:` *before* calling git and discards the boolean it returns, and `spawndamnit` captures stderr rather than inheriting it, so the `fatal:` never reaches the workflow log. `git push --tags` then has nothing to send, reports `Everything up-to-date`, and the job stays green. The log line proves only that Changesets intended a tag.
 
-The fix is a git identity in the publish job before `pnpm release:publish`, and it cannot be verified before it runs, because the failing condition exists only on the runner. Tracked in [#71](https://github.com/Squared-Lemons-Ltd/canvas-panels/issues/71), where the evidence and the acceptance test are recorded.
+**Fixed after this release, unverified until the next one.** The publish job now configures a committer identity before `pnpm release:publish`, lists `@squaredlemons/*` tags between the publish and the push so the tag is proved rather than inferred, and names the remote on the push. The failing condition exists only on the runner, so nothing here can verify it: the acceptance test is that the next version's tag reaches the remote with nobody pushing it. Tracked in [#71](https://github.com/Squared-Lemons-Ltd/canvas-panels/issues/71).
 
 **An earlier version of this record said the identity explanation had been ruled out by direct test. That was wrong**, and is corrected here rather than quietly dropped: the test ran on a machine where git could auto-derive an identity, so it never exercised the failing condition and proved only that annotated tags work when an identity exists. Re-run with `user.useConfigOnly=true`, `git tag <name> -m <name>` exits 128 and writes no tag.
 
