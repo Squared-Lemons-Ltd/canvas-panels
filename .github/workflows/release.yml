@@ -128,6 +128,24 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # `changeset publish` writes an *annotated* tag — `git tag <name> -m <name>`,
+      # deliberately, so that a `--follow-tags` push would carry it — and an
+      # annotated tag requires a committer identity. A GitHub-hosted runner has
+      # none: `actions/checkout` sets `http.extraheader`, `safe.directory` and
+      # `gc.auto` and no identity, and git's hostname fallback derives
+      # `runner@<host>.(none)`, which git refuses rather than accepts. `git tag`
+      # then exits 128 having written nothing — and invisibly, because
+      # `@changesets/cli` prints `New tag:` *before* calling git and discards the
+      # boolean it returns, and captures stderr rather than inheriting it. The
+      # push that followed had nothing to send, reported `Everything up-to-date`,
+      # and the job stayed green. That is `0.2.1`, `0.3.0` and `0.4.0`, each
+      # tagged by hand afterwards. The evidence, and the acceptance test, are in
+      # https://github.com/Squared-Lemons-Ltd/canvas-panels/issues/71.
+      - name: Give git an identity, so the release tag can be written
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
       # `changesets/action` is deliberately not used. It does not branch on
       # whether a `version:` step was configured — it branches on whether a
       # Changeset is pending, and with one present it always takes the
@@ -147,8 +165,20 @@ jobs:
       - name: Publish
         run: pnpm release:publish
 
+      # Whether the tag exists is now read off git rather than inferred from
+      # Changesets' `New tag:` line, which is printed whether or not the tag was
+      # written. `fetch-depth: 0` brings the earlier release tags with it, so
+      # this lists those too — what it answers is whether the version just
+      # published is among them. An unchanged version publishes nothing and tags
+      # nothing, so a list without a new entry is not a failure; a list that
+      # never gains one across a release is this bug returning.
+      - name: List the release tags, so a missing one is visible
+        run: git tag --list '@squaredlemons/*'
+
       # `changeset publish` writes a git tag per published version and nothing
-      # pushes them by itself. Nothing to push is not a failure: an unchanged
-      # version publishes nothing and tags nothing.
+      # pushes them by itself. The remote is named because `actions/checkout`
+      # leaves a detached HEAD with no upstream, and the push is `--tags` rather
+      # than `--follow-tags`: that flag pushes annotated tags reachable from a
+      # pushed commit, and this job pushes no commit.
       - name: Push the release tags
-        run: git push --tags
+        run: git push origin --tags
