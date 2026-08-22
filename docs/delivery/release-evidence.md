@@ -59,6 +59,58 @@ node --input-type=module -e '
 
 `pnpm pack:check` already does the equivalent against the local tarball for every subpath, both consumers, and a Next production build. The commands above are the part it cannot do: proving that the *registry* holds the same bytes, and that an install with no workspace resolution reaches them.
 
+## 0.4.1
+
+One shipped change, and the first release whose tag reached the remote without anyone pushing it — which is what makes this record the acceptance test for [#71](https://github.com/Squared-Lemons-Ltd/canvas-panels/issues/71) rather than another entry describing the same gap.
+
+| Field | Value |
+| --- | --- |
+| Version | `0.4.1` |
+| Tarball | `squaredlemons-canvas-panels-0.4.1.tgz` |
+| Integrity, as published | `sha512-ML8pZsfD//NSME7zBytX9bzM2KIFXtB8vZr+7X4khjoe3O8Im873/6cS8N2jwXfZcgoeFgBaiNAZS14/6D43CQ==` |
+| Shasum, as published | `c904b7674f5316b765425e81f21392a36c3eb226` |
+| Integrity, local pack | `sha512-fj7NNMMp1VnlZCOv+kgEjS25DKRByCoUDxzqc20eAeuAx6n0CkhVkFzYVV3vfiPrg8UDvCNZn2vJXfn7uy21Yw==` (`f8a58a22…`) — differs only by the Changesets `package.json` rewrite; see "How to reproduce" |
+| Packed size | 52 entries, 151,460 bytes packed, 654,934 bytes unpacked |
+| Registry | Public npm, `https://registry.npmjs.org` |
+| Licence | MIT, shipped in the tarball |
+| Provenance | **Attested.** `https://slsa.dev/provenance/v1` plus npm's publish attestation, naming workflow `.github/workflows/release.yml` on `refs/heads/main` and source commit `caab69ac…` |
+| Visibility | Public |
+| dist-tag | `latest`; `next` left on `0.2.0-rc.0` |
+| Source commit | `caab69ac6d404370de601bfc0abd858a093f16cc`, tagged `@squaredlemons/canvas-panels@0.4.1` — **by the workflow** |
+| Workflow run | [32558350298](https://github.com/Squared-Lemons-Ltd/canvas-panels/actions/runs/32558350298), 22 August 2026 |
+| Toolchain | Node 22.23.2 in the publish job, npm `^11.5.1` installed in the job, pnpm 9.15.9; gate additionally on Node 24.19.0 |
+| Gate | `pnpm gate` passed on the cut commit and again in CI: 474 contract tests, 3 packed-consumer tests, 0 failures, on Node 22 and Node 24 |
+
+### What shipped
+
+Patch, and documentation only — no behaviour changed and no rule moved:
+
+- **The README says what a wrong cascade-layer order looks like.** It already gave the layer statement and said that importing the stylesheet first sorts `canvas-panels` below an application's reset; what it did not say is what that produces on screen. The failure is silent — the package's rules are present and valid, merely outranked — and what a consumer sees is package-rendered controls arriving as bare text with no hit target, the Guarded Transition dialog's Save, Discard and Stay most visibly, those being the controls an application is least likely to have styled itself. That reads as "the package ships no styling for these", and it had been reported as a missing default. The "Theming" section now names the symptom and says to check the layer statement first. The shipped skill carries the same paragraph, so an agent meets it before it debugs it.
+
+### The tag reached the remote, and #71 is closed
+
+**This is the first release where nothing was done by hand.** `0.2.1`, `0.3.0` and `0.4.0` each reported a tag the workflow then failed to push, and each was tagged and pushed manually afterwards. The cause was established in [#71](https://github.com/Squared-Lemons-Ltd/canvas-panels/issues/71) and fixed in `733e8cd`, which shipped to nobody and so carried no changeset. It could only ever be proven by a release; this is that release.
+
+What the run shows, in order:
+
+- The identity step ran: `git config user.name "github-actions[bot]"`, `git config user.email "41898282+github-actions[bot]@users.noreply.github.com"`.
+- `changeset publish` logged `🦋 New tag: @squaredlemons/canvas-panels@0.4.1` at `07:01:51.914Z` — the same line it logged on all three failures, which is why it was never evidence of anything.
+- **The new listing step then read the tag off git**, printing `0.2.0`, `0.2.1`, `0.3.0`, `0.4.0` *and* `0.4.1`. This is the line the previous releases could not have produced.
+- `git push origin --tags` reported `* [new tag] @squaredlemons/canvas-panels@0.4.1`, not the `Everything up-to-date` of the three before it.
+
+Confirmed from outside the runner: `git ls-remote --tags origin` lists the tag, it dereferences to `caab69ac…`, and the annotated tag object's tagger is `github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>` — the identity the fix supplied, which is what an annotated tag could not be written without.
+
+`gitHead` is still empty, which is the separate Changesets/npm behaviour recorded against each release rather than tracked as a fault. The tie to source is now twofold: the signed attestation, and — for the first time from the workflow — the tag.
+
+### Verified against the registry
+
+Run on 22 August 2026, unauthenticated — the package is public:
+
+- `npm view` reports `dist.integrity sha512-ML8pZsfD…` and `dist.shasum c904b767…`, matching the row above, with `latest` resolving to `0.4.1` and `next` still on `0.2.0-rc.0`.
+- **The attestation covers the bytes npm serves.** Both the SLSA provenance and npm's publish attestation carry a subject digest of `30bf2966c7c3fff3…`, which is exactly what the published `dist.integrity` decodes to, and the provenance names source commit `caab69ac…` — the commit the tag points at. So the tarball on the registry is the one the workflow built, from the commit this record names, in run 32558350298.
+- The published tarball was downloaded and compared against a local pack of the same tree: `diff -r` over `dist/` is **empty**, the file lists are identical, and `package.json` is semantically equal — `scripts` moved to the end and the trailing newline dropped, the Changesets rewrite seen at `0.1.0`, `0.2.1`, `0.4.0` and now confirmed a fourth time.
+- A clean consumer outside this workspace — `npm init`, then `npm add @squaredlemons/canvas-panels@0.4.1 react@^19 react-dom@^19` with no `.npmrc` and no token — installed it, recorded `sha512-ML8pZsfD…` in its own lockfile, resolved `/core` and `styles.css`, and `npm audit signatures` verified 4 registry signatures and 3 attestations.
+
 ## 0.4.0
 
 Five reports from two external adoptions on `0.3.0` — PodMule across 16 Canvas Workspaces, and a ~40-host admin migration — implemented in four worktrees behind four separate gates, merged into one branch, and released together. Four additions to the Public Contract; nothing removed, nothing narrowed, and the `0.x` allowance for a breaking change in a minor unused.
@@ -126,7 +178,7 @@ The same two gaps as `0.2.1` and `0.3.0`. **Three for three**, so they are prope
 
 It is invisible twice over: `@changesets/cli` prints `New tag:` *before* calling git and discards the boolean it returns, and `spawndamnit` captures stderr rather than inheriting it, so the `fatal:` never reaches the workflow log. `git push --tags` then has nothing to send, reports `Everything up-to-date`, and the job stays green. The log line proves only that Changesets intended a tag.
 
-**Fixed after this release, unverified until the next one.** The publish job now configures a committer identity before `pnpm release:publish`, lists `@squaredlemons/*` tags between the publish and the push so the tag is proved rather than inferred, and names the remote on the push. The failing condition exists only on the runner, so nothing here can verify it: the acceptance test is that the next version's tag reaches the remote with nobody pushing it. Tracked in [#71](https://github.com/Squared-Lemons-Ltd/canvas-panels/issues/71).
+**Fixed after this release, and proven by `0.4.1`.** The publish job now configures a committer identity before `pnpm release:publish`, lists `@squaredlemons/*` tags between the publish and the push so the tag is proved rather than inferred, and names the remote on the push. The failing condition exists only on the runner, so nothing at the time could verify it; the acceptance test was that the next version's tag reach the remote with nobody pushing it, and `0.4.1` did. [#71](https://github.com/Squared-Lemons-Ltd/canvas-panels/issues/71) is closed.
 
 **An earlier version of this record said the identity explanation had been ruled out by direct test. That was wrong**, and is corrected here rather than quietly dropped: the test ran on a machine where git could auto-derive an identity, so it never exercised the failing condition and proved only that annotated tags work when an identity exists. Re-run with `user.useConfigOnly=true`, `git tag <name> -m <name>` exits 128 and writes no tag.
 
