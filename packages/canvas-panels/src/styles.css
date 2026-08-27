@@ -403,7 +403,7 @@
     vertical-align: -0.125em;
   }
 
-  /* Each Panel body scrolls on its own so headers stay visible. */
+  /* Each Panel body scrolls vertically on its own so headers stay visible. */
   [data-canvas-panel-body] {
     /*
      * The two corners the body shares with the Panel. A scroll container clips
@@ -426,8 +426,19 @@
     border-end-start-radius: inherit;
     flex: 1 1 auto;
     min-height: 0;
+    /*
+     * A Panel body is a vertical surface. Hiding horizontal overflow keeps
+     * even an oversized renderer from becoming the gesture's horizontal
+     * scroll target; that gesture belongs to the Panel Stack around it.
+     */
+    overflow-x: hidden;
     overflow-y: auto;
-    overscroll-behavior: contain;
+    /*
+     * Contain only the vertical axis. Containing both axes here would swallow
+     * a horizontal trackpad gesture at the body's boundary instead of chaining
+     * it to the horizontally scrolling Canvas.
+     */
+    overscroll-behavior-y: contain;
     padding: var(--canvas-body-padding);
     /*
      * The containing block for what the body holds, so the scroll it already
@@ -548,6 +559,15 @@
     [data-canvas-panel][data-active] {
       border-right: 0;
       flex-basis: 100%;
+    }
+
+    /*
+     * The one-Panel presentation has no horizontal Stack to hand a gesture to,
+     * so retain the body's previous two-axis overflow and containment there.
+     */
+    [data-canvas-panel-body] {
+      overflow-x: auto;
+      overscroll-behavior: contain;
     }
   }
 

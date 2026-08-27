@@ -723,7 +723,7 @@ test("the --canvas-* defaults are inherited, so an ancestor can theme the Canvas
   }
 });
 
-test("a Panel contains what it holds, and the Canvas scrolls on one axis", () => {
+test("a Panel contains what it holds, and each surface owns its scroll axis", () => {
   const own = (selector) =>
     stylesheetRules.find(
       (rule) => rule.selector === selector && rule.at.length === 1,
@@ -731,8 +731,16 @@ test("a Panel contains what it holds, and the Canvas scrolls on one axis", () =>
   const application = own("[data-canvas-application]");
   const body = own("[data-canvas-panel-body]");
   const header = own("[data-canvas-panel-header]");
+  const mobileBody = stylesheetRules.find(
+    ({ at, selector }) =>
+      selector === "[data-canvas-panel-body]" &&
+      at.includes("@media (max-width: 47.999rem)"),
+  );
 
-  assert.ok(application && body && header, "the Canvas chrome must be styled");
+  assert.ok(
+    application && body && header && mobileBody,
+    "the Canvas chrome must be styled",
+  );
 
   // An absolutely positioned descendant is laid out against the nearest
   // positioned ancestor. Without these that is the Panel, so a body's own
@@ -748,7 +756,14 @@ test("a Panel contains what it holds, and the Canvas scrolls on one axis", () =>
   // the top of the frame. Vertical scrolling belongs to each Panel body.
   assert.match(application.declarations, /overflow-x:\s*auto;/);
   assert.match(application.declarations, /overflow-y:\s*hidden;/);
+  assert.match(application.declarations, /overscroll-behavior-x:\s*contain;/);
+  assert.match(body.declarations, /overflow-x:\s*hidden;/);
   assert.match(body.declarations, /overflow-y:\s*auto;/);
+  assert.match(body.declarations, /overscroll-behavior-y:\s*contain;/);
+  assert.doesNotMatch(body.declarations, /overscroll-behavior:\s*contain;/);
+  assert.doesNotMatch(body.declarations, /overscroll-behavior-x:/);
+  assert.match(mobileBody.declarations, /overflow-x:\s*auto;/);
+  assert.match(mobileBody.declarations, /overscroll-behavior:\s*contain;/);
 });
 
 test("every surface the package paints answers to a --canvas-* token", () => {
