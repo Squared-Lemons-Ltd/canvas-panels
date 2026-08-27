@@ -59,6 +59,44 @@ node --input-type=module -e '
 
 `pnpm pack:check` already does the equivalent against the local tarball for every subpath, both consumers, and a Next production build. The commands above are the part it cannot do: proving that the *registry* holds the same bytes, and that an install with no workspace resolution reaches them.
 
+## 0.5.0
+
+One addition to the Public Contract, fixing the scroll surface a horizontal gesture owns when it begins over a Panel body.
+
+| Field | Value |
+| --- | --- |
+| Version | `0.5.0` |
+| Tarball | `squaredlemons-canvas-panels-0.5.0.tgz` |
+| Integrity, as published | `sha512-C1rqZ/QVnd6lwrH2l1S2nAxFw+rvz6KlgFIL0tzeafYCQYWYxgM/Zbi/xZT0vpOQP/DIZIXfGdc85FwbSu9VZQ==` |
+| Shasum, as published | `1babb4f4be53009c12de7381ebe833ced8f5cd3a` |
+| Integrity, local pack | `sha512-3WcxdxjWnNoiVi6hHHvn6OEvfl66GhVzlHoUupXfExcyLxPXikUX8geRpbBkOlnHUXb3QYBdXv2i5xCy7o4b0w==` (`dd673177…`) — differs only by the Changesets `package.json` rewrite; see "How to reproduce" |
+| Packed size | 52 entries, 153,804 bytes packed, 656,224 bytes unpacked |
+| Registry | Public npm, `https://registry.npmjs.org` |
+| Licence | MIT, shipped in the tarball |
+| Provenance | **Attested.** `https://slsa.dev/provenance/v1` plus npm's publish attestation, naming workflow `.github/workflows/release.yml` on `refs/heads/main` and source commit `daf2d1e2…` |
+| Visibility | Public |
+| dist-tag | `latest`; `next` left on `0.2.0-rc.0` |
+| Source commit | `daf2d1e2671bfb988e9e26d8d20de6b11d834b1c`, tagged `@squaredlemons/canvas-panels@0.5.0` by the workflow |
+| Workflow run | [33056165630](https://github.com/Squared-Lemons-Ltd/canvas-panels/actions/runs/33056165630), 27 August 2026 |
+| Toolchain | Node 22.23.2 in the publish job, npm `^11.5.1` installed in the job, pnpm 9.15.9; gate additionally on Node 24.19.0 |
+| Gate | `pnpm gate` passed on the cut commit and in CI: 475 contract tests, 3 packed-consumer tests, 0 failures, on Node 22 and Node 24. The first Node 22 CI attempt had one browser-gesture assertion time out while the same test passed locally and on Node 24; rerunning the failed gate passed all 475 before publishing. |
+
+### What shipped
+
+Minor, adding one documented behaviour to the Public Contract ([#75](https://github.com/Squared-Lemons-Ltd/canvas-panels/issues/75)):
+
+- **Gesture direction now chooses the scroll surface wherever the pointer is over a visible Panel.** In the desktop and tablet Panel Stack presentations, a horizontal trackpad or wheel gesture over a Panel body chains to the horizontally scrolling Canvas, while a vertical gesture continues to scroll that body beneath its fixed header. Horizontal overscroll remains contained at the outer Canvas boundary, and the one-Panel mobile presentation retains its previous two-axis body overflow and containment.
+
+### Verified against the registry
+
+Run on 27 August 2026, unauthenticated:
+
+- `npm view` reports the integrity and shasum above; `latest` resolves to `0.5.0` and `next` remains on `0.2.0-rc.0`. `gitHead` is empty, so the signed provenance and annotated tag provide the source tie.
+- Both the SLSA provenance and npm publish attestation carry the subject digest `0b5aea67f4159dde…`, exactly the hexadecimal value obtained by decoding the published `dist.integrity`. The provenance names source commit `daf2d1e2…`.
+- The workflow-created annotated tag reached the remote and dereferences to `daf2d1e2…`.
+- The published tarball and a local pack contain the same 52 files. `diff -r` over `dist/` is empty; only `package.json` differs, and sorting both JSON documents proves their fields and values are identical.
+- A clean consumer outside the workspace installed `@squaredlemons/canvas-panels@0.5.0` with React 19, recorded the published integrity in its lockfile, exercised `/core`, resolved `styles.css`, and reported 4 verified registry signatures and 3 verified attestations.
+
 ## 0.4.1
 
 One shipped change, and the first release whose tag reached the remote without anyone pushing it — which is what makes this record the acceptance test for [#71](https://github.com/Squared-Lemons-Ltd/canvas-panels/issues/71) rather than another entry describing the same gap.
