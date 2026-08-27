@@ -475,6 +475,8 @@ A Panel Instance ID is numbered from one **within its own Panel Engine**, and th
 
 The Declared Breakpoints are `mobile`, `tablet`, and `desktop`. Their media queries are exported as `canvasBreakpointQueries` from both `@squaredlemons/canvas-panels/core` and `@squaredlemons/canvas-panels/ui`, so an application can align its own layout with the presentation the Canvas selects. A Declared Breakpoint changes presentation only: it never alters Panel instances, logical order, the Active Panel, the Stack Version, or transition history. Environments without `matchMedia` — servers and pre-hydration renders — present the desktop Canvas, which the stylesheet mirrors so the first paint never flashes the wrong presentation.
 
+In the desktop and tablet Panel Stack presentations, gesture direction chooses the scroll surface wherever the pointer is over a visible Panel. A horizontal trackpad or wheel gesture pans the whole Stack, including when it starts over a Panel body; a vertical gesture over a body scrolls that body while its header stays fixed. The Canvas contains horizontal overscroll at the Stack boundary, so the same gesture does not escape into browser history or the surrounding page. The one-Panel mobile presentation is unchanged.
+
 ## Next.js
 
 A deep link is decoded on the server and seeded before the first client render, so the full contextual stack is present rather than flashing the Root Panel.
