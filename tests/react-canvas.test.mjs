@@ -1693,6 +1693,63 @@ test("a Context Signal is compared one level deep, so cycles are safe and rebuil
   rendered.unmount();
 });
 
+test("an inline visual title updates without keeping the Panel renderer alive", async () => {
+  const root = defineRootPanel({ kind: "root", title: "Home" });
+  let renders = 0;
+  let Canvas;
+
+  function RootRenderer() {
+    renders += 1;
+    if (renders > 10) {
+      throw new Error("inline visual title kept the Panel renderer alive");
+    }
+    const [revision, setRevision] = useState(1);
+    Canvas.useHeader({
+      visualTitle: createElement("strong", null, `Revision ${revision}`),
+    });
+    return createElement(
+      "button",
+      { onClick: () => setRevision(2), type: "button" },
+      "Update title",
+    );
+  }
+
+  Canvas = createCanvasModule({
+    root,
+    panels: [],
+    renderers: { root: RootRenderer },
+  });
+  const rendered = render(
+    createElement(
+      Canvas.Provider,
+      null,
+      createElement(Canvas.Workspace, { label: "Inline title" }),
+    ),
+  );
+
+  await waitFor(() =>
+    assert.equal(
+      rendered.container.querySelector("[data-canvas-visual-title]")
+        ?.textContent,
+      "Revision 1",
+    ),
+  );
+  const settledAfterMount = renders;
+  await act(async () => {});
+  assert.equal(renders, settledAfterMount);
+
+  fireEvent.click(rendered.getByRole("button", { name: "Update title" }));
+  await waitFor(() =>
+    assert.equal(
+      rendered.container.querySelector("[data-canvas-visual-title]")
+        ?.textContent,
+      "Revision 2",
+    ),
+  );
+  assert.ok(renders <= settledAfterMount + 1);
+  rendered.unmount();
+});
+
 test("a registered visual title replaces the heading rather than printing beside it", () => {
   const editor = definePanel({ kind: "editor", title: ({ name }) => name });
   let Canvas;

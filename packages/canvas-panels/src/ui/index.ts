@@ -205,25 +205,25 @@ export type CanvasActionProps =
   | CanvasActionContentProps;
 
 /**
- * Where an Action's application-supplied render — a content Action's content,
- * or a button Action's icon — lives between the Panel body that produced it
- * and the header that shows it.
+ * Where application-supplied header content — a visual title, a content
+ * Action's content, or a button Action's icon — lives between the Panel body
+ * that produced it and the header that shows it.
  *
  * Application content is a new element on every render, so putting it in the
- * registration itself would re-register the Action every time the application
- * re-rendered — the Workspace's action map is keyed on registration identity,
- * and a ticking readout would churn it once a second. The registration holds
- * this store instead: its identity never moves, the header subscribes to it,
- * and only the one header slot re-renders.
+ * registration itself would re-register its owner every time the application
+ * re-rendered — the Workspace's maps are keyed on registration identity, and
+ * a ticking readout or inline title would churn them indefinitely. The
+ * registration holds this store instead: its identity never moves, the header
+ * subscribes to it, and only the one header slot re-renders.
  */
 type HeaderContentStore = Readonly<{
   subscribe: (listener: () => void) => () => void;
-  read: () => CanvasActionContent;
-  write: (content: CanvasActionContent) => void;
+  read: () => ReactNode;
+  write: (content: ReactNode) => void;
 }>;
 
 function createHeaderContentStore(): HeaderContentStore {
-  let content: CanvasActionContent = null;
+  let content: ReactNode = null;
   const listeners = new Set<() => void>();
   return Object.freeze({
     subscribe: (listener: () => void) => {
@@ -233,7 +233,7 @@ function createHeaderContentStore(): HeaderContentStore {
       };
     },
     read: () => content,
-    write: (next: CanvasActionContent) => {
+    write: (next: ReactNode) => {
       if (Object.is(next, content)) return;
       content = next;
       for (const listener of listeners) listener();
@@ -887,7 +887,7 @@ export function createCanvasModule<
     ((lifecycle: PanelLifecycle) => () => void) | null
   >(null);
   type HeaderRegistration = Readonly<{
-    visualTitle?: ReactNode;
+    visualTitle?: HeaderContentStore;
     dirtyLabel?: string;
     initialFocus?: RefObject<HTMLElement | null>;
     fallbackFocus?: RefObject<HTMLElement | null>;
@@ -997,9 +997,13 @@ export function createCanvasModule<
     if (!scope)
       throw new Error("Canvas header hooks must run inside a Panel renderer");
     const { visualTitle } = header;
+    const [store] = useState(createHeaderContentStore);
+    useLayoutEffect(() => {
+      store.write(visualTitle);
+    }, [store, visualTitle]);
     useEffect(
-      () => scope.registerHeader({ visualTitle }),
-      [scope, visualTitle],
+      () => scope.registerHeader({ visualTitle: store }),
+      [scope, store],
     );
   }
 
@@ -1469,6 +1473,48 @@ export function createCanvasModule<
             action.description,
           ),
     );
+  }
+
+  function HeaderVisualTitle({
+    panelTitle,
+    stores,
+  }: Readonly<{
+    panelTitle: string;
+    stores: readonly HeaderContentStore[];
+  }>) {
+    const subscribe = useCallback(
+      (listener: () => void) => {
+        const unsubscribers = stores.map((store) => store.subscribe(listener));
+        return () => {
+          for (const unsubscribe of unsubscribers) unsubscribe();
+        };
+      },
+      [stores],
+    );
+    const read = useCallback(
+      () =>
+        [...stores]
+          .reverse()
+          .map((store) => store.read())
+          .find((visualTitle) => visualTitle !== undefined),
+      [stores],
+    );
+    const visualTitle = useSyncExternalStore(subscribe, read, read);
+    return visualTitle === undefined
+      ? panelTitle
+      : createElement(
+          Fragment,
+          null,
+          createElement("span", { "data-canvas-panel-title": "" }, panelTitle),
+          createElement(
+            "span",
+            {
+              "aria-hidden": true,
+              "data-canvas-visual-title": "",
+            },
+            visualTitle,
+          ),
+        );
   }
 
   /**
@@ -2312,11 +2358,9 @@ export function createCanvasModule<
               const headers = [
                 ...(headerRegistrations.get(panel.instanceId)?.values() ?? []),
               ];
-              const visualTitle = [...headers]
-                .reverse()
-                .find(
-                  ({ visualTitle }) => visualTitle !== undefined,
-                )?.visualTitle;
+              const visualTitleStores = headers.flatMap(({ visualTitle }) =>
+                visualTitle === undefined ? [] : [visualTitle],
+              );
               const dirtyLabel = dirtyPanelIds.has(panel.instanceId)
                 ? [...headers]
                     .reverse()
@@ -2412,24 +2456,12 @@ export function createCanvasModule<
                   createElement(
                     "h2",
                     { id: headingId, tabIndex: -1 },
-                    ...(visualTitle === undefined
-                      ? [panel.title]
-                      : [
-                          createElement(
-                            "span",
-                            { "data-canvas-panel-title": "", key: "title" },
-                            panel.title,
-                          ),
-                          createElement(
-                            "span",
-                            {
-                              "aria-hidden": true,
-                              "data-canvas-visual-title": "",
-                              key: "visual-title",
-                            },
-                            visualTitle,
-                          ),
-                        ]),
+                    visualTitleStores.length === 0
+                      ? panel.title
+                      : createElement(HeaderVisualTitle, {
+                          panelTitle: panel.title,
+                          stores: visualTitleStores,
+                        }),
                   ),
                   dirtyLabel === undefined
                     ? null
