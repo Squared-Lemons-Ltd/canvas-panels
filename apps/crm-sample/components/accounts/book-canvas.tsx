@@ -783,14 +783,11 @@ function AccountPanel({
    * The stylesheet puts the span before the heading; see `[data-canvas-visual-
    * title]` in `globals.css`.
    *
-   * Memoised because `useHeader` re-registers whenever the node's identity
-   * changes, and a fresh element every render would never settle.
+   * `useHeader` holds the node in a stable header-content store, so the natural
+   * inline element updates this one heading slot without re-registering it.
    */
   BookCanvas.useHeader({
-    visualTitle: useMemo(
-      () => (company ? <HealthMark health={company.health} /> : undefined),
-      [company],
-    ),
+    visualTitle: company ? <HealthMark health={company.health} /> : undefined,
   });
 
   BookCanvas.useContextSignal(
