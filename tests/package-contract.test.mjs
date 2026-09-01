@@ -996,6 +996,20 @@ test("the README states the two rules a button Action's icon and description tur
   );
 });
 
+test("the README states the visible and DOM-text boundaries of an Action description", async () => {
+  const readme = await readFile(
+    join(root, "packages/canvas-panels/README.md"),
+    "utf8",
+  );
+
+  assert.match(readme, /supplies the announced half only/);
+  assert.match(readme, /does not render a visible explanation/);
+  assert.match(readme, /one application-owned source/);
+  assert.match(readme, /`button\.textContent` includes the hidden description/);
+  assert.match(readme, /a markup snapshot includes its element/);
+  assert.match(readme, /button's own text nodes/);
+});
+
 test("the README says that focus does not imply Activation, and names the option that changes it", async () => {
   const readme = await readFile(
     join(root, "packages/canvas-panels/README.md"),
@@ -1009,8 +1023,13 @@ test("the README says that focus does not imply Activation, and names the option
   // asserted against the built package in tests/react-canvas.test.mjs.
   assert.match(readme, /\*\*Focus does not imply Activation\.\*\*/);
   assert.match(readme, /`activateOnFocus` defaults to `false`/);
+  assert.match(
+    readme,
+    /a primary pointer press anywhere inside a retained Panel makes it the Active Panel/,
+  );
   // And the accessibility half, which is the part a host cannot re-derive:
-  // activating because focus arrived must not then move that focus.
+  // activating because focus arrived or the user pressed the Panel must not
+  // then move that focus.
   assert.match(readme, /never moves focus/);
 });
 

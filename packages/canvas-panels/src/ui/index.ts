@@ -505,13 +505,14 @@ export type CanvasWorkspaceProps = Readonly<{
    */
   sizing?: PanelSizingBounds;
   /**
-   * Whether focus arriving inside a retained Panel makes it the Active Panel.
+   * Whether a primary pointer press within a retained Panel, or focus arriving
+   * inside it on its own, makes it the Active Panel.
    *
    * Defaults to `false`, which is the Canvas's standing rule: focus records
    * the DOM-Focused Panel and nothing else, so a Panel becomes active only
-   * when something navigates or calls `activate`. Turn it on for a Canvas
-   * that should behave like a master–detail UI, where clicking or tabbing
-   * into a column selects it.
+   * when something navigates or calls `activate`. Turn it on for a Canvas that
+   * should behave like a master–detail UI, where pressing or tabbing into a
+   * column selects it.
    *
    * Only focus that arrives on its own counts. Focus the Canvas itself places
    * — restoring it after a Guarded Transition, rescuing it out of a Panel the
@@ -519,9 +520,10 @@ export type CanvasWorkspaceProps = Readonly<{
    * activates nothing, because the Canvas put it there. Neither does focus
    * that reaches a Panel behind an open Guarded Transition dialog.
    *
-   * Activating this way never moves focus: the Panel already has it, so the
-   * one claim activation makes on focus is settled where it stands rather
-   * than sent to that Panel's `initialFocus`.
+   * Activating this way never moves focus: focus either stays where it already
+   * was after a press on Panel chrome, follows the browser into a pressed
+   * control, or is already inside the Panel after Tab or F6. The activation's
+   * claim is settled there rather than sent to that Panel's `initialFocus`.
    */
   activateOnFocus?: boolean;
 }>;
@@ -2381,6 +2383,24 @@ export function createCanvasModule<
                   left.id.localeCompare(right.id),
               );
 
+              const activatePanelWithoutMovingFocus = () => {
+                if (
+                  !activateOnFocus ||
+                  active ||
+                  placingFocus.current ||
+                  deepestTransition
+                ) {
+                  return;
+                }
+                const outcome = activate({ target: panel.instanceRef });
+                // Focus is already where the user put it, or a press landed on
+                // Panel chrome which does not take focus. Either way this
+                // activation must not create a claim on `initialFocus`.
+                if (outcome.status === "activated") {
+                  initiallyFocusedPanel.current = panel.instanceId;
+                }
+              };
+
               return createElement(
                 "section",
                 {
@@ -2417,23 +2437,11 @@ export function createCanvasModule<
                     // placed is a repair, and a Panel behind an open Guarded
                     // Transition dialog is inert and has no business being
                     // activated by a focus that reached it anyway.
-                    if (
-                      !activateOnFocus ||
-                      active ||
-                      placingFocus.current ||
-                      deepestTransition
-                    ) {
-                      return;
-                    }
-                    const outcome = activate({ target: panel.instanceRef });
-                    // Focus is already where activation would have sent it, so
-                    // the one claim activation makes on focus is settled here,
-                    // before the effect that honours it can run. Without this
-                    // the Panel would pull the caret out of the field the user
-                    // has just clicked into and hand it to `initialFocus`.
-                    if (outcome.status === "activated") {
-                      initiallyFocusedPanel.current = panel.instanceId;
-                    }
+                    activatePanelWithoutMovingFocus();
+                  },
+                  onPointerDownCapture: (event) => {
+                    if (!event.isPrimary || event.button !== 0) return;
+                    activatePanelWithoutMovingFocus();
                   },
                   role: "region",
                 },
