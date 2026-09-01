@@ -30,6 +30,20 @@ globalThis.Node = dom.window.Node;
 globalThis.getComputedStyle = dom.window.getComputedStyle;
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
+class TestPointerEvent extends dom.window.MouseEvent {
+  constructor(type, init = {}) {
+    super(type, init);
+    Object.defineProperty(this, "isPrimary", {
+      value: init.isPrimary ?? true,
+    });
+  }
+}
+Object.defineProperty(dom.window, "PointerEvent", {
+  configurable: true,
+  value: TestPointerEvent,
+});
+globalThis.PointerEvent = TestPointerEvent;
+
 test("a bound Canvas navigates Root to Class to Learner with semantic reuse and branch replacement", async () => {
   const root = defineRootPanel({ kind: "classes", title: "Classes" });
   const classPanel = definePanel({
@@ -2232,6 +2246,66 @@ test("focus alone does not make a retained Panel the Active Panel", async () => 
   canvas.rendered.unmount();
 });
 
+test("a Canvas that activates on focus follows pointer presses on Panel chrome", async () => {
+  for (const selector of [
+    "[data-canvas-panel-header]",
+    "[data-canvas-panel-body]",
+  ]) {
+    const canvas = renderActivationCanvas({ activateOnFocus: true });
+    const panel = canvas.rendered.getByRole("region", { name: "one" });
+    const chrome = panel.querySelector(selector);
+    assert.ok(chrome);
+    assert.equal(canvas.activePanelTitle(), "two");
+    const focusBeforePress = canvas.focusedTestId();
+
+    fireEvent.pointerDown(chrome, { button: 0, isPrimary: true });
+    await act(async () => {});
+
+    assert.equal(canvas.activePanelTitle(), "one");
+    assert.equal(canvas.focusedTestId(), focusBeforePress);
+    canvas.rendered.unmount();
+  }
+});
+
+test("Panel chrome does not activate from a pointer press without the opt-in", async () => {
+  const canvas = renderActivationCanvas();
+  const panel = canvas.rendered.getByRole("region", { name: "one" });
+  const header = panel.querySelector("[data-canvas-panel-header]");
+  assert.ok(header);
+
+  fireEvent.pointerDown(header, { button: 0, isPrimary: true });
+  await act(async () => {});
+
+  assert.equal(canvas.activePanelTitle(), "two");
+  canvas.rendered.unmount();
+});
+
+test("a non-primary pointer does not activate Panel chrome", async () => {
+  const canvas = renderActivationCanvas({ activateOnFocus: true });
+  const panel = canvas.rendered.getByRole("region", { name: "one" });
+  const header = panel.querySelector("[data-canvas-panel-header]");
+  assert.ok(header);
+
+  fireEvent.pointerDown(header, { button: 0, isPrimary: false });
+  await act(async () => {});
+
+  assert.equal(canvas.activePanelTitle(), "two");
+  canvas.rendered.unmount();
+});
+
+test("pointer activation leaves focus on the descendant the user pressed", async () => {
+  const canvas = renderActivationCanvas({ activateOnFocus: true });
+  const notes = canvas.rendered.getByTestId("notes-one");
+
+  fireEvent.pointerDown(notes, { button: 0, isPrimary: true });
+  act(() => notes.focus());
+  await act(async () => {});
+
+  assert.equal(canvas.activePanelTitle(), "one");
+  assert.equal(canvas.focusedTestId(), "notes-one");
+  canvas.rendered.unmount();
+});
+
 test("a Canvas that activates on focus follows the user into a retained Panel", async () => {
   const canvas = renderActivationCanvas({ activateOnFocus: true });
   const notes = canvas.rendered.getByTestId("notes-one");
@@ -2279,6 +2353,16 @@ test("focus the Canvas restores after a Guarded Transition activates nothing", a
 
   fireEvent.click(opener);
   await rendered.findByRole("alertdialog");
+  const guardedPanel = [
+    ...rendered.container.querySelectorAll("[data-canvas-panel]"),
+  ].find((panel) => panel.querySelector("h2")?.textContent === "two");
+  const guardedHeader = guardedPanel?.querySelector(
+    "[data-canvas-panel-header]",
+  );
+  assert.ok(guardedHeader);
+  fireEvent.pointerDown(guardedHeader, { button: 0, isPrimary: true });
+  assert.equal(canvas.activePanelTitle(), "one");
+
   await act(async () => {
     fireEvent.click(rendered.getByRole("button", { name: "Discard" }));
   });

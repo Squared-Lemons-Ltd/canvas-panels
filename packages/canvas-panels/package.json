@@ -1,6 +1,6 @@
 {
   "name": "@squaredlemons/canvas-panels",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "Canvas Panel Stack UI for React 19 and Next.js: typed panel navigation, guarded unsaved-changes transitions, deep-linkable URL state, and accessible region cycling",
   "keywords": [
     "canvas",

@@ -1,5 +1,15 @@
 # @squaredlemons/canvas-panels
 
+## 0.6.0
+
+### Minor Changes
+
+- 2aabba0: Clarify that an Action `description` is announced but not visible, and remains part of the button's DOM text, so applications retain visible explanations where needed and test labels against the right boundary.
+
+### Patch Changes
+
+- 2aabba0: Make `activateOnFocus` select a retained Panel when its bare header or body is pressed, matching the documented master–detail behaviour without moving focus.
+
 ## 0.5.1
 
 ### Patch Changes
